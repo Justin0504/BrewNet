@@ -1,4 +1,5 @@
 import SwiftUI
+import AuthenticationServices
 
 struct LoginView: View {
     @EnvironmentObject var authManager: AuthManager
@@ -8,6 +9,7 @@ struct LoginView: View {
     @State private var showAlert = false
     @State private var alertMessage = ""
     @State private var forceRefresh = UUID()
+    @State private var showingRegisterView = false
     
     var body: some View {
         GeometryReader { geometry in
@@ -64,13 +66,13 @@ struct LoginView: View {
                         
                         // 登录表单
                         VStack(spacing: 24) {
-                            // 邮箱输入框
+                            // 邮箱/手机号输入框
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("Email")
+                                Text("Email or Phone")
                                     .font(.system(size: 14, weight: .medium))
                                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                                 
-                                TextField("Enter your email", text: $email)
+                                TextField("Enter your email or phone", text: $email)
                                     .textFieldStyle(CustomTextFieldStyle())
                                     .keyboardType(.emailAddress)
                                     .autocapitalization(.none)
@@ -119,11 +121,37 @@ struct LoginView: View {
                             .disabled(isLoading || email.isEmpty || password.isEmpty)
                             .opacity((email.isEmpty || password.isEmpty) ? 0.6 : 1.0)
                             
+                            // 注册按钮
+                            Button(action: {
+                                showingRegisterView = true
+                            }) {
+                                Text("Don't have an account? Sign up")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    .underline()
+                            }
+                            .padding(.top, 8)
+                            
                             // 其他登录方式
                             VStack(spacing: 16) {
                                 Text("or")
                                     .font(.system(size: 14))
                                     .foregroundColor(Color.gray)
+                                
+                                // Apple Sign In按钮
+                                SignInWithAppleButton(
+                                    onRequest: { request in
+                                        request.requestedScopes = [.fullName, .email]
+                                    },
+                                    onCompletion: { result in
+                                        handleAppleSignIn(result: result)
+                                    }
+                                )
+                                .signInWithAppleButtonStyle(.black)
+                                .frame(height: 50)
+                                .cornerRadius(25)
+                                .disabled(isLoading)
+                                .opacity(isLoading ? 0.6 : 1.0)
                                 
                                 // 游客登录按钮
                                 Button(action: {
@@ -202,6 +230,10 @@ struct LoginView: View {
         } message: {
             Text(alertMessage)
         }
+        .sheet(isPresented: $showingRegisterView) {
+            RegisterView()
+                .environmentObject(authManager)
+        }
     }
     
     // MARK: - Login Functions
@@ -264,6 +296,42 @@ struct LoginView: View {
     // Keep backward compatibility
     private func performQuickLogin() {
         performGuestLogin()
+    }
+    
+    private func handleAppleSignIn(result: Result<ASAuthorization, Error>) {
+        print("🔵 handleAppleSignIn called")
+        switch result {
+        case .success(let authorization):
+            print("🍎 Apple Sign In authorization received")
+            print("🔄 Setting isLoading = true")
+            isLoading = true
+            
+            Task {
+                print("📡 Calling authManager.signInWithApple()")
+                let result = await authManager.signInWithApple(authorization: authorization)
+                print("📡 authManager.signInWithApple() returned")
+                
+                await MainActor.run {
+                    print("🔄 Setting isLoading = false")
+                    isLoading = false
+                    
+                    switch result {
+                    case .success(let user):
+                        print("✅ Apple Sign In successful: \(user.name)")
+                        print("🔄 Current auth state: \(authManager.authState)")
+                        print("🔄 Should navigate to main view now")
+                        // Login successful, will automatically navigate to main view
+                    case .failure(let error):
+                        print("❌ Apple Sign In failed: \(error.localizedDescription)")
+                        showAlert(message: error.localizedDescription)
+                    }
+                }
+            }
+            
+        case .failure(let error):
+            print("❌ Apple Sign In error: \(error.localizedDescription)")
+            showAlert(message: "Apple Sign In failed: \(error.localizedDescription)")
+        }
     }
     
     private func showAlert(message: String) {

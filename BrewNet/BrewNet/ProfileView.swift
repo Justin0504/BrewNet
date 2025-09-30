@@ -6,9 +6,9 @@ struct ProfileView: View {
     @State private var selectedTab = 0
     @State private var showLogoutAlert = false
     @State private var showUpgradeAlert = false
-    @State private var viewedPosts: [Post] = []
-    @State private var likedPosts: [Post] = []
-    @State private var savedPosts: [Post] = []
+    @State private var viewedPosts: [AppPost] = []
+    @State private var likedPosts: [AppPost] = []
+    @State private var savedPosts: [AppPost] = []
     @State private var matchedUsers: [UserProfile] = []
     @State private var coffeeChatSchedules: [CoffeeChatSchedule] = []
     
@@ -269,7 +269,7 @@ struct ProfileView: View {
 
 // MARK: - Post History View
 struct PostHistoryView: View {
-    let posts: [Post]
+    let posts: [AppPost]
     
     var body: some View {
         ScrollView {
@@ -287,7 +287,7 @@ struct PostHistoryView: View {
 
 // MARK: - Liked Posts View
 struct LikedPostsView: View {
-    let posts: [Post]
+    let posts: [AppPost]
     
     var body: some View {
         ScrollView {
@@ -305,7 +305,7 @@ struct LikedPostsView: View {
 
 // MARK: - Saved Posts View
 struct SavedPostsView: View {
-    let posts: [Post]
+    let posts: [AppPost]
     
     var body: some View {
         ScrollView {
@@ -440,7 +440,7 @@ struct CalendarView: View {
 
 // MARK: - Liked Post Card View
 struct LikedPostCardView: View {
-    let post: Post
+    let post: AppPost
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -477,7 +477,7 @@ struct LikedPostCardView: View {
 
 // MARK: - Saved Post Card View
 struct SavedPostCardView: View {
-    let post: Post
+    let post: AppPost
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {

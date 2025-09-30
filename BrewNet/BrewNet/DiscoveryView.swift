@@ -2,7 +2,7 @@ import SwiftUI
 
 struct DiscoveryView: View {
     @State private var searchText = ""
-    @State private var posts: [Post] = samplePosts
+    @State private var posts: [AppPost] = samplePosts
     @State private var showingCreatePost = false
     
     var body: some View {
@@ -56,7 +56,7 @@ struct DiscoveryView: View {
 
 // MARK: - Post Card View
 struct PostCardView: View {
-    let post: Post
+    let post: AppPost
     @State private var isLiked = false
     @State private var isSaved = false
     @State private var likeCount = Int.random(in: 5...50)
@@ -161,7 +161,7 @@ struct PostCardView: View {
 }
 
 // MARK: - Post Model
-struct Post: Identifiable {
+struct AppPost: Identifiable {
     let id = UUID()
     let title: String
     let content: String
@@ -173,7 +173,7 @@ struct Post: Identifiable {
 
 // MARK: - Sample Data
 let samplePosts = [
-    Post(
+    AppPost(
         title: "After leading people in big companies, I found that this kind of 'junior' is destined not to be promoted",
         content: "",
         question: "What kind of talent can be promoted in big companies?",
@@ -181,7 +181,7 @@ let samplePosts = [
         tagColor: .green,
         backgroundColor: Color.white.opacity(0.8)
     ),
-    Post(
+    AppPost(
         title: "◆◆ Standard Process ◆◆",
         content: "1. Thank him for his time\n2. Introduce yourself\n3. Then the other party will usually take the lead to introduce their experience\n4. Thank him for his introduction",
         question: "How to do a coffee chat?",
@@ -189,7 +189,7 @@ let samplePosts = [
         tagColor: .green,
         backgroundColor: Color.white.opacity(0.8)
     ),
-    Post(
+    AppPost(
         title: "First wave of employees replaced by AI recount personal experience of mass layoffs",
         content: "\"Always be prepared to leave your employer, because they are prepared to leave you.\" Brothers, this is it. I was just informed by my boss and HR that my entire career has been replaced by AI.",
         question: "AIGC layoff wave?",
@@ -197,7 +197,7 @@ let samplePosts = [
         tagColor: .blue,
         backgroundColor: Color.white
     ),
-    Post(
+    AppPost(
         title: "5 Workplace efficiency improvement small tools",
         content: "",
         question: "What tools can improve workplace efficiency?!",
@@ -205,7 +205,7 @@ let samplePosts = [
         tagColor: .purple,
         backgroundColor: Color.white
     ),
-    Post(
+    AppPost(
         title: "Many advertising companies facing layoffs",
         content: "",
         question: "",
@@ -213,7 +213,7 @@ let samplePosts = [
         tagColor: .orange,
         backgroundColor: Color.white
     ),
-    Post(
+    AppPost(
         title: "Coffee Chat Tips",
         content: "Learn how to network effectively through coffee meetings and build meaningful professional relationships.",
         question: "How to make the most of coffee chats?",

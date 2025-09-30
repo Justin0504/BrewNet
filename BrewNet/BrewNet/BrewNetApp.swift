@@ -11,9 +11,12 @@ import SwiftUI
 struct BrewNetApp: App {
     let persistenceController = PersistenceController.shared
     @StateObject private var authManager = AuthManager()
+    @StateObject private var databaseManager = DatabaseManager.shared
     
     init() {
         print("🚀 BrewNetApp initialized")
+        // Initialize database with sample data
+        databaseManager.createSampleData()
     }
     
     var body: some Scene {
@@ -21,6 +24,7 @@ struct BrewNetApp: App {
             ContentView()
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
                 .environmentObject(authManager)
+                .environmentObject(databaseManager)
         }
     }
 }
