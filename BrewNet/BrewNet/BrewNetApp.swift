@@ -12,11 +12,10 @@ struct BrewNetApp: App {
     let persistenceController = PersistenceController.shared
     @StateObject private var authManager = AuthManager()
     @StateObject private var databaseManager = DatabaseManager.shared
+    @StateObject private var supabaseService = SupabaseService.shared
     
     init() {
         print("🚀 BrewNetApp initialized")
-        // Initialize database with sample data
-        databaseManager.createSampleData()
     }
     
     var body: some Scene {
@@ -25,6 +24,35 @@ struct BrewNetApp: App {
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
                 .environmentObject(authManager)
                 .environmentObject(databaseManager)
+                .environmentObject(supabaseService)
+                .onAppear {
+                    setupDependencies()
+                }
         }
+    }
+    
+    // 在视图出现后设置依赖关系
+    private func setupDependencies() {
+        print("🔧 设置依赖关系...")
+        
+        // 设置依赖关系
+        supabaseService.setDependencies(databaseManager: databaseManager)
+        authManager.setDependencies(databaseManager: databaseManager, supabaseService: supabaseService)
+        
+        print("✅ 依赖关系设置完成")
+        print("📊 DatabaseManager: \(databaseManager)")
+        print("📊 SupabaseService: \(supabaseService)")
+        
+        // 启用混合模式（云端 + 本地缓存）进行 Supabase 测试
+        databaseManager.enableHybridMode()
+        print("🔄 混合模式已启用 - 云端 + 本地缓存（测试 Supabase 功能）")
+        
+        // 清理重复帖子
+        databaseManager.removeDuplicatePosts()
+        
+        // Initialize database with sample data
+        databaseManager.createSampleData()
+        
+        print("✅ 应用初始化完成")
     }
 }

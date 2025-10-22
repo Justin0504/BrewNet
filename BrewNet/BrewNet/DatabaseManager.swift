@@ -21,7 +21,39 @@ class DatabaseManager: ObservableObject {
         return persistentContainer.viewContext
     }
     
-    private init() {}
+    // MARK: - Supabase Service
+    private let supabaseService = SupabaseService.shared
+    
+    // MARK: - Sync Configuration
+    @Published var syncMode: SyncMode = .hybrid
+    @Published var lastSyncTime: Date?
+    @Published var isOnline: Bool = true
+    
+    enum SyncMode {
+        case localOnly      // Local storage only (test mode)
+        case cloudOnly      // Cloud storage only
+        case hybrid         // Hybrid mode: cloud + local cache
+    }
+    
+    private init() {
+        // Start network monitoring
+        supabaseService.startNetworkMonitoring()
+        
+        // Listen for network status changes
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("NetworkStatusChanged"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            if let isOnline = notification.userInfo?["isOnline"] as? Bool {
+                self?.isOnline = isOnline
+            }
+        }
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
     
     // MARK: - SaveEntity Context
     func saveContext() {
@@ -47,7 +79,43 @@ class DatabaseManager: ObservableObject {
         user.lastLoginAt = Date()
         
         saveContext()
+        
+        // Sync to cloud based on sync mode
+        if syncMode != .localOnly && isOnline {
+            Task {
+                await syncUserToCloud(user: user)
+            }
+        }
+        
         return user
+    }
+    
+    /// Sync user data to cloud
+    private func syncUserToCloud(user: UserEntity) async {
+        let supabaseUser = SupabaseUser(
+            id: user.id ?? UUID().uuidString,
+            email: user.email ?? "",
+            name: user.name ?? "",
+            phoneNumber: user.phoneNumber,
+            isGuest: user.isGuest,
+            profileImage: user.profileImage,
+            bio: user.bio,
+            company: user.company,
+            jobTitle: user.jobTitle,
+            location: user.location,
+            skills: user.skills,
+            interests: user.interests,
+            createdAt: ISO8601DateFormatter().string(from: user.createdAt ?? Date()),
+            lastLoginAt: ISO8601DateFormatter().string(from: user.lastLoginAt ?? Date()),
+            updatedAt: ISO8601DateFormatter().string(from: Date())
+        )
+        
+        do {
+            _ = try await supabaseService.createUser(user: supabaseUser)
+            print("✅ User data synced to cloud: \(user.name ?? "")")
+        } catch {
+            print("❌ Failed to sync user data to cloud: \(error)")
+        }
     }
     
     func getUser(by id: String) -> UserEntity? {
@@ -85,6 +153,17 @@ class DatabaseManager: ObservableObject {
     
     // MARK: - PostEntity Operations
     func createPost(id: String, title: String, content: String, question: String, tag: String, tagColor: String, backgroundColor: String, authorId: String, authorName: String) -> PostEntity? {
+        print("🔧 DatabaseManager.createPost called")
+        print("  - ID: \(id)")
+        print("  - Title: \(title)")
+        print("  - Author: \(authorName)")
+        
+        // Check if post with same ID already exists (prevent duplicates)
+        if let existingPost = getPost(by: id) {
+            print("⚠️ Post already exists, returning existing post")
+            return existingPost
+        }
+        
         let post = PostEntity(context: context)
         post.id = id
         post.title = title
@@ -100,8 +179,59 @@ class DatabaseManager: ObservableObject {
         post.likeCount = 0
         post.viewCount = 0
         
+        print("📦 PostEntity object created")
+        
         saveContext()
+        
+        print("💾 saveContext called")
+        
+        // Verify save
+        let allPosts = getAllPosts()
+        print("📊 Total posts in database: \(allPosts.count)")
+        
+        // Send notification that post was created
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PostCreated"),
+            object: nil,
+            userInfo: ["postId": id]
+        )
+        print("📨 PostCreated notification sent")
+        
+        // Sync to cloud based on sync mode
+        if syncMode != .localOnly && isOnline {
+            Task {
+                await syncPostToCloud(post: post)
+            }
+        }
+        
+        print("✅ createPost completed")
         return post
+    }
+    
+    /// Sync post data to cloud
+    private func syncPostToCloud(post: PostEntity) async {
+        let supabasePost = SupabasePost(
+            id: post.id ?? UUID().uuidString,
+            title: post.title ?? "",
+            content: post.content,
+            question: post.question,
+            tag: post.tag ?? "",
+            tagColor: post.tagColor ?? "",
+            backgroundColor: post.backgroundColor ?? "",
+            authorId: post.authorId ?? "",
+            authorName: post.authorName ?? "",
+            likeCount: Int(post.likeCount),
+            viewCount: Int(post.viewCount),
+            createdAt: ISO8601DateFormatter().string(from: post.createdAt ?? Date()),
+            updatedAt: ISO8601DateFormatter().string(from: post.updatedAt ?? Date())
+        )
+        
+        do {
+            _ = try await supabaseService.createPost(post: supabasePost)
+            print("✅ Post data synced to cloud: \(post.title ?? "")")
+        } catch {
+            print("❌ Failed to sync post data to cloud: \(error)")
+        }
     }
     
     func getAllPosts() -> [PostEntity] {
@@ -393,5 +523,171 @@ class DatabaseManager: ObservableObject {
         
         saveContext()
         print("✅ All data cleared")
+    }
+    
+    // MARK: - Sync Operations
+    
+    /// 设置同步模式
+    func setSyncMode(_ mode: SyncMode) {
+        syncMode = mode
+        print("🔄 同步模式已设置为: \(mode)")
+    }
+    
+    /// 手动同步到云端
+    func syncToCloud() async {
+        guard syncMode != .localOnly && isOnline else {
+            print("⚠️ 当前模式不支持云端同步或网络不可用")
+            return
+        }
+        
+        await supabaseService.syncToCloud()
+        lastSyncTime = Date()
+    }
+    
+    /// 从云端同步数据
+    func syncFromCloud() async {
+        guard syncMode != .localOnly && isOnline else {
+            print("⚠️ 当前模式不支持云端同步或网络不可用")
+            return
+        }
+        
+        await supabaseService.syncFromCloud()
+        lastSyncTime = Date()
+    }
+    
+    /// 双向同步（云端 ↔ 本地）
+    func bidirectionalSync() async {
+        guard syncMode == .hybrid && isOnline else {
+            print("⚠️ 双向同步仅在混合模式下可用且需要网络连接")
+            return
+        }
+        
+        // 先同步本地数据到云端
+        await syncToCloud()
+        
+        // 再从云端同步最新数据到本地
+        await syncFromCloud()
+        
+        print("✅ 双向同步完成")
+    }
+    
+    /// 切换测试模式（仅本地存储）
+    func enableTestMode() {
+        setSyncMode(.localOnly)
+        print("🧪 测试模式已启用 - 仅使用本地存储")
+    }
+    
+    /// 启用混合模式
+    func enableHybridMode() {
+        setSyncMode(.hybrid)
+        print("🔄 混合模式已启用 - 云端 + 本地缓存")
+    }
+    
+    /// 获取同步状态信息
+    func getSyncStatus() -> String {
+        let modeText = syncMode == .localOnly ? "仅本地" : 
+                      syncMode == .cloudOnly ? "仅云端" : "混合模式"
+        let onlineText = isOnline ? "在线" : "离线"
+        let lastSyncText = lastSyncTime?.formatted() ?? "从未同步"
+        
+        return """
+        同步模式: \(modeText)
+        网络状态: \(onlineText)
+        最后同步: \(lastSyncText)
+        """
+    }
+    
+    // MARK: - Additional Helper Methods
+    
+    func getAllUsers() -> [UserEntity] {
+        let request: NSFetchRequest<UserEntity> = UserEntity.fetchRequest()
+        
+        do {
+            return try context.fetch(request)
+        } catch {
+            print("❌ Error fetching users: \(error)")
+            return []
+        }
+    }
+    
+    // getAllPosts() 方法已在上面定义，此处删除重复定义
+    
+    func clearAllPosts() {
+        let request = NSFetchRequest<NSFetchRequestResult>(entityName: "Post")
+        let deleteRequest = NSBatchDeleteRequest(fetchRequest: request)
+        
+        do {
+            try context.execute(deleteRequest)
+            saveContext()
+            print("🗑️ All posts cleared")
+        } catch {
+            print("❌ Error clearing posts: \(error)")
+        }
+    }
+    
+    /// Remove duplicate posts (based on ID or content)
+    func removeDuplicatePosts() {
+        let allPosts = getAllPosts()
+        print("🔍 Checking \(allPosts.count) posts for duplicates")
+        
+        var seenIds = Set<String>()
+        var duplicates: [PostEntity] = []
+        
+        // Step 1: Remove ID duplicates (case-insensitive)
+        for post in allPosts {
+            if let id = post.id {
+                let normalizedId = id.lowercased() // Normalize to lowercase for comparison
+                
+                if seenIds.contains(normalizedId) {
+                    duplicates.append(post)
+                    print("🔍 Found duplicate ID: \(id) (normalized: \(normalizedId))")
+                } else {
+                    seenIds.insert(normalizedId)
+                }
+            }
+        }
+        
+        // Step 2: Remove content duplicates
+        let remainingPosts = allPosts.filter { !duplicates.contains($0) }
+        var contentGroups: [String: [PostEntity]] = [:]
+        
+        for post in remainingPosts {
+            let contentSignature = "\(post.title ?? "")_\(post.authorName ?? "")_\(post.tag ?? "")"
+            if contentGroups[contentSignature] == nil {
+                contentGroups[contentSignature] = []
+            }
+            contentGroups[contentSignature]?.append(post)
+        }
+        
+        // For each group with same content, keep only the newest one
+        for (signature, posts) in contentGroups {
+            if posts.count > 1 {
+                print("🔍 Found \(posts.count) posts with same content: \(signature)")
+                
+                // Sort by creation time, keep newest
+                let sortedPosts = posts.sorted { ($0.createdAt ?? Date.distantPast) > ($1.createdAt ?? Date.distantPast) }
+                
+                // Delete all except the first (newest) one
+                for i in 1..<sortedPosts.count {
+                    duplicates.append(sortedPosts[i])
+                    print("  Marked for deletion: \(sortedPosts[i].title ?? "Untitled") (ID: \(sortedPosts[i].id ?? "No ID"))")
+                }
+            }
+        }
+        
+        if !duplicates.isEmpty {
+            print("🗑️ Deleting \(duplicates.count) duplicate posts")
+            for duplicate in duplicates {
+                print("  Deleting: \(duplicate.title ?? "Untitled") (ID: \(duplicate.id ?? "No ID"))")
+                context.delete(duplicate)
+            }
+            saveContext()
+            
+            // Verify deletion result
+            let remaining = getAllPosts()
+            print("✅ Cleanup complete, \(remaining.count) unique posts remaining")
+        } else {
+            print("✅ No duplicate posts found")
+        }
     }
 }

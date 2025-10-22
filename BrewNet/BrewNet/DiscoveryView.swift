@@ -1,9 +1,14 @@
 import SwiftUI
 
 struct DiscoveryView: View {
+    @EnvironmentObject var databaseManager: DatabaseManager
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
     @State private var searchText = ""
-    @State private var posts: [AppPost] = samplePosts
+    @State private var posts: [AppPost] = []
     @State private var showingCreatePost = false
+    @State private var isLoading = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -50,7 +55,102 @@ struct DiscoveryView: View {
         .background(Color(red: 0.98, green: 0.97, blue: 0.95))
         .sheet(isPresented: $showingCreatePost) {
             CreatePostView()
+                .environmentObject(databaseManager)
+                .environmentObject(authManager)
         }
+        .onAppear {
+            print("🔄 DiscoveryView appeared")
+            loadPosts()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PostCreated"))) { notification in
+            print("📨 Received PostCreated notification")
+            if let postId = notification.userInfo?["postId"] as? String {
+                print("  New post ID: \(postId)")
+            }
+            // Delay to ensure data is saved
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                loadPosts()
+            }
+        }
+    }
+    
+    private func loadPosts() {
+        print("📚 Loading posts from Supabase...")
+        isLoading = true
+        
+        Task {
+            do {
+                // Get all posts from Supabase
+                let supabasePosts = try await supabaseService.getAllPosts()
+                print("✅ Retrieved \(supabasePosts.count) posts from Supabase")
+                
+                // Convert to AppPost
+                let appPosts = supabasePosts.map { supabasePost in
+                    AppPost(
+                        id: supabasePost.id,
+                        title: supabasePost.title,
+                        content: supabasePost.content ?? "",
+                        question: supabasePost.question ?? "",
+                        tag: supabasePost.tag,
+                        tagColor: supabasePost.tagColor,
+                        backgroundColor: supabasePost.backgroundColor,
+                        authorId: supabasePost.authorId,
+                        authorName: supabasePost.authorName,
+                        likeCount: supabasePost.likeCount,
+                        commentCount: 0, // TODO: Implement comment count
+                        viewCount: supabasePost.viewCount,
+                        createdAt: ISO8601DateFormatter().date(from: supabasePost.createdAt) ?? Date(),
+                        updatedAt: ISO8601DateFormatter().date(from: supabasePost.updatedAt) ?? Date()
+                    )
+                }.sorted { $0.createdAt > $1.createdAt } // Sort by creation time descending
+                
+                // Update UI
+                await MainActor.run {
+                    posts = appPosts
+                    isLoading = false
+                    print("✅ Posts loaded, displaying \(posts.count) posts")
+                    print("📋 Post list: \(posts.map { $0.title })")
+                }
+                
+            } catch {
+                print("❌ Failed to load posts from Supabase: \(error)")
+                print("🔄 Falling back to local data")
+                
+                // Fallback to local data on failure
+                await MainActor.run {
+                    loadLocalPosts()
+                    isLoading = false
+                }
+            }
+        }
+    }
+    
+    // Backup: Load from local (only used when Supabase fails)
+    private func loadLocalPosts() {
+        print("📚 Loading posts from local database...")
+        let postEntities = databaseManager.getAllPosts()
+        print("✅ Found \(postEntities.count) local posts")
+        
+        posts = postEntities.map { entity in
+            AppPost(
+                id: entity.id ?? UUID().uuidString.lowercased(),
+                title: entity.title ?? "Untitled",
+                content: entity.content ?? "",
+                question: entity.question ?? "",
+                tag: entity.tag ?? "General",
+                tagColor: entity.tagColor ?? "gray",
+                backgroundColor: entity.backgroundColor ?? "white",
+                authorId: entity.authorId ?? "",
+                authorName: entity.authorName ?? "Unknown",
+                likeCount: Int(entity.likeCount),
+                commentCount: 0,
+                viewCount: Int(entity.viewCount),
+                createdAt: entity.createdAt ?? Date(),
+                updatedAt: entity.updatedAt ?? Date()
+            )
+        }.sorted { $0.createdAt > $1.createdAt }
+        
+        print("✅ Local posts loaded, displaying \(posts.count) posts")
     }
 }
 
@@ -59,9 +159,15 @@ struct PostCardView: View {
     let post: AppPost
     @State private var isLiked = false
     @State private var isSaved = false
-    @State private var likeCount = Int.random(in: 5...50)
+    @State private var likeCount: Int
+    
+    init(post: AppPost) {
+        self.post = post
+        _likeCount = State(initialValue: post.likeCount)
+    }
     
     var body: some View {
+        NavigationLink(destination: PostDetailView(post: post)) {
         VStack(alignment: .leading, spacing: 12) {
             // Post Title
             Text(post.title)
@@ -99,7 +205,7 @@ struct PostCardView: View {
                         .foregroundColor(.white)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(post.tagColor)
+                        .background(post.tagUIColor)
                         .cornerRadius(8)
                     
                     Spacer()
@@ -154,74 +260,58 @@ struct PostCardView: View {
             }
         }
         .padding(16)
-        .background(post.backgroundColor)
+        .background(post.backgroundUIColor)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 }
 
 // MARK: - Post Model
 struct AppPost: Identifiable {
-    let id = UUID()
+    let id: String
     let title: String
     let content: String
     let question: String
     let tag: String
-    let tagColor: Color
-    let backgroundColor: Color
+    let tagColor: String
+    let backgroundColor: String
+    let authorId: String
+    let authorName: String
+    let likeCount: Int
+    let commentCount: Int
+    let viewCount: Int
+    let createdAt: Date
+    let updatedAt: Date
+    
+    // 计算属性：转换颜色字符串为 Color
+    var tagUIColor: Color {
+        colorFromString(tagColor)
+    }
+    
+    var backgroundUIColor: Color {
+        colorFromString(backgroundColor)
+    }
+    
+    private func colorFromString(_ colorString: String) -> Color {
+        switch colorString.lowercased() {
+        case "blue": return .blue
+        case "green": return .green
+        case "purple": return .purple
+        case "orange": return .orange
+        case "red": return .red
+        case "pink": return .pink
+        case "indigo": return .indigo
+        case "teal": return .teal
+        case "cyan": return .cyan
+        case "white": return .white
+        default: return .gray
+        }
+    }
 }
 
-// MARK: - Sample Data
-let samplePosts = [
-    AppPost(
-        title: "After leading people in big companies, I found that this kind of 'junior' is destined not to be promoted",
-        content: "",
-        question: "What kind of talent can be promoted in big companies?",
-        tag: "Experience Sharing",
-        tagColor: .green,
-        backgroundColor: Color.white.opacity(0.8)
-    ),
-    AppPost(
-        title: "◆◆ Standard Process ◆◆",
-        content: "1. Thank him for his time\n2. Introduce yourself\n3. Then the other party will usually take the lead to introduce their experience\n4. Thank him for his introduction",
-        question: "How to do a coffee chat?",
-        tag: "Experience Sharing",
-        tagColor: .green,
-        backgroundColor: Color.white.opacity(0.8)
-    ),
-    AppPost(
-        title: "First wave of employees replaced by AI recount personal experience of mass layoffs",
-        content: "\"Always be prepared to leave your employer, because they are prepared to leave you.\" Brothers, this is it. I was just informed by my boss and HR that my entire career has been replaced by AI.",
-        question: "AIGC layoff wave?",
-        tag: "Trend Direction",
-        tagColor: .blue,
-        backgroundColor: Color.white
-    ),
-    AppPost(
-        title: "5 Workplace efficiency improvement small tools",
-        content: "",
-        question: "What tools can improve workplace efficiency?!",
-        tag: "Resource Library",
-        tagColor: .purple,
-        backgroundColor: Color.white
-    ),
-    AppPost(
-        title: "Many advertising companies facing layoffs",
-        content: "",
-        question: "",
-        tag: "Industry News",
-        tagColor: .orange,
-        backgroundColor: Color.white
-    ),
-    AppPost(
-        title: "Coffee Chat Tips",
-        content: "Learn how to network effectively through coffee meetings and build meaningful professional relationships.",
-        question: "How to make the most of coffee chats?",
-        tag: "Networking",
-        tagColor: Color(red: 0.4, green: 0.2, blue: 0.1),
-        backgroundColor: Color.white
-    )
-]
+// MARK: - Sample Data (Removed - now loading from database)
 
 // MARK: - Preview
 struct DiscoveryView_Previews: PreviewProvider {

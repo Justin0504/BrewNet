@@ -204,7 +204,7 @@ struct TestButtonStyle: ButtonStyle {
 struct DatabaseTestView_Previews: PreviewProvider {
     static var previews: some View {
         DatabaseTestView()
-            .environmentObject(DatabaseManager.shared)
+            // 依赖关系通过环境对象传递，不需要直接引用
             .environmentObject(AuthManager())
     }
 }

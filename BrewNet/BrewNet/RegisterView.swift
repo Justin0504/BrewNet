@@ -136,8 +136,13 @@ struct RegisterView: View {
                                     .font(.system(size: 14, weight: .medium))
                                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                                 
+                                // 临时使用 SecureField 进行测试
                                 SecureField("Create a password", text: $password)
                                     .textFieldStyle(CustomTextFieldStyle())
+                                    .autocorrectionDisabled()
+                                    .textContentType(.none)
+                                    .disableAutocorrection(true)
+                                    .autocapitalization(.none)
                             }
                             
                             // Confirm password field
@@ -146,9 +151,39 @@ struct RegisterView: View {
                                     .font(.system(size: 14, weight: .medium))
                                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                                 
+                                // 临时使用 SecureField 进行测试
                                 SecureField("Confirm your password", text: $confirmPassword)
                                     .textFieldStyle(CustomTextFieldStyle())
+                                    .autocorrectionDisabled()
+                                    .textContentType(.none)
+                                    .disableAutocorrection(true)
+                                    .autocapitalization(.none)
                             }
+                            
+                            // Debug info (temporary)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Debug Info:")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Text("Name: '\(name)' (\(name.isEmpty ? "Empty" : "OK"))")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                Text("Email: '\(email)' (\(email.isEmpty ? "Empty" : "OK"))")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                Text("Password: '\(password)' (\(password.isEmpty ? "Empty" : "OK"))")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                Text("Confirm: '\(confirmPassword)' (\(confirmPassword.isEmpty ? "Empty" : "OK"))")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                Text("Form Valid: \(isFormValid ? "YES" : "NO")")
+                                    .font(.caption2)
+                                    .foregroundColor(isFormValid ? .green : .red)
+                            }
+                            .padding()
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
                             
                             // Register button
                             Button(action: {
@@ -226,19 +261,25 @@ struct RegisterView: View {
     
     // MARK: - Form Validation
     private var isFormValid: Bool {
-        guard !name.isEmpty,
-              !password.isEmpty,
-              !confirmPassword.isEmpty,
-              password.count >= 6,
-              password == confirmPassword else {
-            return false
-        }
+        let nameValid = !name.isEmpty
+        let passwordValid = !password.isEmpty && password.count >= 6
+        let confirmPasswordValid = !confirmPassword.isEmpty && password == confirmPassword
         
-        if selectedAuthMethod == .email {
-            return !email.isEmpty && isValidEmail(email)
-        } else {
-            return !phoneNumber.isEmpty && isValidPhoneNumber(phoneNumber)
-        }
+        let emailValid = selectedAuthMethod == .email ? (!email.isEmpty && isValidEmail(email)) : true
+        let phoneValid = selectedAuthMethod == .phone ? (!phoneNumber.isEmpty && isValidPhoneNumber(phoneNumber)) : true
+        
+        let isValid = nameValid && passwordValid && confirmPasswordValid && emailValid && phoneValid
+        
+        // 调试信息
+        print("🔍 Form Validation:")
+        print("  Name: \(name) - Valid: \(nameValid)")
+        print("  Password: \(password) - Valid: \(passwordValid)")
+        print("  Confirm Password: \(confirmPassword) - Valid: \(confirmPasswordValid)")
+        print("  Email: \(email) - Valid: \(emailValid)")
+        print("  Phone: \(phoneNumber) - Valid: \(phoneValid)")
+        print("  Overall: \(isValid)")
+        
+        return isValid
     }
     
     // MARK: - Registration

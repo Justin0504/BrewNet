@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import AuthenticationServices
+import Supabase
 
 // MARK: - User Model
 struct AppUser: Codable, Identifiable {
@@ -35,12 +36,19 @@ class AuthManager: ObservableObject {
     
     private let userDefaults = UserDefaults.standard
     private let userKey = "current_user"
-    private let databaseManager = DatabaseManager.shared
+    private weak var databaseManager: DatabaseManager?
+    private weak var supabaseService: SupabaseService?
     
     init() {
         print("🚀 AuthManager initialized")
         // Check if there's saved user information
         checkAuthStatus()
+    }
+    
+    // MARK: - Dependency Injection
+    func setDependencies(databaseManager: DatabaseManager, supabaseService: SupabaseService) {
+        self.databaseManager = databaseManager
+        self.supabaseService = supabaseService
     }
     
     // MARK: - Check Authentication Status
@@ -60,9 +68,6 @@ class AuthManager: ObservableObject {
     
     // MARK: - Login
     func login(email: String, password: String) async -> Result<AppUser, AuthError> {
-        // Simulate network request delay
-        try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
-        
         // Check if input is email or phone number
         let isEmail = isValidEmail(email)
         let isPhone = isValidPhoneNumber(email)
@@ -76,14 +81,31 @@ class AuthManager: ObservableObject {
             return .failure(.invalidCredentials)
         }
         
+        // 根据数据库管理器的同步模式决定认证方式
+        if databaseManager?.syncMode == .localOnly {
+            return await localLogin(email: email, password: password)
+        } else {
+            return await supabaseLogin(email: email, password: password)
+        }
+    }
+    
+    /// 本地登录（测试模式）
+    private func localLogin(email: String, password: String) async -> Result<AppUser, AuthError> {
+        // Simulate network request delay
+        try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
+        
+        // Check if input is email or phone number
+        let isEmail = isValidEmail(email)
+        let isPhone = isValidPhoneNumber(email)
+        
         // Check if user exists in database
         let userEntity: UserEntity?
         if isEmail {
-            userEntity = databaseManager.getUserByEmail(email)
+            userEntity = databaseManager?.getUserByEmail(email)
         } else {
             // For phone number, we store it as email in database
             let phoneEmail = "\(email)@brewnet.local"
-            userEntity = databaseManager.getUserByEmail(phoneEmail)
+            userEntity = databaseManager?.getUserByEmail(phoneEmail)
         }
         
         guard let existingUser = userEntity else {
@@ -91,7 +113,7 @@ class AuthManager: ObservableObject {
         }
         
         // Update last login time
-        databaseManager.updateUserLastLogin(existingUser.id ?? "")
+        databaseManager?.updateUserLastLogin(existingUser.id ?? "")
         
         // Convert to User model
         let user = AppUser(
@@ -107,6 +129,43 @@ class AuthManager: ObservableObject {
         return .success(user)
     }
     
+    /// Supabase 登录
+    private func supabaseLogin(email: String, password: String) async -> Result<AppUser, AuthError> {
+        do {
+            // 使用 Supabase 认证
+            let response = try await SupabaseConfig.shared.client.auth.signIn(
+                email: email,
+                password: password
+            )
+            
+            let user = response.user
+            
+            // 从 Supabase 获取用户详细信息
+            let supabaseUser = try await supabaseService?.getUser(id: user.id.uuidString)
+            
+            if let supabaseUser = supabaseUser {
+                // 更新本地数据库
+                databaseManager?.updateUserLastLogin(supabaseUser.id)
+                
+                let appUser = supabaseUser.toAppUser()
+                
+                await MainActor.run {
+                    saveUser(appUser)
+                }
+                
+                return .success(appUser)
+            } else {
+                return .failure(.invalidCredentials)
+            }
+            
+        } catch {
+            print("❌ Supabase login error: \(error)")
+            
+            // 如果 Supabase 登录失败，回退到本地登录
+            return await localLogin(email: email, password: password)
+        }
+    }
+    
     // MARK: - Guest Login
     func guestLogin() async -> Result<AppUser, AuthError> {
         print("🚀 Starting guest login process...")
@@ -117,7 +176,7 @@ class AuthManager: ObservableObject {
         let guestId = "guest_\(UUID().uuidString.prefix(8))"
         
         // Create guest user in database
-        let userEntity = databaseManager.createUser(
+        let userEntity = databaseManager?.createUser(
             id: guestId,
             email: "guest@brewnet.com",
             name: randomName,
@@ -220,34 +279,75 @@ class AuthManager: ObservableObject {
     
     // MARK: - Register
     func register(email: String, password: String, name: String) async -> Result<AppUser, AuthError> {
-        // Simulate network request delay
-        try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+        print("🔐 开始注册流程")
+        print("📧 邮箱: \(email)")
+        print("👤 姓名: \(name)")
         
         // Simple email format validation
         guard isValidEmail(email) else {
+            print("❌ 邮箱格式无效")
             return .failure(.invalidEmail)
         }
         
         // Validate password length
         guard password.count >= 6 else {
+            print("❌ 密码长度不足")
             return .failure(.invalidCredentials)
         }
         
+        print("✅ 验证通过")
+        print("🔧 同步模式: \(databaseManager?.syncMode == .localOnly ? "本地" : "混合")")
+        
+        // 暂时强制使用本地注册进行调试
+        print("⚠️ 强制使用本地注册模式（调试）")
+        return await localRegister(email: email, password: password, name: name)
+        
+        // 原来的逻辑 - 暂时注释掉
+        /*
+        if databaseManager?.syncMode == .localOnly {
+            return await localRegister(email: email, password: password, name: name)
+        } else {
+            return await supabaseRegister(email: email, password: password, name: name)
+        }
+        */
+    }
+    
+    /// 本地注册（测试模式）
+    private func localRegister(email: String, password: String, name: String) async -> Result<AppUser, AuthError> {
+        print("📱 开始本地注册: \(email)")
+        
+        // Simulate network request delay
+        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+        
+        // 检查 databaseManager 是否可用
+        guard let dbManager = databaseManager else {
+            print("❌ DatabaseManager 不可用")
+            return .failure(.unknownError)
+        }
+        
+        print("✅ DatabaseManager 可用")
+        
         // Check if email already exists in database
-        if let existingUser = databaseManager.getUserByEmail(email) {
+        if let existingUser = dbManager.getUserByEmail(email) {
+            print("⚠️ 邮箱已存在: \(email)")
             return .failure(.emailAlreadyExists)
         }
         
+        print("✅ 邮箱可用，创建新用户")
+        
         // Create new user in database
         let userId = UUID().uuidString
-        guard let userEntity = databaseManager.createUser(
+        guard let userEntity = dbManager.createUser(
             id: userId,
             email: email,
             name: name,
             isGuest: false
         ) else {
+            print("❌ 创建用户实体失败")
             return .failure(.unknownError)
         }
+        
+        print("✅ 用户实体创建成功")
         
         // Convert to User model
         let user = AppUser(
@@ -257,10 +357,119 @@ class AuthManager: ObservableObject {
             isGuest: false
         )
         
+        print("✅ 本地注册成功: \(user.name)")
+        
         await MainActor.run {
             saveUser(user)
         }
         return .success(user)
+    }
+    
+    /// Supabase 注册
+    private func supabaseRegister(email: String, password: String, name: String) async -> Result<AppUser, AuthError> {
+        do {
+            print("🚀 开始 Supabase 注册: \(email)")
+            print("🔗 使用 URL: https://jcxvdolcdifdghaibspy.supabase.co")
+            
+            // 使用 Supabase 注册
+            let response = try await SupabaseConfig.shared.client.auth.signUp(
+                email: email,
+                password: password,
+                data: ["name": .string(name)]
+            )
+            
+            print("✅ Supabase 注册响应成功")
+            print("👤 用户 ID: \(response.user.id.uuidString)")
+            
+            let user = response.user
+            
+            // 创建用户详细信息
+            let supabaseUser = SupabaseUser(
+                id: user.id.uuidString,
+                email: email,
+                name: name,
+                phoneNumber: nil,
+                isGuest: false,
+                profileImage: nil,
+                bio: nil,
+                company: nil,
+                jobTitle: nil,
+                location: nil,
+                skills: nil,
+                interests: nil,
+                createdAt: ISO8601DateFormatter().string(from: Date()),
+                lastLoginAt: ISO8601DateFormatter().string(from: Date()),
+                updatedAt: ISO8601DateFormatter().string(from: Date())
+            )
+            
+            // 尝试保存到 Supabase
+            do {
+                if let createdUser = try await supabaseService?.createUser(user: supabaseUser) {
+                    print("✅ 用户数据已保存到 Supabase")
+                    
+                    // 同时保存到本地数据库
+                    let userEntity = databaseManager?.createUser(
+                        id: createdUser.id,
+                        email: createdUser.email,
+                        name: createdUser.name,
+                        isGuest: createdUser.isGuest
+                    )
+                    
+                    let appUser = createdUser.toAppUser()
+                    
+                    await MainActor.run {
+                        saveUser(appUser)
+                    }
+                    
+                    return .success(appUser)
+                } else {
+                    // supabaseService 为 nil，回退到本地注册
+                    print("⚠️ Supabase 服务不可用，回退到本地注册")
+                    return await localRegister(email: email, password: password, name: name)
+                }
+            } catch {
+                // Supabase 数据库操作失败（可能是表不存在）
+                print("⚠️ Supabase 数据保存失败: \(error.localizedDescription)")
+                print("🔄 认证成功，但回退到本地存储")
+                
+                // 认证已经成功，只是数据库保存失败，继续使用本地注册
+                return await localRegister(email: email, password: password, name: name)
+            }
+            
+        } catch {
+            print("❌ Supabase 注册失败:")
+            print("🔍 错误类型: \(type(of: error))")
+            print("📝 错误信息: \(error.localizedDescription)")
+            
+            // 检查是否是网络错误
+            if let httpError = error as? URLError {
+                print("🌐 网络错误代码: \(httpError.code.rawValue)")
+                print("🌐 网络错误描述: \(httpError.localizedDescription)")
+                
+                switch httpError.code {
+                case .notConnectedToInternet, .networkConnectionLost:
+                    print("📡 网络连接问题，回退到本地注册")
+                    return await localRegister(email: email, password: password, name: name)
+                case .timedOut:
+                    print("⏱️ 连接超时，回退到本地注册")
+                    return await localRegister(email: email, password: password, name: name)
+                default:
+                    break
+                }
+            }
+            
+            // 根据错误类型返回更具体的错误信息
+            if error.localizedDescription.contains("already registered") ||
+               error.localizedDescription.contains("already exists") {
+                return .failure(.emailAlreadyExists)
+            } else if error.localizedDescription.contains("password") {
+                return .failure(.invalidCredentials)
+            } else {
+                print("🔄 回退到本地注册")
+                // 如果 Supabase 注册失败，回退到本地注册
+                return await localRegister(email: email, password: password, name: name)
+            }
+        }
     }
     
     // MARK: - Register with Phone
@@ -280,13 +489,13 @@ class AuthManager: ObservableObject {
         
         // Check if phone already exists in database
         let phoneEmail = "\(phoneNumber)@brewnet.local"
-        if let existingUser = databaseManager.getUserByEmail(phoneEmail) {
+        if let existingUser = databaseManager?.getUserByEmail(phoneEmail) {
             return .failure(.phoneAlreadyExists)
         }
         
         // Create new user in database
         let userId = UUID().uuidString
-        guard let userEntity = databaseManager.createUser(
+        guard let userEntity = databaseManager?.createUser(
             id: userId,
             email: phoneEmail,
             name: name,

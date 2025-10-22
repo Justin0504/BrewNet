@@ -84,8 +84,7 @@ struct LoginView: View {
                                     .font(.system(size: 14, weight: .medium))
                                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                                 
-                                SecureField("Enter your password", text: $password)
-                                    .textFieldStyle(CustomTextFieldStyle())
+                                CustomPasswordField(text: $password, placeholder: "Enter your password")
                             }
                             
                             // 登录按钮

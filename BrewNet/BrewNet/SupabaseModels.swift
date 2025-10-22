@@ -1,0 +1,291 @@
+import Foundation
+import SwiftUI
+
+// MARK: - Supabase User Model
+struct SupabaseUser: Codable, Identifiable {
+    let id: String
+    let email: String
+    let name: String
+    let phoneNumber: String?
+    let isGuest: Bool
+    let profileImage: String?
+    let bio: String?
+    let company: String?
+    let jobTitle: String?
+    let location: String?
+    let skills: String?
+    let interests: String?
+    let createdAt: String
+    let lastLoginAt: String
+    let updatedAt: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case email
+        case name
+        case phoneNumber = "phone_number"
+        case isGuest = "is_guest"
+        case profileImage = "profile_image"
+        case bio
+        case company
+        case jobTitle = "job_title"
+        case location
+        case skills
+        case interests
+        case createdAt = "created_at"
+        case lastLoginAt = "last_login_at"
+        case updatedAt = "updated_at"
+    }
+    
+    // Convert to AppUser
+    func toAppUser() -> AppUser {
+        return AppUser(
+            id: id,
+            email: email,
+            name: name,
+            isGuest: isGuest
+        )
+    }
+}
+
+// MARK: - Supabase Post Model
+struct SupabasePost: Codable, Identifiable {
+    let id: String
+    let title: String
+    let content: String?
+    let question: String?
+    let tag: String
+    let tagColor: String
+    let backgroundColor: String
+    let authorId: String
+    let authorName: String
+    let likeCount: Int
+    let viewCount: Int
+    let createdAt: String
+    let updatedAt: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case content
+        case question
+        case tag
+        case tagColor = "tag_color"
+        case backgroundColor = "background_color"
+        case authorId = "author_id"
+        case authorName = "author_name"
+        case likeCount = "like_count"
+        case viewCount = "view_count"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+    
+    // Convert to PostEntity
+    func toPostEntity() -> PostEntity {
+        let post = PostEntity()
+        post.id = id
+        post.title = title
+        post.content = content
+        post.question = question
+        post.tag = tag
+        post.tagColor = tagColor
+        post.backgroundColor = backgroundColor
+        post.authorId = authorId
+        post.authorName = authorName
+        post.likeCount = Int32(likeCount)
+        post.viewCount = Int32(viewCount)
+        
+        // Convert ISO string to Date
+        let formatter = ISO8601DateFormatter()
+        if let createdAtDate = formatter.date(from: createdAt) {
+            post.createdAt = createdAtDate
+        } else {
+            post.createdAt = Date()
+        }
+        
+        if let updatedAtDate = formatter.date(from: updatedAt) {
+            post.updatedAt = updatedAtDate
+        } else {
+            post.updatedAt = Date()
+        }
+        
+        return post
+    }
+}
+
+// MARK: - Supabase Like Model
+struct SupabaseLike: Codable, Identifiable {
+    let id: String
+    let userId: String
+    let postId: String
+    let createdAt: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userId = "user_id"
+        case postId = "post_id"
+        case createdAt = "created_at"
+    }
+}
+
+// MARK: - Supabase Save Model
+struct SupabaseSave: Codable, Identifiable {
+    let id: String
+    let userId: String
+    let postId: String
+    let createdAt: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userId = "user_id"
+        case postId = "post_id"
+        case createdAt = "created_at"
+    }
+}
+
+// MARK: - Supabase Match Model
+struct SupabaseMatch: Codable, Identifiable {
+    let id: String
+    let userId: String
+    let matchedUserId: String
+    let matchedUserName: String
+    let matchType: String
+    let isActive: Bool
+    let createdAt: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userId = "user_id"
+        case matchedUserId = "matched_user_id"
+        case matchedUserName = "matched_user_name"
+        case matchType = "match_type"
+        case isActive = "is_active"
+        case createdAt = "created_at"
+    }
+}
+
+// MARK: - Supabase Coffee Chat Model
+struct SupabaseCoffeeChat: Codable, Identifiable {
+    let id: String
+    let userId: String
+    let title: String
+    let participantId: String
+    let participantName: String
+    let scheduledDate: String
+    let location: String
+    let status: String
+    let notes: String?
+    let createdAt: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userId = "user_id"
+        case title
+        case participantId = "participant_id"
+        case participantName = "participant_name"
+        case scheduledDate = "scheduled_date"
+        case location
+        case status
+        case notes
+        case createdAt = "created_at"
+    }
+}
+
+// MARK: - Supabase Message Model
+struct SupabaseMessage: Codable, Identifiable {
+    let id: String
+    let senderId: String
+    let receiverId: String
+    let content: String
+    let messageType: String
+    let isRead: Bool
+    let timestamp: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case senderId = "sender_id"
+        case receiverId = "receiver_id"
+        case content
+        case messageType = "message_type"
+        case isRead = "is_read"
+        case timestamp
+    }
+}
+
+// MARK: - Supabase Anonymous Post Model
+struct SupabaseAnonymousPost: Codable, Identifiable {
+    let id: String
+    let title: String
+    let content: String?
+    let question: String?
+    let tag: String
+    let tagColor: String
+    let likes: Int
+    let comments: Int
+    let shares: Int
+    let createdAt: String
+    let updatedAt: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case content
+        case question
+        case tag
+        case tagColor = "tag_color"
+        case likes
+        case comments
+        case shares
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+    
+    // Convert to AnonymousPost
+    func toAnonymousPost() -> AnonymousPost {
+        let formatter = ISO8601DateFormatter()
+        let date = formatter.date(from: createdAt) ?? Date()
+        
+        let timeAgo = DateFormatter.timeAgoFormatter.string(from: date)
+        
+        return AnonymousPost(
+            title: title,
+            content: content ?? "",
+            question: question ?? "",
+            tag: tag,
+            tagColor: Color(hex: tagColor) ?? .gray,
+            imageName: nil,
+            likes: likes,
+            comments: comments,
+            shares: shares,
+            timeAgo: timeAgo
+        )
+    }
+}
+
+// MARK: - Color Extension for Hex Support
+extension Color {
+    init?(hex: String) {
+        var hexSanitized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        hexSanitized = hexSanitized.replacingOccurrences(of: "#", with: "")
+        
+        var rgb: UInt64 = 0
+        
+        guard Scanner(string: hexSanitized).scanHexInt64(&rgb) else { return nil }
+        
+        self.init(
+            red: Double((rgb & 0xFF0000) >> 16) / 255.0,
+            green: Double((rgb & 0x00FF00) >> 8) / 255.0,
+            blue: Double(rgb & 0x0000FF) / 255.0
+        )
+    }
+}
+
+// MARK: - DateFormatter Extension
+extension DateFormatter {
+    static let timeAgoFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter
+    }()
+}

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MainView: View {
     @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
     @State private var selectedTab = 0
     
     var body: some View {
@@ -45,6 +46,14 @@ struct MainView: View {
                     Text("DB Test")
                 }
                 .tag(4)
+            
+            // Supabase Test (Debug only)
+            SupabaseTestView()
+                .tabItem {
+                    Image(systemName: "cloud.fill")
+                    Text("Supabase")
+                }
+                .tag(5)
         }
         .accentColor(Color(red: 0.4, green: 0.2, blue: 0.1)) // Dark brown theme color
     }
@@ -52,6 +61,7 @@ struct MainView: View {
 
 // MARK: - Home View
 struct HomeView: View {
+    @EnvironmentObject var supabaseService: SupabaseService
     @State private var selectedTab = 0
     
     var body: some View {
@@ -82,6 +92,12 @@ struct HomeView: View {
             }
             .navigationTitle("BrewNet")
             .navigationBarTitleDisplayMode(.inline)
+        }
+        .onAppear {
+            // 检查 Supabase 表是否存在
+            Task {
+                await supabaseService.ensureTablesExist()
+            }
         }
     }
 }

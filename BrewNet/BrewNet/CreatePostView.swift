@@ -3,6 +3,9 @@ import PhotosUI
 
 struct CreatePostView: View {
     @Environment(\.presentationMode) var presentationMode
+    @EnvironmentObject var databaseManager: DatabaseManager
+    @EnvironmentObject var authManager: AuthManager
+    
     @State private var selectedImages: [UIImage] = []
     @State private var title = ""
     @State private var content = ""
@@ -13,6 +16,8 @@ struct CreatePostView: View {
     @State private var showingCamera = false
     @State private var showingActionSheet = false
     @State private var isPosting = false
+    @State private var showingAlert = false
+    @State private var alertMessage = ""
     
     let tags = ["General", "Career", "Workplace", "Tech", "Personal", "Advice", "Networking", "Productivity", "Wellness", "Remote Work", "Experience Sharing", "Trend Direction", "Resource Library"]
     
@@ -31,6 +36,11 @@ struct CreatePostView: View {
         }
         .sheet(isPresented: $showingCamera) {
             CameraView(selectedImages: $selectedImages, maxImages: 9)
+        }
+        .alert("Notice", isPresented: $showingAlert) {
+            Button("OK") { }
+        } message: {
+            Text(alertMessage)
         }
     }
     
@@ -309,17 +319,81 @@ struct CreatePostView: View {
     }
     
     private func createPost() {
+        print("📝 Creating post...")
+        print("  Title: \(title)")
+        print("  Content: \(content)")
+        print("  Tag: \(selectedTag)")
+        print("  Anonymous: \(isAnonymous)")
+        print("  📊 DatabaseManager: \(databaseManager)")
+        print("  👤 AuthManager: \(authManager)")
+        
         isPosting = true
         
-        // Simulate posting delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+        // Get current user info
+        guard let currentUser = authManager.currentUser else {
+            print("❌ Unable to get current user")
+            showAlert("Unable to get user information")
             isPosting = false
-            presentationMode.wrappedValue.dismiss()
-            
-            // Here you would normally save the post to your data store
-            // For now, we'll just show a success message
-            print("Post created successfully!")
+            return
         }
+        
+        print("✅ Current user: \(currentUser.name) (ID: \(currentUser.id))")
+        
+        // Generate post ID (always lowercase)
+        let postId = UUID().uuidString.lowercased()
+        
+        // Determine author info (anonymous or real name)
+        let authorId = isAnonymous ? "anonymous_\(postId)" : currentUser.id
+        let authorName = isAnonymous ? "Anonymous User" : currentUser.name
+        
+        // Select color based on tag
+        let tagColor = getTagColor(for: selectedTag)
+        let backgroundColor = "white"
+        
+        // Create post
+        if let post = databaseManager.createPost(
+            id: postId,
+            title: title.isEmpty ? "Untitled Post" : title,
+            content: content,
+            question: question,
+            tag: selectedTag,
+            tagColor: tagColor,
+            backgroundColor: backgroundColor,
+            authorId: authorId,
+            authorName: authorName
+        ) {
+            print("✅ Post created successfully: \(post.id ?? "unknown")")
+            
+            // Simulate delay to show loading state
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                isPosting = false
+                presentationMode.wrappedValue.dismiss()
+            }
+        } else {
+            print("❌ Post creation failed")
+            showAlert("Failed to create post, please try again")
+            isPosting = false
+        }
+    }
+    
+    private func getTagColor(for tag: String) -> String {
+        switch tag {
+        case "Career": return "blue"
+        case "Workplace": return "green"
+        case "Tech": return "purple"
+        case "Personal": return "orange"
+        case "Advice": return "red"
+        case "Networking": return "pink"
+        case "Productivity": return "indigo"
+        case "Wellness": return "teal"
+        case "Remote Work": return "cyan"
+        default: return "gray"
+        }
+    }
+    
+    private func showAlert(_ message: String) {
+        alertMessage = message
+        showingAlert = true
     }
 }
 

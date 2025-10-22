@@ -3,6 +3,8 @@ import SwiftUI
 // MARK: - Profile View
 struct ProfileView: View {
     @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var databaseManager: DatabaseManager
+    
     @State private var selectedTab = 0
     @State private var showLogoutAlert = false
     @State private var showUpgradeAlert = false
@@ -47,6 +49,13 @@ struct ProfileView: View {
             }
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                loadUserData()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PostCreated"))) { _ in
+                print("📨 ProfileView 收到 PostCreated 通知 - 重新加载数据")
+                loadUserData()
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
@@ -250,20 +259,45 @@ struct ProfileView: View {
     
     // MARK: - Load User Data
     private func loadUserData() {
-        // Load viewed posts (simulate data)
-        viewedPosts = samplePosts.prefix(10).map { $0 }
+        print("📚 Loading user data...")
+
+        // Load posts from database
+        let postEntities = databaseManager.getAllPosts()
+        let allPosts = postEntities.map { entity in
+            AppPost(
+                id: entity.id ?? UUID().uuidString,
+                title: entity.title ?? "Untitled",
+                content: entity.content ?? "",
+                question: entity.question ?? "",
+                tag: entity.tag ?? "General",
+                tagColor: entity.tagColor ?? "gray",
+                backgroundColor: entity.backgroundColor ?? "white",
+                authorId: entity.authorId ?? "",
+                authorName: entity.authorName ?? "Unknown",
+                likeCount: Int(entity.likeCount),
+                commentCount: 0,
+                viewCount: Int(entity.viewCount),
+                createdAt: entity.createdAt ?? Date(),
+                updatedAt: entity.updatedAt ?? Date()
+            )
+        }
         
-        // Load liked posts (simulate data)
-        likedPosts = samplePosts.filter { _ in Bool.random() }.prefix(5).map { $0 }
-        
-        // Load saved posts (simulate data)
-        savedPosts = samplePosts.filter { _ in Bool.random() }.prefix(3).map { $0 }
-        
+        // Load viewed posts - get recently viewed posts
+        viewedPosts = Array(allPosts.prefix(10))
+
+        // Load liked posts - TODO: Load actual liked posts from database
+        likedPosts = Array(allPosts.prefix(5))
+
+        // Load saved posts - TODO: Load actual saved posts from database
+        savedPosts = Array(allPosts.prefix(3))
+
         // Load matched users (simulate data)
         matchedUsers = sampleProfiles.filter { _ in Bool.random() }.prefix(4).map { $0 }
-        
+
         // Load coffee chat schedules (simulate data)
         coffeeChatSchedules = sampleCoffeeChatSchedules
+
+        print("✅ User data loaded")
     }
 }
 

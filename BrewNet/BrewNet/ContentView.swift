@@ -98,4 +98,5 @@ struct LoadingView: View {
 #Preview {
     ContentView()
         .environmentObject(AuthManager())
+        .environmentObject(SupabaseService.shared)
 }
