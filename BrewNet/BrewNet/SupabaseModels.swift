@@ -15,6 +15,7 @@ struct SupabaseUser: Codable, Identifiable {
     let location: String?
     let skills: String?
     let interests: String?
+    let profileSetupCompleted: Bool
     let createdAt: String
     let lastLoginAt: String
     let updatedAt: String
@@ -32,6 +33,7 @@ struct SupabaseUser: Codable, Identifiable {
         case location
         case skills
         case interests
+        case profileSetupCompleted = "profile_setup_completed"
         case createdAt = "created_at"
         case lastLoginAt = "last_login_at"
         case updatedAt = "updated_at"
@@ -43,7 +45,48 @@ struct SupabaseUser: Codable, Identifiable {
             id: id,
             email: email,
             name: name,
-            isGuest: isGuest
+            isGuest: isGuest,
+            profileSetupCompleted: profileSetupCompleted
+        )
+    }
+}
+
+// MARK: - Supabase Profile Model
+struct SupabaseProfile: Codable, Identifiable {
+    let id: String
+    let userId: String
+    let coreIdentity: CoreIdentity
+    let professionalBackground: ProfessionalBackground
+    let networkingIntent: NetworkingIntent
+    let personalitySocial: PersonalitySocial
+    let privacyTrust: PrivacyTrust
+    let createdAt: String
+    let updatedAt: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userId = "user_id"
+        case coreIdentity = "core_identity"
+        case professionalBackground = "professional_background"
+        case networkingIntent = "networking_intent"
+        case personalitySocial = "personality_social"
+        case privacyTrust = "privacy_trust"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+    
+    // Convert to BrewNetProfile
+    func toBrewNetProfile() -> BrewNetProfile {
+        return BrewNetProfile(
+            id: id,
+            userId: userId,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            coreIdentity: coreIdentity,
+            professionalBackground: professionalBackground,
+            networkingIntent: networkingIntent,
+            personalitySocial: personalitySocial,
+            privacyTrust: privacyTrust
         )
     }
 }

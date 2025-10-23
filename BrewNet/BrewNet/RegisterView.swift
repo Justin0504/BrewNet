@@ -13,6 +13,7 @@ struct RegisterView: View {
     @State private var showAlert = false
     @State private var alertMessage = ""
     @State private var selectedAuthMethod: AuthMethod = .email
+    @State private var selectedCountryCode: CountryCode = .china
     
     enum AuthMethod: String, CaseIterable {
         case email = "Email"
@@ -102,14 +103,22 @@ struct RegisterView: View {
                             }
                             
                             // Name field
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Full Name")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            HStack {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Full Name")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    
+                                    TextField("Enter your full name", text: $name)
+                                        .textFieldStyle(CustomTextFieldStyle())
+                                        .autocapitalization(.words)
+                                }
                                 
-                                TextField("Enter your full name", text: $name)
-                                    .textFieldStyle(CustomTextFieldStyle())
-                                    .autocapitalization(.words)
+                                // Validation indicator
+                                Circle()
+                                    .fill(isNameValid ? Color.green : Color.red)
+                                    .frame(width: 12, height: 12)
+                                    .opacity(name.isEmpty ? 0.3 : 1.0)
                             }
                             
                             // Email or Phone field
@@ -119,71 +128,101 @@ struct RegisterView: View {
                                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                                 
                                 if selectedAuthMethod == .email {
-                                    TextField("Enter your email", text: $email)
-                                        .textFieldStyle(CustomTextFieldStyle())
-                                        .keyboardType(.emailAddress)
-                                        .autocapitalization(.none)
+                                    HStack {
+                                        TextField("Enter your email", text: $email)
+                                            .textFieldStyle(CustomTextFieldStyle())
+                                            .keyboardType(.emailAddress)
+                                            .autocapitalization(.none)
+                                        
+                                        // Validation indicator
+                                        Circle()
+                                            .fill(isEmailValid ? Color.green : Color.red)
+                                            .frame(width: 12, height: 12)
+                                            .opacity(email.isEmpty ? 0.3 : 1.0)
+                                    }
                                 } else {
-                                    TextField("Enter your phone number", text: $phoneNumber)
-                                        .textFieldStyle(CustomTextFieldStyle())
-                                        .keyboardType(.phonePad)
+                                    VStack(spacing: 8) {
+                                        // Country code selector
+                                        HStack {
+                                            Text("Country Code")
+                                                .font(.system(size: 14, weight: .medium))
+                                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                            
+                                            Spacer()
+                                            
+                                            Picker("Country Code", selection: $selectedCountryCode) {
+                                                ForEach(CountryCode.allCases, id: \.self) { code in
+                                                    Text(code.displayName).tag(code)
+                                                }
+                                            }
+                                            .pickerStyle(MenuPickerStyle())
+                                            .frame(width: 120)
+                                        }
+                                        
+                                        HStack {
+                                            TextField("Enter your phone number", text: $phoneNumber)
+                                                .textFieldStyle(CustomTextFieldStyle())
+                                                .keyboardType(.phonePad)
+                                            
+                                            // Validation indicator
+                                            Circle()
+                                                .fill(isPhoneValid ? Color.green : Color.red)
+                                                .frame(width: 12, height: 12)
+                                                .opacity(phoneNumber.isEmpty ? 0.3 : 1.0)
+                                        }
+                                    }
                                 }
                             }
                             
                             // Password field
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Password")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            HStack {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Password")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    
+                                    SecureField("Create a password", text: $password)
+                                        .textFieldStyle(CustomTextFieldStyle())
+                                        .autocorrectionDisabled()
+                                        .textContentType(.none)
+                                        .disableAutocorrection(true)
+                                        .autocapitalization(.none)
+                                    
+                                    // Password requirements
+                                    Text("Password must be at least 8 characters and contain letters and numbers")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.gray)
+                                }
                                 
-                                // 临时使用 SecureField 进行测试
-                                SecureField("Create a password", text: $password)
-                                    .textFieldStyle(CustomTextFieldStyle())
-                                    .autocorrectionDisabled()
-                                    .textContentType(.none)
-                                    .disableAutocorrection(true)
-                                    .autocapitalization(.none)
+                                // Validation indicator
+                                Circle()
+                                    .fill(isPasswordValid ? Color.green : Color.red)
+                                    .frame(width: 12, height: 12)
+                                    .opacity(password.isEmpty ? 0.3 : 1.0)
                             }
                             
                             // Confirm password field
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Confirm Password")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            HStack {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Confirm Password")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    
+                                    SecureField("Confirm your password", text: $confirmPassword)
+                                        .textFieldStyle(CustomTextFieldStyle())
+                                        .autocorrectionDisabled()
+                                        .textContentType(.none)
+                                        .disableAutocorrection(true)
+                                        .autocapitalization(.none)
+                                }
                                 
-                                // 临时使用 SecureField 进行测试
-                                SecureField("Confirm your password", text: $confirmPassword)
-                                    .textFieldStyle(CustomTextFieldStyle())
-                                    .autocorrectionDisabled()
-                                    .textContentType(.none)
-                                    .disableAutocorrection(true)
-                                    .autocapitalization(.none)
+                                // Validation indicator
+                                Circle()
+                                    .fill(isConfirmPasswordValid ? Color.green : Color.red)
+                                    .frame(width: 12, height: 12)
+                                    .opacity(confirmPassword.isEmpty ? 0.3 : 1.0)
                             }
                             
-                            // Debug info (temporary)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Debug Info:")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                Text("Name: '\(name)' (\(name.isEmpty ? "Empty" : "OK"))")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                Text("Email: '\(email)' (\(email.isEmpty ? "Empty" : "OK"))")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                Text("Password: '\(password)' (\(password.isEmpty ? "Empty" : "OK"))")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                Text("Confirm: '\(confirmPassword)' (\(confirmPassword.isEmpty ? "Empty" : "OK"))")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                Text("Form Valid: \(isFormValid ? "YES" : "NO")")
-                                    .font(.caption2)
-                                    .foregroundColor(isFormValid ? .green : .red)
-                            }
-                            .padding()
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(8)
                             
                             // Register button
                             Button(action: {
@@ -259,25 +298,38 @@ struct RegisterView: View {
         }
     }
     
+    // MARK: - Individual Field Validation
+    private var isNameValid: Bool {
+        return !name.isEmpty
+    }
+    
+    private var isEmailValid: Bool {
+        return !email.isEmpty && isValidEmail(email)
+    }
+    
+    private var isPhoneValid: Bool {
+        let digitsOnly = phoneNumber.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
+        return !phoneNumber.isEmpty && digitsOnly.count == selectedCountryCode.phoneNumberLength
+    }
+    
+    private var isPasswordValid: Bool {
+        return !password.isEmpty && password.count >= 8 && password.contains(where: { $0.isLetter }) && password.contains(where: { $0.isNumber })
+    }
+    
+    private var isConfirmPasswordValid: Bool {
+        return !confirmPassword.isEmpty && password == confirmPassword
+    }
+    
     // MARK: - Form Validation
     private var isFormValid: Bool {
-        let nameValid = !name.isEmpty
-        let passwordValid = !password.isEmpty && password.count >= 6
-        let confirmPasswordValid = !confirmPassword.isEmpty && password == confirmPassword
+        let nameValid = isNameValid
+        let passwordValid = isPasswordValid
+        let confirmPasswordValid = isConfirmPasswordValid
         
-        let emailValid = selectedAuthMethod == .email ? (!email.isEmpty && isValidEmail(email)) : true
-        let phoneValid = selectedAuthMethod == .phone ? (!phoneNumber.isEmpty && isValidPhoneNumber(phoneNumber)) : true
+        let emailValid = selectedAuthMethod == .email ? isEmailValid : true
+        let phoneValid = selectedAuthMethod == .phone ? isPhoneValid : true
         
         let isValid = nameValid && passwordValid && confirmPasswordValid && emailValid && phoneValid
-        
-        // 调试信息
-        print("🔍 Form Validation:")
-        print("  Name: \(name) - Valid: \(nameValid)")
-        print("  Password: \(password) - Valid: \(passwordValid)")
-        print("  Confirm Password: \(confirmPassword) - Valid: \(confirmPasswordValid)")
-        print("  Email: \(email) - Valid: \(emailValid)")
-        print("  Phone: \(phoneNumber) - Valid: \(phoneValid)")
-        print("  Overall: \(isValid)")
         
         return isValid
     }
@@ -324,8 +376,8 @@ struct RegisterView: View {
     private func isValidPhoneNumber(_ phone: String) -> Bool {
         // Remove all non-digit characters
         let digitsOnly = phone.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
-        // Check if it's a valid length (7-15 digits)
-        return digitsOnly.count >= 7 && digitsOnly.count <= 15
+        // Check if it matches the selected country code's phone number length
+        return digitsOnly.count == selectedCountryCode.phoneNumberLength
     }
     
     private func showAlert(message: String) {

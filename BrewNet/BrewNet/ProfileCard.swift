@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - User Profile Model
 struct UserProfile: Identifiable, Codable {
-    let id = UUID()
+    let id: UUID
     let name: String
     let age: Int
     let company: String
@@ -15,6 +15,7 @@ struct UserProfile: Identifiable, Codable {
     let interests: [String]
     
     init(name: String, age: Int, company: String, jobTitle: String, skills: [String], bio: String, imageName: String, location: String, education: String, interests: [String]) {
+        self.id = UUID()
         self.name = name
         self.age = age
         self.company = company

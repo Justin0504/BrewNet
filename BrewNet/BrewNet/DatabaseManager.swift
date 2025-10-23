@@ -68,13 +68,14 @@ class DatabaseManager: ObservableObject {
     }
     
     // MARK: - User Operations
-    func createUser(id: String, email: String, name: String, phoneNumber: String? = nil, isGuest: Bool = false) -> UserEntity? {
+    func createUser(id: String, email: String, name: String, phoneNumber: String? = nil, isGuest: Bool = false, profileSetupCompleted: Bool = false) -> UserEntity? {
         let user = UserEntity(context: context)
         user.id = id
         user.email = email
         user.name = name
         user.phoneNumber = phoneNumber
         user.isGuest = isGuest
+        user.profileSetupCompleted = profileSetupCompleted
         user.createdAt = Date()
         user.lastLoginAt = Date()
         
@@ -105,6 +106,7 @@ class DatabaseManager: ObservableObject {
             location: user.location,
             skills: user.skills,
             interests: user.interests,
+            profileSetupCompleted: user.profileSetupCompleted,
             createdAt: ISO8601DateFormatter().string(from: user.createdAt ?? Date()),
             lastLoginAt: ISO8601DateFormatter().string(from: user.lastLoginAt ?? Date()),
             updatedAt: ISO8601DateFormatter().string(from: Date())
@@ -227,7 +229,7 @@ class DatabaseManager: ObservableObject {
         )
         
         do {
-            _ = try await supabaseService.createPost(post: supabasePost)
+            let _ = try await supabaseService.createPost(post: supabasePost)
             print("✅ Post data synced to cloud: \(post.title ?? "")")
         } catch {
             print("❌ Failed to sync post data to cloud: \(error)")
@@ -490,7 +492,7 @@ class DatabaseManager: ObservableObject {
         ]
         
         for postData in samplePosts {
-            createPost(
+            let _ = createPost(
                 id: postData.0,
                 title: postData.1,
                 content: postData.2,

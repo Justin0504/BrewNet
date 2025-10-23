@@ -19,6 +19,51 @@ class SupabaseService: ObservableObject {
     }
     
     // MARK: - Database Setup
+    func createProfilesTable() async throws {
+        print("🔧 正在创建 profiles 表...")
+        
+        // 由于 Supabase 客户端可能不支持直接执行 DDL，我们使用一个变通方法
+        // 尝试插入一个测试记录来检查表是否存在，如果不存在则提示用户手动创建
+        do {
+            // 先尝试查询表是否存在
+            let response = try await client
+                .from("profiles")
+                .select("id")
+                .limit(1)
+                .execute()
+            
+            print("✅ profiles 表已存在！")
+            print("📊 响应状态: \(response.response.statusCode)")
+            
+        } catch {
+            print("❌ profiles 表不存在，需要手动创建")
+            print("🔍 错误信息: \(error.localizedDescription)")
+            
+            // 提供创建表的 SQL 语句
+            let createTableSQL = """
+            CREATE TABLE IF NOT EXISTS profiles (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                core_identity JSONB NOT NULL,
+                professional_background JSONB NOT NULL,
+                networking_intent JSONB NOT NULL,
+                personality_social JSONB NOT NULL,
+                privacy_trust JSONB NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                UNIQUE(user_id)
+            );
+            """
+            
+            print("📋 请在 Supabase Dashboard 的 SQL Editor 中执行以下 SQL 语句:")
+            print(String(repeating: "=", count: 60))
+            print(createTableSQL)
+            print(String(repeating: "=", count: 60))
+            
+            throw error
+        }
+    }
+    
     func ensureTablesExist() async {
         print("🔧 开始检查 Supabase 连接...")
         print("🔗 Supabase URL: https://jcxvdolcdifdghaibspy.supabase.co")
@@ -37,7 +82,7 @@ class SupabaseService: ObservableObject {
             print("📡 正在测试 Supabase 连接...")
             
             // 测试基本连接
-            let response = try await client.database
+            let response = try await client
                 .from("users")
                 .select("id")
                 .limit(1)
@@ -81,7 +126,7 @@ class SupabaseService: ObservableObject {
         
         do {
             // 测试基本连接
-            let response = try await client.database
+            let response = try await client
                 .from("users")
                 .select("count")
                 .execute()
@@ -115,7 +160,7 @@ class SupabaseService: ObservableObject {
     
     /// 创建用户到 Supabase
     func createUser(user: SupabaseUser) async throws -> SupabaseUser {
-        let response = try await client.database
+        let response = try await client
             .from(SupabaseTable.users.rawValue)
             .insert(user)
             .select()
@@ -127,21 +172,31 @@ class SupabaseService: ObservableObject {
         
         // 同时保存到本地数据库
         await MainActor.run {
-            _ = databaseManager?.createUser(
+            let _ = databaseManager?.createUser(
                 id: createdUser.id,
                 email: createdUser.email,
                 name: createdUser.name,
                 phoneNumber: createdUser.phoneNumber,
-                isGuest: createdUser.isGuest
+                isGuest: createdUser.isGuest,
+                profileSetupCompleted: createdUser.profileSetupCompleted
             )
         }
         
         return createdUser
     }
     
+    /// 更新用户资料设置完成状态
+    func updateUserProfileSetupCompleted(userId: String, completed: Bool) async throws {
+        try await client
+            .from(SupabaseTable.users.rawValue)
+            .update(["profile_setup_completed": completed])
+            .eq("id", value: userId)
+            .execute()
+    }
+    
     /// 从 Supabase 获取用户
     func getUser(id: String) async throws -> SupabaseUser? {
-        let response = try await client.database
+        let response = try await client
             .from(SupabaseTable.users.rawValue)
             .select()
             .eq("id", value: id)
@@ -154,7 +209,7 @@ class SupabaseService: ObservableObject {
     
     /// 从 Supabase 通过邮箱获取用户
     func getUserByEmail(email: String) async throws -> SupabaseUser? {
-        let response = try await client.database
+        let response = try await client
             .from(SupabaseTable.users.rawValue)
             .select()
             .eq("email", value: email)
@@ -167,7 +222,7 @@ class SupabaseService: ObservableObject {
     
     /// 更新用户最后登录时间
     func updateUserLastLogin(userId: String) async throws {
-        try await client.database
+        try await client
             .from(SupabaseTable.users.rawValue)
             .update(["last_login_at": ISO8601DateFormatter().string(from: Date())])
             .eq("id", value: userId)
@@ -178,7 +233,7 @@ class SupabaseService: ObservableObject {
     
     /// 创建帖子到 Supabase
     func createPost(post: SupabasePost) async throws -> SupabasePost {
-        let response = try await client.database
+        let response = try await client
             .from(SupabaseTable.posts.rawValue)
             .insert(post)
             .select()
@@ -190,7 +245,7 @@ class SupabaseService: ObservableObject {
         
         // 同时保存到本地数据库
         await MainActor.run {
-            _ = databaseManager?.createPost(
+            let _ = databaseManager?.createPost(
                 id: createdPost.id,
                 title: createdPost.title,
                 content: createdPost.content ?? "",
@@ -208,7 +263,7 @@ class SupabaseService: ObservableObject {
     
     /// 从 Supabase 获取所有帖子
     func getAllPosts() async throws -> [SupabasePost] {
-        let response = try await client.database
+        let response = try await client
             .from(SupabaseTable.posts.rawValue)
             .select()
             .order("created_at", ascending: false)
@@ -220,7 +275,7 @@ class SupabaseService: ObservableObject {
     
     /// 从 Supabase 获取用户的帖子
     func getPostsByAuthor(authorId: String) async throws -> [SupabasePost] {
-        let response = try await client.database
+        let response = try await client
             .from(SupabaseTable.posts.rawValue)
             .select()
             .eq("author_id", value: authorId)
@@ -236,7 +291,7 @@ class SupabaseService: ObservableObject {
     /// 点赞帖子
     func likePost(userId: String, postId: String) async throws -> Bool {
         // 检查是否已经点赞
-        let existingLikes = try await client.database
+        let existingLikes = try await client
             .from(SupabaseTable.likes.rawValue)
             .select()
             .eq("user_id", value: userId)
@@ -258,7 +313,7 @@ class SupabaseService: ObservableObject {
             createdAt: ISO8601DateFormatter().string(from: Date())
         )
         
-        try await client.database
+        try await client
             .from(SupabaseTable.likes.rawValue)
             .insert(like)
             .execute()
@@ -277,7 +332,7 @@ class SupabaseService: ObservableObject {
     /// 取消点赞
     func unlikePost(userId: String, postId: String) async throws -> Bool {
         // 删除点赞记录
-        try await client.database
+        try await client
             .from(SupabaseTable.likes.rawValue)
             .delete()
             .eq("user_id", value: userId)
@@ -298,7 +353,7 @@ class SupabaseService: ObservableObject {
     /// 更新帖子点赞数
     private func updatePostLikeCount(postId: String, increment: Int) async throws {
         // 先获取当前点赞数
-        let response = try await client.database
+        let response = try await client
             .from(SupabaseTable.posts.rawValue)
             .select("like_count")
             .eq("id", value: postId)
@@ -311,7 +366,7 @@ class SupabaseService: ObservableObject {
         let newCount = max(0, currentCount + increment)
         
         // 更新点赞数
-        try await client.database
+        try await client
             .from(SupabaseTable.posts.rawValue)
             .update(["like_count": newCount])
             .eq("id", value: postId)
@@ -323,7 +378,7 @@ class SupabaseService: ObservableObject {
     /// 保存帖子
     func savePost(userId: String, postId: String) async throws -> Bool {
         // 检查是否已经保存
-        let existingSaves = try await client.database
+        let existingSaves = try await client
             .from(SupabaseTable.saves.rawValue)
             .select()
             .eq("user_id", value: userId)
@@ -345,7 +400,7 @@ class SupabaseService: ObservableObject {
             createdAt: ISO8601DateFormatter().string(from: Date())
         )
         
-        try await client.database
+        try await client
             .from(SupabaseTable.saves.rawValue)
             .insert(save)
             .execute()
@@ -360,7 +415,7 @@ class SupabaseService: ObservableObject {
     
     /// 取消保存
     func unsavePost(userId: String, postId: String) async throws -> Bool {
-        try await client.database
+        try await client
             .from(SupabaseTable.saves.rawValue)
             .delete()
             .eq("user_id", value: userId)
@@ -375,11 +430,75 @@ class SupabaseService: ObservableObject {
         return true
     }
     
+    // MARK: - Profile Operations
+    
+    /// 创建用户资料
+    func createProfile(profile: SupabaseProfile) async throws -> SupabaseProfile {
+        let response = try await client
+            .from(SupabaseTable.profiles.rawValue)
+            .insert(profile)
+            .select()
+            .single()
+            .execute()
+        
+        let data = response.data
+        return try JSONDecoder().decode(SupabaseProfile.self, from: data)
+    }
+    
+    /// 获取用户资料
+    func getProfile(userId: String) async throws -> SupabaseProfile? {
+        let response = try await client
+            .from(SupabaseTable.profiles.rawValue)
+            .select()
+            .eq("user_id", value: userId)
+            .single()
+            .execute()
+        
+        let data = response.data
+        return try JSONDecoder().decode(SupabaseProfile.self, from: data)
+    }
+    
+    /// 更新用户资料
+    func updateProfile(profileId: String, profile: SupabaseProfile) async throws -> SupabaseProfile {
+        let response = try await client
+            .from(SupabaseTable.profiles.rawValue)
+            .update(profile)
+            .eq("id", value: profileId)
+            .select()
+            .single()
+            .execute()
+        
+        let data = response.data
+        return try JSONDecoder().decode(SupabaseProfile.self, from: data)
+    }
+    
+    /// 删除用户资料
+    func deleteProfile(profileId: String) async throws {
+        try await client
+            .from(SupabaseTable.profiles.rawValue)
+            .delete()
+            .eq("id", value: profileId)
+            .execute()
+    }
+    
+    /// 获取推荐用户列表
+    func getRecommendedProfiles(userId: String, limit: Int = 20) async throws -> [SupabaseProfile] {
+        let response = try await client
+            .from(SupabaseTable.profiles.rawValue)
+            .select()
+            .neq("user_id", value: userId)
+            .limit(limit)
+            .execute()
+        
+        let data = response.data
+        return try JSONDecoder().decode([SupabaseProfile].self, from: data)
+    }
+    
     // MARK: - Anonymous Post Operations
     
     /// 创建匿名帖子
     func createAnonymousPost(post: SupabaseAnonymousPost) async throws -> SupabaseAnonymousPost {
-        let response = try await client.database
+        let response = try await client
             .from(SupabaseTable.anonymousPosts.rawValue)
             .insert(post)
             .select()
@@ -392,7 +511,7 @@ class SupabaseService: ObservableObject {
     
     /// 获取所有匿名帖子
     func getAllAnonymousPosts() async throws -> [SupabaseAnonymousPost] {
-        let response = try await client.database
+        let response = try await client
             .from(SupabaseTable.anonymousPosts.rawValue)
             .select()
             .order("created_at", ascending: false)
@@ -425,6 +544,7 @@ class SupabaseService: ObservableObject {
                     location: user.location,
                     skills: user.skills,
                     interests: user.interests,
+                    profileSetupCompleted: user.profileSetupCompleted,
                     createdAt: ISO8601DateFormatter().string(from: user.createdAt ?? Date()),
                     lastLoginAt: ISO8601DateFormatter().string(from: user.lastLoginAt ?? Date()),
                     updatedAt: ISO8601DateFormatter().string(from: Date())
@@ -436,7 +556,7 @@ class SupabaseService: ObservableObject {
                     continue
                 } else {
                     // 创建新用户
-                    try await createUser(user: supabaseUser)
+                    let _ = try await createUser(user: supabaseUser)
                 }
             }
             
@@ -460,7 +580,7 @@ class SupabaseService: ObservableObject {
                 )
                 
                 // 检查云端是否已存在
-                if let _ = try? await client.database
+                if let _ = try? await client
                     .from(SupabaseTable.posts.rawValue)
                     .select("id")
                     .eq("id", value: supabasePost.id)
@@ -470,7 +590,7 @@ class SupabaseService: ObservableObject {
                     continue
                 } else {
                     // 创建新帖子
-                    try await createPost(post: supabasePost)
+                    let _ = try await createPost(post: supabasePost)
                 }
             }
             
@@ -498,7 +618,7 @@ class SupabaseService: ObservableObject {
                 
                 // 重新创建帖子数据
                 for cloudPost in cloudPosts {
-                    _ = databaseManager?.createPost(
+                    let _ = databaseManager?.createPost(
                         id: cloudPost.id,
                         title: cloudPost.title,
                         content: cloudPost.content ?? "",
@@ -537,7 +657,7 @@ class SupabaseService: ObservableObject {
     private func checkNetworkStatus() async {
         do {
             // 尝试连接 Supabase
-            _ = try await client.database
+            _ = try await client
                 .from(SupabaseTable.users.rawValue)
                 .select("id")
                 .limit(1)
