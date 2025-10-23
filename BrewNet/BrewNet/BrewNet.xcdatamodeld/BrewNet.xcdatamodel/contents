@@ -15,6 +15,7 @@
         <attribute name="location" optional="YES" attributeType="String"/>
         <attribute name="skills" optional="YES" attributeType="String"/>
         <attribute name="interests" optional="YES" attributeType="String"/>
+        <attribute name="profileSetupCompleted" optional="NO" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
         <relationship name="likedPosts" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Like" inverseName="user" inverseEntity="Like"/>
         <relationship name="savedPosts" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Save" inverseName="user" inverseEntity="Save"/>
         <relationship name="matches" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Match" inverseName="user" inverseEntity="Match"/>

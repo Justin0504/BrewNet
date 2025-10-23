@@ -4,6 +4,7 @@ import SwiftUI
 struct ProfileView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var databaseManager: DatabaseManager
+    @EnvironmentObject var supabaseService: SupabaseService
     
     @State private var selectedTab = 0
     @State private var showLogoutAlert = false
@@ -13,44 +14,78 @@ struct ProfileView: View {
     @State private var savedPosts: [AppPost] = []
     @State private var matchedUsers: [UserProfile] = []
     @State private var coffeeChatSchedules: [CoffeeChatSchedule] = []
+    @State private var userProfile: BrewNetProfile?
+    @State private var isLoadingProfile = true
     
     var body: some View {
         NavigationView {
-            VStack(spacing: 0) {
-                // User Header
-                userHeaderView
-                
-                // Tab Selection
-                tabSelectionView
-                
-                // Content
-                TabView(selection: $selectedTab) {
-                    // Browse History
-                    PostHistoryView(posts: viewedPosts)
-                        .tag(0)
-                    
-                    // My Likes
-                    LikedPostsView(posts: likedPosts)
-                        .tag(1)
-                    
-                    // My Saved Posts
-                    SavedPostsView(posts: savedPosts)
-                        .tag(2)
-                    
-                    // Matched Users
-                    MatchedUsersView(users: matchedUsers)
-                        .tag(3)
-                    
-                    // Calendar Appointments
-                    CalendarView(schedules: coffeeChatSchedules)
-                        .tag(4)
+            Group {
+                if isLoadingProfile {
+                    // Loading state
+                    VStack {
+                        Spacer()
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
+                            .scaleEffect(1.2)
+                        Text("Loading profile...")
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray)
+                            .padding(.top, 16)
+                        Spacer()
+                    }
+                } else if let profile = userProfile {
+                    // Show profile display
+                    ProfileDisplayView(profile: profile)
+                } else {
+                    // Show setup prompt
+                    VStack(spacing: 24) {
+                        Spacer()
+                        
+                        Image(systemName: "person.circle")
+                            .font(.system(size: 80))
+                            .foregroundColor(.gray)
+                        
+                        VStack(spacing: 12) {
+                            Text("Complete Your Profile")
+                                .font(.system(size: 24, weight: .bold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            
+                            Text("Set up your profile to start networking with other professionals")
+                                .font(.system(size: 16))
+                                .foregroundColor(.gray)
+                                .multilineTextAlignment(.center)
+                        }
+                        
+                        Button("Set Up Profile") {
+                            // This will be handled by the ContentView routing
+                        }
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color(red: 0.6, green: 0.4, blue: 0.2),
+                                    Color(red: 0.4, green: 0.2, blue: 0.1)
+                                ]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .cornerRadius(25)
+                        .shadow(color: Color.brown.opacity(0.3), radius: 8, x: 0, y: 4)
+                        .padding(.horizontal, 32)
+                        
+                        Spacer()
+                    }
                 }
-                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
             }
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 loadUserData()
+                loadUserProfile()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PostCreated"))) { _ in
                 print("📨 ProfileView 收到 PostCreated 通知 - 重新加载数据")
@@ -298,6 +333,35 @@ struct ProfileView: View {
         coffeeChatSchedules = sampleCoffeeChatSchedules
 
         print("✅ User data loaded")
+    }
+    
+    private func loadUserProfile() {
+        guard let currentUser = authManager.currentUser else {
+            isLoadingProfile = false
+            return
+        }
+        
+        Task {
+            do {
+                if let supabaseProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                    await MainActor.run {
+                        self.userProfile = supabaseProfile.toBrewNetProfile()
+                        self.isLoadingProfile = false
+                    }
+                } else {
+                    await MainActor.run {
+                        self.userProfile = nil
+                        self.isLoadingProfile = false
+                    }
+                }
+            } catch {
+                print("❌ Failed to load user profile: \(error)")
+                await MainActor.run {
+                    self.userProfile = nil
+                    self.isLoadingProfile = false
+                }
+            }
+        }
     }
 }
 
@@ -758,7 +822,7 @@ struct CoffeeChatScheduleCard: View {
 
 // MARK: - Coffee Chat Schedule Model
 struct CoffeeChatSchedule: Identifiable, Codable {
-    let id = UUID()
+    let id: UUID
     let title: String
     let participantName: String
     let date: Date
@@ -766,6 +830,7 @@ struct CoffeeChatSchedule: Identifiable, Codable {
     let status: ScheduleStatus
     
     init(title: String, participantName: String, date: Date, location: String, status: ScheduleStatus = .confirmed) {
+        self.id = UUID()
         self.title = title
         self.participantName = participantName
         self.date = date
