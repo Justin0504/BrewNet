@@ -309,7 +309,8 @@ struct SupabaseTestView: View {
             id: UUID().uuidString,
             email: "test@example.com",
             name: "测试用户",
-            isGuest: false
+            isGuest: false,
+            profileSetupCompleted: false
         )
         
         if testUser != nil {

@@ -11,14 +11,16 @@ struct AppUser: Codable, Identifiable {
     let createdAt: Date
     let lastLoginAt: Date
     let isGuest: Bool // Whether it's a guest user
+    let profileSetupCompleted: Bool // Whether profile setup is completed
     
-    init(id: String = UUID().uuidString, email: String, name: String, isGuest: Bool = false) {
+    init(id: String = UUID().uuidString, email: String, name: String, isGuest: Bool = false, profileSetupCompleted: Bool = false) {
         self.id = id
         self.email = email
         self.name = name
         self.createdAt = Date()
         self.lastLoginAt = Date()
         self.isGuest = isGuest
+        self.profileSetupCompleted = profileSetupCompleted
     }
 }
 
@@ -54,25 +56,18 @@ class AuthManager: ObservableObject {
     // MARK: - Check Authentication Status
     private func checkAuthStatus() {
         print("🔍 Checking authentication status...")
-        // Check locally stored user information
-        if let userData = userDefaults.data(forKey: userKey),
-           let user = try? JSONDecoder().decode(AppUser.self, from: userData) {
-            print("✅ Found saved user: \(user.name)")
-            self.currentUser = user
-            self.authState = .authenticated(user)
-        } else {
-            print("❌ No saved user found, showing login screen")
-            self.authState = .unauthenticated
-        }
+        // Always show login screen first, don't auto-login
+        print("📱 Showing login screen on app startup")
+        self.authState = .unauthenticated
     }
     
     // MARK: - Login
     func login(email: String, password: String) async -> Result<AppUser, AuthError> {
         // Check if input is email or phone number
         let isEmail = isValidEmail(email)
-        let isPhone = isValidPhoneNumber(email)
+        let _ = isValidPhoneNumber(email)
         
-        guard isEmail || isPhone else {
+        guard isEmail else {
             return .failure(.invalidEmail)
         }
         
@@ -96,7 +91,7 @@ class AuthManager: ObservableObject {
         
         // Check if input is email or phone number
         let isEmail = isValidEmail(email)
-        let isPhone = isValidPhoneNumber(email)
+        let _ = isValidPhoneNumber(email)
         
         // Check if user exists in database
         let userEntity: UserEntity?
@@ -120,7 +115,8 @@ class AuthManager: ObservableObject {
             id: existingUser.id ?? UUID().uuidString,
             email: existingUser.email ?? "",
             name: existingUser.name ?? "",
-            isGuest: existingUser.isGuest
+            isGuest: existingUser.isGuest,
+            profileSetupCompleted: existingUser.profileSetupCompleted
         )
         
         await MainActor.run {
@@ -176,18 +172,20 @@ class AuthManager: ObservableObject {
         let guestId = "guest_\(UUID().uuidString.prefix(8))"
         
         // Create guest user in database
-        let userEntity = databaseManager?.createUser(
+        let _ = databaseManager?.createUser(
             id: guestId,
             email: "guest@brewnet.com",
             name: randomName,
-            isGuest: true
+            isGuest: true,
+            profileSetupCompleted: false
         )
         
         let user = AppUser(
             id: guestId,
             email: "guest@brewnet.com",
             name: randomName,
-            isGuest: true
+            isGuest: true,
+            profileSetupCompleted: false
         )
         
         print("👤 Created guest user: \(user.name)")
@@ -261,7 +259,8 @@ class AuthManager: ObservableObject {
             id: userID,
             email: email,
             name: fullName,
-            isGuest: false
+            isGuest: false,
+            profileSetupCompleted: false
         )
         
         // Save user information (both to current user and Apple-specific storage)
@@ -328,7 +327,7 @@ class AuthManager: ObservableObject {
         print("✅ DatabaseManager 可用")
         
         // Check if email already exists in database
-        if let existingUser = dbManager.getUserByEmail(email) {
+        if dbManager.getUserByEmail(email) != nil {
             print("⚠️ 邮箱已存在: \(email)")
             return .failure(.emailAlreadyExists)
         }
@@ -341,7 +340,8 @@ class AuthManager: ObservableObject {
             id: userId,
             email: email,
             name: name,
-            isGuest: false
+            isGuest: false,
+            profileSetupCompleted: false
         ) else {
             print("❌ 创建用户实体失败")
             return .failure(.unknownError)
@@ -354,7 +354,8 @@ class AuthManager: ObservableObject {
             id: userEntity.id ?? userId,
             email: userEntity.email ?? email,
             name: userEntity.name ?? name,
-            isGuest: false
+            isGuest: false,
+            profileSetupCompleted: false
         )
         
         print("✅ 本地注册成功: \(user.name)")
@@ -397,6 +398,7 @@ class AuthManager: ObservableObject {
                 location: nil,
                 skills: nil,
                 interests: nil,
+                profileSetupCompleted: false,
                 createdAt: ISO8601DateFormatter().string(from: Date()),
                 lastLoginAt: ISO8601DateFormatter().string(from: Date()),
                 updatedAt: ISO8601DateFormatter().string(from: Date())
@@ -412,7 +414,8 @@ class AuthManager: ObservableObject {
                         id: createdUser.id,
                         email: createdUser.email,
                         name: createdUser.name,
-                        isGuest: createdUser.isGuest
+                        isGuest: createdUser.isGuest,
+                        profileSetupCompleted: createdUser.profileSetupCompleted
                     )
                     
                     let appUser = createdUser.toAppUser()
@@ -489,7 +492,7 @@ class AuthManager: ObservableObject {
         
         // Check if phone already exists in database
         let phoneEmail = "\(phoneNumber)@brewnet.local"
-        if let existingUser = databaseManager?.getUserByEmail(phoneEmail) {
+        if databaseManager?.getUserByEmail(phoneEmail) != nil {
             return .failure(.phoneAlreadyExists)
         }
         
@@ -500,7 +503,8 @@ class AuthManager: ObservableObject {
             email: phoneEmail,
             name: name,
             phoneNumber: phoneNumber,
-            isGuest: false
+            isGuest: false,
+            profileSetupCompleted: false
         ) else {
             return .failure(.unknownError)
         }
@@ -510,7 +514,8 @@ class AuthManager: ObservableObject {
             id: userEntity.id ?? userId,
             email: userEntity.email ?? phoneEmail,
             name: userEntity.name ?? name,
-            isGuest: false
+            isGuest: false,
+            profileSetupCompleted: false
         )
         
         await MainActor.run {
@@ -600,6 +605,21 @@ class AuthManager: ObservableObject {
         } else {
             print("❌ User data save failed")
         }
+    }
+    
+    /// Update profile setup completion status
+    func updateProfileSetupCompleted(_ completed: Bool) {
+        guard let user = currentUser else { return }
+        
+        let updatedUser = AppUser(
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            isGuest: user.isGuest,
+            profileSetupCompleted: completed
+        )
+        
+        saveUser(updatedUser)
     }
     
     // MARK: - Validation Helpers

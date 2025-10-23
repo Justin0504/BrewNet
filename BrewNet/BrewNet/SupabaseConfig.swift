@@ -22,6 +22,7 @@ class SupabaseConfig {
 // MARK: - Supabase Tables
 enum SupabaseTable: String, CaseIterable {
     case users = "users"
+    case profiles = "profiles"
     case posts = "posts"
     case likes = "likes"
     case saves = "saves"
@@ -34,11 +35,11 @@ enum SupabaseTable: String, CaseIterable {
 // MARK: - Database Schema Helper
 struct DatabaseSchema {
     static func createTables() async throws {
-        let client = SupabaseConfig.shared.client
+        let _ = SupabaseConfig.shared.client
         
         // 注意：这些 SQL 语句需要在 Supabase Dashboard 中执行
         // 这里只是作为参考
-        let createUsersTable = """
+        let _ = """
         CREATE TABLE IF NOT EXISTS users (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             email TEXT UNIQUE NOT NULL,
@@ -52,13 +53,29 @@ struct DatabaseSchema {
             location TEXT,
             skills TEXT,
             interests TEXT,
+            profile_setup_completed BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             last_login_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
         """
         
-        let createPostsTable = """
+        let _ = """
+        CREATE TABLE IF NOT EXISTS profiles (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            core_identity JSONB NOT NULL,
+            professional_background JSONB NOT NULL,
+            networking_intent JSONB NOT NULL,
+            personality_social JSONB NOT NULL,
+            privacy_trust JSONB NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(user_id)
+        );
+        """
+        
+        let _ = """
         CREATE TABLE IF NOT EXISTS posts (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             title TEXT NOT NULL,
@@ -76,7 +93,7 @@ struct DatabaseSchema {
         );
         """
         
-        let createLikesTable = """
+        let _ = """
         CREATE TABLE IF NOT EXISTS likes (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id UUID NOT NULL REFERENCES users(id),
@@ -86,7 +103,7 @@ struct DatabaseSchema {
         );
         """
         
-        let createSavesTable = """
+        let _ = """
         CREATE TABLE IF NOT EXISTS saves (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id UUID NOT NULL REFERENCES users(id),
@@ -96,7 +113,7 @@ struct DatabaseSchema {
         );
         """
         
-        let createMatchesTable = """
+        let _ = """
         CREATE TABLE IF NOT EXISTS matches (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id UUID NOT NULL REFERENCES users(id),
@@ -108,7 +125,7 @@ struct DatabaseSchema {
         );
         """
         
-        let createCoffeeChatsTable = """
+        let _ = """
         CREATE TABLE IF NOT EXISTS coffee_chats (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id UUID NOT NULL REFERENCES users(id),
@@ -123,7 +140,7 @@ struct DatabaseSchema {
         );
         """
         
-        let createMessagesTable = """
+        let _ = """
         CREATE TABLE IF NOT EXISTS messages (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             sender_id UUID NOT NULL REFERENCES users(id),
@@ -135,7 +152,7 @@ struct DatabaseSchema {
         );
         """
         
-        let createAnonymousPostsTable = """
+        let _ = """
         CREATE TABLE IF NOT EXISTS anonymous_posts (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             title TEXT NOT NULL,

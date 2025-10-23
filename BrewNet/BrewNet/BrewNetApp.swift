@@ -31,7 +31,7 @@ struct BrewNetApp: App {
         }
     }
     
-    // 在视图出现后设置依赖关系
+    // 在视图出现后设置依赖
     private func setupDependencies() {
         print("🔧 设置依赖关系...")
         

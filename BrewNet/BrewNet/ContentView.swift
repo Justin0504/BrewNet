@@ -11,6 +11,7 @@ import CoreData
 struct ContentView: View {
     @EnvironmentObject var authManager: AuthManager
     @State private var refreshID = UUID()
+    @State private var showDatabaseSetup = false
     
     var body: some View {
         Group {
@@ -19,11 +20,18 @@ struct ContentView: View {
                 // 加载界面
                 LoadingView()
             case .authenticated(let user):
-                // 已登录，显示主界面
-                MainView()
-                    .onAppear {
-                        print("🏠 主界面已显示，用户: \(user.name)")
-                    }
+                // 已登录，检查是否需要完成资料设置
+                if user.profileSetupCompleted {
+                    MainView()
+                        .onAppear {
+                            print("🏠 主界面已显示，用户: \(user.name)")
+                        }
+                } else {
+                    ProfileSetupView()
+                        .onAppear {
+                            print("📝 资料设置界面已显示，用户: \(user.name)")
+                        }
+                }
             case .unauthenticated:
                 // 未登录，显示登录界面
                 LoginView()
@@ -33,6 +41,10 @@ struct ContentView: View {
             }
         }
         .id(refreshID) // 添加强制刷新ID
+        .sheet(isPresented: $showDatabaseSetup) {
+            DatabaseSetupView()
+                .environmentObject(SupabaseService.shared)
+        }
         .onReceive(authManager.$authState) { newState in
             print("🔄 ContentView 收到状态变化通知: \(newState)")
             switch newState {

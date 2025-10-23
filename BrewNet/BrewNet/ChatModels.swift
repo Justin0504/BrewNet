@@ -3,7 +3,7 @@ import SwiftUI
 
 // MARK: - Message Model
 struct ChatMessage: Identifiable, Codable {
-    let id = UUID()
+    let id: UUID
     let content: String
     let timestamp: Date
     let isFromUser: Bool
@@ -12,6 +12,7 @@ struct ChatMessage: Identifiable, Codable {
     let senderAvatar: String?
     
     init(content: String, isFromUser: Bool, messageType: MessageType = .text, senderName: String? = nil, senderAvatar: String? = nil) {
+        self.id = UUID()
         self.content = content
         self.timestamp = Date()
         self.isFromUser = isFromUser
@@ -31,7 +32,7 @@ enum MessageType: String, Codable, CaseIterable {
 
 // MARK: - Chat User Model
 struct ChatUser: Identifiable, Codable {
-    let id = UUID()
+    let id: UUID
     let name: String
     let avatar: String
     let isOnline: Bool
@@ -43,6 +44,7 @@ struct ChatUser: Identifiable, Codable {
     let matchType: MatchType
     
     init(name: String, avatar: String, isOnline: Bool = false, lastSeen: Date = Date(), interests: [String] = [], bio: String = "", isMatched: Bool = false, matchDate: Date? = nil, matchType: MatchType = .none) {
+        self.id = UUID()
         self.name = name
         self.avatar = avatar
         self.isOnline = isOnline
@@ -117,13 +119,14 @@ enum MatchType: String, Codable, CaseIterable {
 
 // MARK: - AI Suggestion Model
 struct AISuggestion: Identifiable, Codable {
-    let id = UUID()
+    let id: UUID
     let content: String
     let category: SuggestionCategory
     let timestamp: Date
     let isUsed: Bool
     
     init(content: String, category: SuggestionCategory, isUsed: Bool = false) {
+        self.id = UUID()
         self.content = content
         self.category = category
         self.timestamp = Date()
@@ -187,7 +190,7 @@ enum SuggestionCategory: String, Codable, CaseIterable {
 
 // MARK: - Chat Session Model
 struct ChatSession: Identifiable, Codable {
-    let id = UUID()
+    let id: UUID
     let user: ChatUser
     var messages: [ChatMessage]
     var aiSuggestions: [AISuggestion]
@@ -196,6 +199,7 @@ struct ChatSession: Identifiable, Codable {
     var isActive: Bool
     
     init(user: ChatUser, messages: [ChatMessage] = [], aiSuggestions: [AISuggestion] = [], isActive: Bool = true) {
+        self.id = UUID()
         self.user = user
         self.messages = messages
         self.aiSuggestions = aiSuggestions
