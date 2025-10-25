@@ -410,7 +410,7 @@ class AuthManager: ObservableObject {
                     print("✅ 用户数据已保存到 Supabase")
                     
                     // 同时保存到本地数据库
-                    let userEntity = databaseManager?.createUser(
+                    let _ = databaseManager?.createUser(
                         id: createdUser.id,
                         email: createdUser.email,
                         name: createdUser.name,

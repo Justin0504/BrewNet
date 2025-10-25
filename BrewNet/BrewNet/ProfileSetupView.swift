@@ -12,7 +12,7 @@ struct ProfileSetupView: View {
     @State private var showDatabaseSetup = false
     @State private var isNavigating = false
     
-    private let totalSteps = 5
+    private let totalSteps = 6
     
     var body: some View {
         GeometryReader { geometry in
@@ -82,24 +82,29 @@ struct ProfileSetupView: View {
                                         ProfessionalBackgroundStep(profileData: $profileData)
                                             .id("step-2")
                                     case 3:
-                                        NetworkingIntentStep(profileData: $profileData)
+                                        NetworkingIntentionStep(profileData: $profileData)
                                             .id("step-3")
                                     case 4:
-                                        PersonalitySocialStep(profileData: $profileData)
+                                        NetworkingPreferencesStep(profileData: $profileData)
                                             .id("step-4")
                                     case 5:
-                                        PrivacyTrustStep(profileData: $profileData)
+                                        PersonalitySocialStep(profileData: $profileData)
                                             .id("step-5")
+                                    case 6:
+                                        PrivacyTrustStep(profileData: $profileData)
+                                            .id("step-6")
                                     default:
                                         EmptyView()
                                     }
                                 }
                                 .padding(.horizontal, 32)
                                 .padding(.top, 32)
-                                .onChange(of: currentStep) { _ in
-                                    // Scroll to top when step changes
-                                    withAnimation(.easeInOut(duration: 0.3)) {
-                                        proxy.scrollTo("step-\(currentStep)", anchor: .top)
+                                .onChange(of: currentStep) { newStep in
+                                    // Only scroll to top when step actually changes, not during picker interactions
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                        withAnimation(.easeInOut(duration: 0.3)) {
+                                            proxy.scrollTo("step-\(newStep)", anchor: .top)
+                                        }
                                     }
                                 }
                             }
@@ -198,9 +203,10 @@ struct ProfileSetupView: View {
         switch currentStep {
         case 1: return "Core Identity"
         case 2: return "Professional Background"
-        case 3: return "Networking & Intent"
-        case 4: return "Personality & Social"
-        case 5: return "Privacy & Trust"
+        case 3: return "Networking Intention"
+        case 4: return "Networking Preferences"
+        case 5: return "Personality & Social"
+        case 6: return "Privacy & Trust"
         default: return ""
         }
     }
@@ -209,9 +215,10 @@ struct ProfileSetupView: View {
         switch currentStep {
         case 1: return "Tell us about yourself - the basics that help others connect with you"
         case 2: return "Share your professional experience and expertise"
-        case 3: return "What brings you to BrewNet? Let's align your networking goals"
-        case 4: return "Show your personality and what makes you unique"
-        case 5: return "Control your privacy and how others can discover you"
+        case 3: return "Define your networking goals and intentions"
+        case 4: return "Set your networking preferences and availability"
+        case 5: return "Show your personality and what makes you unique"
+        case 6: return "Control your privacy and how others can discover you"
         default: return ""
         }
     }
@@ -247,7 +254,8 @@ struct ProfileSetupView: View {
                     userId: updatedProfile.userId,
                     coreIdentity: updatedProfile.coreIdentity,
                     professionalBackground: updatedProfile.professionalBackground,
-                    networkingIntent: updatedProfile.networkingIntent,
+                    networkingIntention: updatedProfile.networkingIntention,
+                    networkingPreferences: updatedProfile.networkingPreferences,
                     personalitySocial: updatedProfile.personalitySocial,
                     privacyTrust: updatedProfile.privacyTrust,
                     createdAt: updatedProfile.createdAt,
@@ -305,7 +313,8 @@ struct ProfileSetupView: View {
         // Use data from profileData (user input from forms)
         let coreIdentity = profileData.coreIdentity ?? profile.coreIdentity
         let professionalBackground = profileData.professionalBackground ?? profile.professionalBackground
-        let networkingIntent = profileData.networkingIntent ?? profile.networkingIntent
+        let networkingIntention = profileData.networkingIntention ?? profile.networkingIntention
+        let networkingPreferences = profileData.networkingPreferences ?? profile.networkingPreferences
         let personalitySocial = profileData.personalitySocial ?? profile.personalitySocial
         let privacyTrust = profileData.privacyTrust ?? profile.privacyTrust
         
@@ -316,7 +325,8 @@ struct ProfileSetupView: View {
             updatedAt: ISO8601DateFormatter().string(from: Date()),
             coreIdentity: coreIdentity,
             professionalBackground: professionalBackground,
-            networkingIntent: networkingIntent,
+            networkingIntention: networkingIntention,
+            networkingPreferences: networkingPreferences,
             personalitySocial: personalitySocial,
             privacyTrust: privacyTrust
         )
@@ -809,170 +819,902 @@ struct ProfessionalBackgroundStep: View {
     }
 }
 
-// MARK: - Step 3: Networking Intent
-struct NetworkingIntentStep: View {
+// MARK: - Step 4: Networking Preferences
+struct NetworkingPreferencesStep: View {
     @Binding var profileData: ProfileCreationData
-    @State private var selectedIntents: Set<NetworkingIntentType> = []
-    @State private var conversationTopics: [String] = []
-    @State private var selectedCollaborationInterests: Set<CollaborationInterest> = []
-    @State private var coffeeChatGoal = ""
     @State private var preferredChatFormat = ChatFormat.virtual
     @State private var preferredChatDuration = ""
-    @StateObject private var selectionHelper = SelectionHelper()
+    @State private var availableTimeslot = AvailableTimeslot.createDefault()
     
     var body: some View {
-        VStack(spacing: 20) {
-            // Networking Intent
-            VStack(alignment: .leading, spacing: 12) {
-                Text("What brings you to BrewNet? *")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
-                    ForEach(NetworkingIntentType.allCases, id: \.self) { intent in
-                        Button(action: {
-                            if selectedIntents.contains(intent) {
-                                selectedIntents.remove(intent)
-                            } else {
-                                selectedIntents.insert(intent)
-                            }
-                        }) {
-                            Text(intent.displayName)
-                                .font(.system(size: 14))
-                                .foregroundColor(selectedIntents.contains(intent) ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(selectedIntents.contains(intent) ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
-                                .cornerRadius(16)
-                        }
-                    }
-                }
-            }
-            
-            // Conversation Topics
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Topics you enjoy discussing")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                
-                Text("Select up to 6 topics (tap to add/remove)")
-                    .font(.system(size: 12))
-                    .foregroundColor(.gray)
-                
-                // All available topics
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
-                    ForEach(getAllTopics(), id: \.self) { topic in
-                        Button(action: {
-                            if selectionHelper.selectedTopics.contains(topic) {
-                                selectionHelper.removeTopic(topic)
-                            } else {
-                                selectionHelper.addTopic(topic)
-                            }
-                        }) {
-                            HStack {
-                                Text(topic)
-                                    .font(.system(size: 14))
-                                    .foregroundColor(selectionHelper.selectedTopics.contains(topic) ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
-                                
-                                if selectionHelper.selectedTopics.contains(topic) {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.white)
-                                }
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(selectionHelper.selectedTopics.contains(topic) ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
-                            .cornerRadius(16)
-                        }
-                        .disabled(selectionHelper.selectedTopics.count >= 6 && !selectionHelper.selectedTopics.contains(topic))
-                        .opacity(selectionHelper.selectedTopics.count >= 6 && !selectionHelper.selectedTopics.contains(topic) ? 0.5 : 1.0)
-                    }
-                }
-                
-                if !selectionHelper.selectedTopics.isEmpty {
-                    Text("Selected: \(selectionHelper.selectedTopics.count)/6")
-                        .font(.system(size: 12))
-                        .foregroundColor(.gray)
-                }
-            }
-            
-            // Coffee Chat Goal
-            VStack(alignment: .leading, spacing: 8) {
-                Text("What's the question on the top of your head?")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                
-                TextField("e.g., How design teams can use AI responsibly", text: $coffeeChatGoal)
-                    .textFieldStyle(CustomTextFieldStyle())
-            }
-            
+        VStack(spacing: 24) {
             // Preferred Chat Format
             VStack(alignment: .leading, spacing: 8) {
                 Text("Preferred Chat Format")
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 
-                Picker("Chat Format", selection: $preferredChatFormat) {
+                HStack(spacing: 8) {
                     ForEach(ChatFormat.allCases, id: \.self) { format in
-                        Text(format.displayName).tag(format)
+                        Button(action: {
+                            preferredChatFormat = format
+                        }) {
+                            Text(format.displayName)
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(preferredChatFormat == format ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(preferredChatFormat == format ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
+                                .cornerRadius(8)
+                        }
                     }
                 }
-                .pickerStyle(SegmentedPickerStyle())
+            }
+            
+            // Available Timeslot Matrix
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Available Timeslots")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                
+                Text("Select your available times for networking")
+                                .font(.system(size: 14))
+                    .foregroundColor(.gray)
+                
+                TimeslotMatrix(availableTimeslot: $availableTimeslot)
             }
         }
         .onAppear {
-            // Load existing data if available
-            if let networkingIntent = profileData.networkingIntent {
-                selectedIntents = Set(networkingIntent.networkingIntent)
-                conversationTopics = networkingIntent.conversationTopics
-                selectedCollaborationInterests = Set(networkingIntent.collaborationInterest)
-                coffeeChatGoal = networkingIntent.coffeeChatGoal ?? ""
-                preferredChatFormat = networkingIntent.preferredChatFormat
-                preferredChatDuration = networkingIntent.preferredChatDuration ?? ""
-            }
+            loadExistingData()
         }
-        .onChange(of: selectedIntents) { _ in updateProfileData() }
-        .onChange(of: conversationTopics) { _ in updateProfileData() }
-        .onChange(of: selectedCollaborationInterests) { _ in updateProfileData() }
-        .onChange(of: coffeeChatGoal) { _ in updateProfileData() }
         .onChange(of: preferredChatFormat) { _ in updateProfileData() }
         .onChange(of: preferredChatDuration) { _ in updateProfileData() }
-        .onChange(of: selectionHelper.selectedTopics) { _ in updateProfileData() }
+        .onChange(of: availableTimeslot) { _ in updateProfileData() }
     }
     
-    private func getAllTopics() -> [String] {
-        var allTopics: [String] = []
-        for industry in IndustryOption.allCases {
-            allTopics.append(contentsOf: DiscussionTopics.topicsForIndustry(industry))
+    private func loadExistingData() {
+        if let networkingPreferences = profileData.networkingPreferences {
+            preferredChatFormat = networkingPreferences.preferredChatFormat
+            preferredChatDuration = networkingPreferences.preferredChatDuration ?? ""
+            availableTimeslot = networkingPreferences.availableTimeslot
         }
-        return Array(Set(allTopics)).sorted()
     }
     
     private func updateProfileData() {
-        let networkingIntent = NetworkingIntent(
-            networkingIntent: Array(selectedIntents),
-            conversationTopics: Array(selectionHelper.selectedTopics),
-            collaborationInterest: Array(selectedCollaborationInterests),
-            coffeeChatGoal: coffeeChatGoal.isEmpty ? nil : coffeeChatGoal,
+        let networkingPreferences = NetworkingPreferences(
             preferredChatFormat: preferredChatFormat,
-            availableTimeslot: AvailableTimeslot.createDefault(),
-            preferredChatDuration: preferredChatDuration.isEmpty ? nil : preferredChatDuration,
-            introPromptAnswers: []
+            availableTimeslot: availableTimeslot,
+            preferredChatDuration: preferredChatDuration.isEmpty ? nil : preferredChatDuration
         )
-        profileData.networkingIntent = networkingIntent
+        profileData.networkingPreferences = networkingPreferences
     }
 }
 
-// MARK: - Step 4: Personality & Social
+// MARK: - Timeslot Matrix
+struct TimeslotMatrix: View {
+    @Binding var availableTimeslot: AvailableTimeslot
+    
+    private let days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
+    private let timeSlots = ["Morning", "Noon", "Afternoon", "Evening", "Night"]
+    
+    var body: some View {
+        VStack(spacing: 6) {
+            // Header row with days
+            HStack(spacing: 2) {
+                Text("")
+                    .frame(width: 60)
+                
+                ForEach(days, id: \.self) { day in
+                    Text(day)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            
+            // Time slot rows
+            ForEach(Array(timeSlots.enumerated()), id: \.offset) { timeIndex, timeSlot in
+                HStack(spacing: 2) {
+                    Text(timeSlot)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .frame(width: 60, alignment: .leading)
+                    
+                    ForEach(Array(days.enumerated()), id: \.offset) { dayIndex, _ in
+                        TimeslotCell(
+                            isSelected: getTimeslotValue(dayIndex: dayIndex, timeIndex: timeIndex),
+                            onTap: {
+                                toggleTimeslot(dayIndex: dayIndex, timeIndex: timeIndex)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.gray.opacity(0.05))
+        .cornerRadius(12)
+    }
+    
+    private func getTimeslotValue(dayIndex: Int, timeIndex: Int) -> Bool {
+        let dayTimeslots = getDayTimeslots(dayIndex: dayIndex)
+        switch timeIndex {
+        case 0: return dayTimeslots.morning
+        case 1: return dayTimeslots.noon
+        case 2: return dayTimeslots.afternoon
+        case 3: return dayTimeslots.evening
+        case 4: return dayTimeslots.night
+        default: return false
+        }
+    }
+    
+    private func getDayTimeslots(dayIndex: Int) -> DayTimeslots {
+        switch dayIndex {
+        case 0: return availableTimeslot.sunday
+        case 1: return availableTimeslot.monday
+        case 2: return availableTimeslot.tuesday
+        case 3: return availableTimeslot.wednesday
+        case 4: return availableTimeslot.thursday
+        case 5: return availableTimeslot.friday
+        case 6: return availableTimeslot.saturday
+        default: return DayTimeslots(morning: false, noon: false, afternoon: false, evening: false, night: false)
+        }
+    }
+    
+    private func toggleTimeslot(dayIndex: Int, timeIndex: Int) {
+        let currentValue = getTimeslotValue(dayIndex: dayIndex, timeIndex: timeIndex)
+        let newValue = !currentValue
+        
+        let newTimeslot = createUpdatedTimeslot(dayIndex: dayIndex, timeIndex: timeIndex, newValue: newValue)
+        availableTimeslot = newTimeslot
+    }
+    
+    private func createUpdatedTimeslot(dayIndex: Int, timeIndex: Int, newValue: Bool) -> AvailableTimeslot {
+        switch dayIndex {
+        case 0: return updateSundayTimeslot(timeIndex: timeIndex, newValue: newValue)
+        case 1: return updateMondayTimeslot(timeIndex: timeIndex, newValue: newValue)
+        case 2: return updateTuesdayTimeslot(timeIndex: timeIndex, newValue: newValue)
+        case 3: return updateWednesdayTimeslot(timeIndex: timeIndex, newValue: newValue)
+        case 4: return updateThursdayTimeslot(timeIndex: timeIndex, newValue: newValue)
+        case 5: return updateFridayTimeslot(timeIndex: timeIndex, newValue: newValue)
+        case 6: return updateSaturdayTimeslot(timeIndex: timeIndex, newValue: newValue)
+        default: return availableTimeslot
+        }
+    }
+    
+    private func updateSundayTimeslot(timeIndex: Int, newValue: Bool) -> AvailableTimeslot {
+        let newSunday = DayTimeslots(
+            morning: timeIndex == 0 ? newValue : availableTimeslot.sunday.morning,
+            noon: timeIndex == 1 ? newValue : availableTimeslot.sunday.noon,
+            afternoon: timeIndex == 2 ? newValue : availableTimeslot.sunday.afternoon,
+            evening: timeIndex == 3 ? newValue : availableTimeslot.sunday.evening,
+            night: timeIndex == 4 ? newValue : availableTimeslot.sunday.night
+        )
+        return AvailableTimeslot(
+            sunday: newSunday,
+            monday: availableTimeslot.monday,
+            tuesday: availableTimeslot.tuesday,
+            wednesday: availableTimeslot.wednesday,
+            thursday: availableTimeslot.thursday,
+            friday: availableTimeslot.friday,
+            saturday: availableTimeslot.saturday
+        )
+    }
+    
+    private func updateMondayTimeslot(timeIndex: Int, newValue: Bool) -> AvailableTimeslot {
+        let newMonday = DayTimeslots(
+            morning: timeIndex == 0 ? newValue : availableTimeslot.monday.morning,
+            noon: timeIndex == 1 ? newValue : availableTimeslot.monday.noon,
+            afternoon: timeIndex == 2 ? newValue : availableTimeslot.monday.afternoon,
+            evening: timeIndex == 3 ? newValue : availableTimeslot.monday.evening,
+            night: timeIndex == 4 ? newValue : availableTimeslot.monday.night
+        )
+        return AvailableTimeslot(
+            sunday: availableTimeslot.sunday,
+            monday: newMonday,
+            tuesday: availableTimeslot.tuesday,
+            wednesday: availableTimeslot.wednesday,
+            thursday: availableTimeslot.thursday,
+            friday: availableTimeslot.friday,
+            saturday: availableTimeslot.saturday
+        )
+    }
+    
+    private func updateTuesdayTimeslot(timeIndex: Int, newValue: Bool) -> AvailableTimeslot {
+        let newTuesday = DayTimeslots(
+            morning: timeIndex == 0 ? newValue : availableTimeslot.tuesday.morning,
+            noon: timeIndex == 1 ? newValue : availableTimeslot.tuesday.noon,
+            afternoon: timeIndex == 2 ? newValue : availableTimeslot.tuesday.afternoon,
+            evening: timeIndex == 3 ? newValue : availableTimeslot.tuesday.evening,
+            night: timeIndex == 4 ? newValue : availableTimeslot.tuesday.night
+        )
+        return AvailableTimeslot(
+            sunday: availableTimeslot.sunday,
+            monday: availableTimeslot.monday,
+            tuesday: newTuesday,
+            wednesday: availableTimeslot.wednesday,
+            thursday: availableTimeslot.thursday,
+            friday: availableTimeslot.friday,
+            saturday: availableTimeslot.saturday
+        )
+    }
+    
+    private func updateWednesdayTimeslot(timeIndex: Int, newValue: Bool) -> AvailableTimeslot {
+        let newWednesday = DayTimeslots(
+            morning: timeIndex == 0 ? newValue : availableTimeslot.wednesday.morning,
+            noon: timeIndex == 1 ? newValue : availableTimeslot.wednesday.noon,
+            afternoon: timeIndex == 2 ? newValue : availableTimeslot.wednesday.afternoon,
+            evening: timeIndex == 3 ? newValue : availableTimeslot.wednesday.evening,
+            night: timeIndex == 4 ? newValue : availableTimeslot.wednesday.night
+        )
+        return AvailableTimeslot(
+            sunday: availableTimeslot.sunday,
+            monday: availableTimeslot.monday,
+            tuesday: availableTimeslot.tuesday,
+            wednesday: newWednesday,
+            thursday: availableTimeslot.thursday,
+            friday: availableTimeslot.friday,
+            saturday: availableTimeslot.saturday
+        )
+    }
+    
+    private func updateThursdayTimeslot(timeIndex: Int, newValue: Bool) -> AvailableTimeslot {
+        let newThursday = DayTimeslots(
+            morning: timeIndex == 0 ? newValue : availableTimeslot.thursday.morning,
+            noon: timeIndex == 1 ? newValue : availableTimeslot.thursday.noon,
+            afternoon: timeIndex == 2 ? newValue : availableTimeslot.thursday.afternoon,
+            evening: timeIndex == 3 ? newValue : availableTimeslot.thursday.evening,
+            night: timeIndex == 4 ? newValue : availableTimeslot.thursday.night
+        )
+        return AvailableTimeslot(
+            sunday: availableTimeslot.sunday,
+            monday: availableTimeslot.monday,
+            tuesday: availableTimeslot.tuesday,
+            wednesday: availableTimeslot.wednesday,
+            thursday: newThursday,
+            friday: availableTimeslot.friday,
+            saturday: availableTimeslot.saturday
+        )
+    }
+    
+    private func updateFridayTimeslot(timeIndex: Int, newValue: Bool) -> AvailableTimeslot {
+        let newFriday = DayTimeslots(
+            morning: timeIndex == 0 ? newValue : availableTimeslot.friday.morning,
+            noon: timeIndex == 1 ? newValue : availableTimeslot.friday.noon,
+            afternoon: timeIndex == 2 ? newValue : availableTimeslot.friday.afternoon,
+            evening: timeIndex == 3 ? newValue : availableTimeslot.friday.evening,
+            night: timeIndex == 4 ? newValue : availableTimeslot.friday.night
+        )
+        return AvailableTimeslot(
+            sunday: availableTimeslot.sunday,
+            monday: availableTimeslot.monday,
+            tuesday: availableTimeslot.tuesday,
+            wednesday: availableTimeslot.wednesday,
+            thursday: availableTimeslot.thursday,
+            friday: newFriday,
+            saturday: availableTimeslot.saturday
+        )
+    }
+    
+    private func updateSaturdayTimeslot(timeIndex: Int, newValue: Bool) -> AvailableTimeslot {
+        let newSaturday = DayTimeslots(
+            morning: timeIndex == 0 ? newValue : availableTimeslot.saturday.morning,
+            noon: timeIndex == 1 ? newValue : availableTimeslot.saturday.noon,
+            afternoon: timeIndex == 2 ? newValue : availableTimeslot.saturday.afternoon,
+            evening: timeIndex == 3 ? newValue : availableTimeslot.saturday.evening,
+            night: timeIndex == 4 ? newValue : availableTimeslot.saturday.night
+        )
+        return AvailableTimeslot(
+            sunday: availableTimeslot.sunday,
+            monday: availableTimeslot.monday,
+            tuesday: availableTimeslot.tuesday,
+            wednesday: availableTimeslot.wednesday,
+            thursday: availableTimeslot.thursday,
+            friday: availableTimeslot.friday,
+            saturday: newSaturday
+        )
+    }
+}
+
+// MARK: - Timeslot Cell
+struct TimeslotCell: View {
+    let isSelected: Bool
+    let onTap: () -> Void
+    
+    var body: some View {
+        Button(action: onTap) {
+            Rectangle()
+                .fill(isSelected ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
+                .frame(width: 30, height: 30)
+                .cornerRadius(4)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                )
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Step 3: Networking Intention
+struct NetworkingIntentionStep: View {
+    @Binding var profileData: ProfileCreationData
+    @State private var selectedIntention: NetworkingIntentionType = .learnGrow
+    @State private var selectedSubIntentions: Set<SubIntentionType> = []
+    @State private var careerDirectionData: CareerDirectionData? = nil
+    @State private var skillDevelopmentData: SkillDevelopmentData? = nil
+    @State private var industryTransitionData: IndustryTransitionData? = nil
+    
+    // Career Direction Data
+    @State private var marketingFunctions: [String: [String]] = [:]
+    @State private var productTechFunctions: [String: [String]] = [:]
+    @State private var dataAnalyticsFunctions: [String: [String]] = [:]
+    @State private var financeConsultingFunctions: [String: [String]] = [:]
+    @State private var operationsHRFunctions: [String: [String]] = [:]
+    @State private var creativeMediaFunctions: [String: [String]] = [:]
+    
+    // Skill Development Data
+    @State private var skills: [SkillSelection] = []
+    @State private var newSkill = ""
+    
+    // Industry Transition Data
+    @State private var industries: [IndustrySelection] = []
+    
+    var body: some View {
+        VStack(spacing: 24) {
+            // Main Intention Selection
+            VStack(alignment: .leading, spacing: 16) {
+                Text("What's your main networking intention? *")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 12) {
+                    ForEach(NetworkingIntentionType.allCases, id: \.self) { intention in
+                        Button(action: {
+                            selectedIntention = intention
+                            selectedSubIntentions.removeAll()
+                        }) {
+                            VStack(spacing: 8) {
+                                Text(getIntentionDescription(intention))
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(selectedIntention == intention ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    .multilineTextAlignment(.center)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(selectedIntention == intention ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
+                            .cornerRadius(12)
+                        }
+                    }
+                }
+            }
+            
+            // Sub-intention Selection
+            if !selectedIntention.subIntentions.isEmpty {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Select your sub-intentions:")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 1), spacing: 8) {
+                        ForEach(selectedIntention.subIntentions, id: \.self) { subIntention in
+                            Button(action: {
+                                if selectedSubIntentions.contains(subIntention) {
+                                    selectedSubIntentions.remove(subIntention)
+                                } else {
+                                    selectedSubIntentions.insert(subIntention)
+                                }
+                            }) {
+                                HStack {
+                                    Text(subIntention.displayName)
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(selectedSubIntentions.contains(subIntention) ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    
+                                    Spacer()
+                                    
+                                    if selectedSubIntentions.contains(subIntention) {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.white)
+                                    }
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                                .background(selectedSubIntentions.contains(subIntention) ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
+                                .cornerRadius(8)
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Detailed Forms based on selected sub-intentions
+            if !selectedSubIntentions.isEmpty {
+                VStack(spacing: 16) {
+                    ForEach(Array(selectedSubIntentions), id: \.self) { subIntention in
+                        switch subIntention {
+                        case .careerDirection:
+                            CareerDirectionForm(functions: $marketingFunctions, productTech: $productTechFunctions, dataAnalytics: $dataAnalyticsFunctions, financeConsulting: $financeConsultingFunctions, operationsHR: $operationsHRFunctions, creativeMedia: $creativeMediaFunctions)
+                        case .skillDevelopment:
+                            SkillDevelopmentForm(skills: $skills, newSkill: $newSkill)
+                        case .industryTransition:
+                            IndustryTransitionForm(industries: $industries)
+                        default:
+                            EmptyView()
+                        }
+                    }
+                }
+            }
+        }
+        .onAppear {
+            loadExistingData()
+        }
+        .onChange(of: selectedIntention) { _ in updateProfileData() }
+        .onChange(of: selectedSubIntentions) { _ in updateProfileData() }
+        .onChange(of: careerDirectionData) { _ in updateProfileData() }
+        .onChange(of: skillDevelopmentData) { _ in updateProfileData() }
+        .onChange(of: industryTransitionData) { _ in updateProfileData() }
+    }
+    
+    private func getIntentionDescription(_ intention: NetworkingIntentionType) -> String {
+        switch intention {
+        case .learnGrow:
+            return "🎓 Learn & Grow"
+        case .connectShare:
+            return "🤝 Connect & Share"
+        case .buildCollaborate:
+            return "🚀 Build & Collaborate"
+        case .unwindChat:
+            return "⛱️ Unwind & Chat"
+        }
+    }
+    
+    private func loadExistingData() {
+        if let networkingIntention = profileData.networkingIntention {
+            selectedIntention = networkingIntention.selectedIntention
+            selectedSubIntentions = Set(networkingIntention.selectedSubIntentions)
+            careerDirectionData = networkingIntention.careerDirection
+            skillDevelopmentData = networkingIntention.skillDevelopment
+            industryTransitionData = networkingIntention.industryTransition
+        }
+    }
+    
+    private func updateProfileData() {
+        let networkingIntention = NetworkingIntention(
+            selectedIntention: selectedIntention,
+            selectedSubIntentions: Array(selectedSubIntentions),
+            careerDirection: careerDirectionData,
+            skillDevelopment: skillDevelopmentData,
+            industryTransition: industryTransitionData
+        )
+        profileData.networkingIntention = networkingIntention
+    }
+}
+
+// MARK: - Career Direction Form
+struct CareerDirectionForm: View {
+    @Binding var functions: [String: [String]]
+    @Binding var productTech: [String: [String]]
+    @Binding var dataAnalytics: [String: [String]]
+    @Binding var financeConsulting: [String: [String]]
+    @Binding var operationsHR: [String: [String]]
+    @Binding var creativeMedia: [String: [String]]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Select the functions or roles where you'd like to receive or offer career direction.")
+                .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.gray)
+            
+            // Marketing & Branding
+            FunctionSection(
+                title: "Marketing & Branding",
+                functions: ["Brand Marketing", "Digital Marketing", "Social Media Operations", "Content Strategy"],
+                selectedFunctions: $functions
+            )
+            
+            // Product & Tech
+            FunctionSection(
+                title: "Product & Tech",
+                functions: ["Product Management", "Product Operations", "Front-end Development", "UX / UI Design", "Product Data Analytics", "Backend Development"],
+                selectedFunctions: $productTech
+            )
+            
+            // Data & Analytics
+            FunctionSection(
+                title: "Data & Analytics",
+                functions: ["Data Analyst", "Growth Analyst", "Marketing Data", "Business Intelligence", "Machine Learning Ops", "Research Analyst"],
+                selectedFunctions: $dataAnalytics
+            )
+            
+            // Finance & Consulting
+            FunctionSection(
+                title: "Finance & Consulting",
+                functions: ["Investment Banking", "Equity Research", "VC / PE Analyst", "Strategy Consulting", "Corporate Finance", "Financial Planning"],
+                selectedFunctions: $financeConsulting
+            )
+            
+            // Operations & HR
+            FunctionSection(
+                title: "Operations & HR",
+                functions: ["Project Management", "Business Operations", "Supply Chain", "HR / Talent Acquisition", "Training & L&D", "Organizational Development"],
+                selectedFunctions: $operationsHR
+            )
+            
+            // Creative & Media
+            FunctionSection(
+                title: "Creative & Media",
+                functions: ["Copywriting", "PR & Communications", "Art Direction", "Video Editing / Motion Design", "Creative Strategy", "Advertising Production"],
+                selectedFunctions: $creativeMedia
+            )
+        }
+    }
+}
+
+// MARK: - Function Section
+struct FunctionSection: View {
+    let title: String
+    let functions: [String]
+    @Binding var selectedFunctions: [String: [String]]
+    
+    var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
+                ForEach(functions, id: \.self) { function in
+                    FunctionRow(
+                        functionName: function,
+                        learnIn: Binding(
+                            get: { selectedFunctions[function]?.contains("learn") ?? false },
+                            set: { isSelected in
+                                if isSelected {
+                                    if selectedFunctions[function] == nil {
+                                        selectedFunctions[function] = ["learn"]
+                                    } else if !selectedFunctions[function]!.contains("learn") {
+                                        selectedFunctions[function]?.append("learn")
+                                    }
+                                } else {
+                                    selectedFunctions[function]?.removeAll { $0 == "learn" }
+                                    if selectedFunctions[function]?.isEmpty == true {
+                                        selectedFunctions[function] = nil
+                                    }
+                                }
+                            }
+                        ),
+                        guideIn: Binding(
+                            get: { selectedFunctions[function]?.contains("guide") ?? false },
+                            set: { isSelected in
+                                if isSelected {
+                                    if selectedFunctions[function] == nil {
+                                        selectedFunctions[function] = ["guide"]
+                                    } else if !selectedFunctions[function]!.contains("guide") {
+                                        selectedFunctions[function]?.append("guide")
+                                    }
+                                } else {
+                                    selectedFunctions[function]?.removeAll { $0 == "guide" }
+                                    if selectedFunctions[function]?.isEmpty == true {
+                                        selectedFunctions[function] = nil
+                                    }
+                                }
+                            }
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Function Row
+struct FunctionRow: View {
+    let functionName: String
+    @Binding var learnIn: Bool
+    @Binding var guideIn: Bool
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            Text(functionName)
+                .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                .multilineTextAlignment(.center)
+            
+            HStack(spacing: 8) {
+                VStack(spacing: 4) {
+                    Text("Learn in")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.gray)
+                    
+                    Button(action: {
+                        learnIn.toggle()
+                    }) {
+                        Image(systemName: learnIn ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 16))
+                            .foregroundColor(learnIn ? Color(red: 0.6, green: 0.4, blue: 0.2) : .gray)
+                    }
+                }
+                
+                VStack(spacing: 4) {
+                    Text("Guide in")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.gray)
+                    
+                    Button(action: {
+                        guideIn.toggle()
+                    }) {
+                        Image(systemName: guideIn ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 16))
+                            .foregroundColor(guideIn ? Color(red: 0.6, green: 0.4, blue: 0.2) : .gray)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 12)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(8)
+    }
+}
+
+// MARK: - Skill Development Form
+struct SkillDevelopmentForm: View {
+    @Binding var skills: [SkillSelection]
+    @Binding var newSkill: String
+    
+    private let commonSkills = ["Product Strategy", "Presentation Skills", "Data Analytics", "AIGC", "Project Management", "Leadership", "Communication", "Problem Solving"]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("List the skills you'd like to learn or share.")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.gray)
+            
+            // Add new skill
+            HStack {
+                TextField("Add a skill", text: $newSkill)
+                    .textFieldStyle(CustomTextFieldStyle())
+                
+                Button("Add") {
+                    if !newSkill.isEmpty && !skills.contains(where: { $0.skillName == newSkill }) {
+                        skills.append(SkillSelection(skillName: newSkill, learnIn: false, guideIn: false))
+                        newSkill = ""
+                    }
+                }
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            }
+            
+            // Common skills
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
+                ForEach(commonSkills, id: \.self) { skill in
+                    if !skills.contains(where: { $0.skillName == skill }) {
+                        Button(action: {
+                            skills.append(SkillSelection(skillName: skill, learnIn: false, guideIn: false))
+                        }) {
+                            Text("+ \(skill)")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                                .cornerRadius(16)
+                        }
+                    }
+                }
+            }
+            
+            // Selected skills
+            if !skills.isEmpty {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 1), spacing: 8) {
+                    ForEach(skills.indices, id: \.self) { index in
+                        SkillRow(
+                            skill: $skills[index],
+                            onDelete: {
+                                skills.remove(at: index)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Skill Row
+struct SkillRow: View {
+    @Binding var skill: SkillSelection
+    let onDelete: () -> Void
+    
+    var body: some View {
+        HStack {
+            Text(skill.skillName)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            
+            Spacer()
+            
+            HStack(spacing: 16) {
+                VStack(spacing: 4) {
+                    Text("Learn in")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.gray)
+                    
+                    Button(action: {
+                        skill.learnIn.toggle()
+                    }) {
+                        Image(systemName: skill.learnIn ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 16))
+                            .foregroundColor(skill.learnIn ? Color(red: 0.6, green: 0.4, blue: 0.2) : .gray)
+                    }
+                }
+                
+                VStack(spacing: 4) {
+                    Text("Guide in")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.gray)
+                    
+                    Button(action: {
+                        skill.guideIn.toggle()
+                    }) {
+                        Image(systemName: skill.guideIn ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 16))
+                            .foregroundColor(skill.guideIn ? Color(red: 0.6, green: 0.4, blue: 0.2) : .gray)
+                    }
+                }
+                
+                Button(action: onDelete) {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.red)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(8)
+    }
+}
+
+// MARK: - Industry Transition Form
+struct IndustryTransitionForm: View {
+    @Binding var industries: [IndustrySelection]
+    
+    private let industryOptions = [
+        "Technology (Software, Data, AI, IT)",
+        "Finance (Banking, Investment, FinTech)",
+        "Marketing & Media (Advertising, PR, Content)",
+        "Consulting & Strategy",
+        "Education & Research",
+        "Healthcare & Biotech",
+        "Manufacturing & Engineering",
+        "Internet & E-Commerce",
+        "Government & Public Sector",
+        "Arts, Design & Entertainment"
+    ]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Select the industries you'd like to transition into/ learn about or offer transition advice/ experience for.")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.gray)
+            
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 1), spacing: 8) {
+                ForEach(industryOptions, id: \.self) { industry in
+                    IndustryRow(
+                        industryName: industry,
+                        learnIn: Binding(
+                            get: { industries.first(where: { $0.industryName == industry })?.learnIn ?? false },
+                            set: { isSelected in
+                                if let index = industries.firstIndex(where: { $0.industryName == industry }) {
+                                    industries[index].learnIn = isSelected
+                                } else {
+                                    industries.append(IndustrySelection(industryName: industry, learnIn: isSelected, guideIn: false))
+                                }
+                            }
+                        ),
+                        guideIn: Binding(
+                            get: { industries.first(where: { $0.industryName == industry })?.guideIn ?? false },
+                            set: { isSelected in
+                                if let index = industries.firstIndex(where: { $0.industryName == industry }) {
+                                    industries[index].guideIn = isSelected
+                                } else {
+                                    industries.append(IndustrySelection(industryName: industry, learnIn: false, guideIn: isSelected))
+                                }
+                            }
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Industry Row
+struct IndustryRow: View {
+    let industryName: String
+    @Binding var learnIn: Bool
+    @Binding var guideIn: Bool
+    
+    var body: some View {
+        HStack {
+            Text(industryName)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            
+            Spacer()
+            
+            HStack(spacing: 16) {
+                VStack(spacing: 4) {
+                    Text("Learn in")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.gray)
+                    
+                    Button(action: {
+                        learnIn.toggle()
+                    }) {
+                        Image(systemName: learnIn ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 16))
+                            .foregroundColor(learnIn ? Color(red: 0.6, green: 0.4, blue: 0.2) : .gray)
+                    }
+                }
+                
+                VStack(spacing: 4) {
+                    Text("Guide in")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.gray)
+                    
+                    Button(action: {
+                        guideIn.toggle()
+                    }) {
+                        Image(systemName: guideIn ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 16))
+                            .foregroundColor(guideIn ? Color(red: 0.6, green: 0.4, blue: 0.2) : .gray)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(8)
+    }
+}
+
+// MARK: - Step 5: Personality & Social
 struct PersonalitySocialStep: View {
     @Binding var profileData: ProfileCreationData
     @State private var preferredMeetingVibe = MeetingVibe.casual
     @State private var communicationStyle = CommunicationStyle.collaborative
+    @State private var selfIntroduction = ""
     @StateObject private var selectionHelper = SelectionHelper()
     
     var body: some View {
         VStack(spacing: 20) {
+            // Self Introduction
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Self Introduction")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                
+                Text("Tell us about yourself professionally (e.g., Senior Software Engineer @ Meta, familiar with Redis, K8s, etc.)")
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray)
+                
+                TextEditor(text: $selfIntroduction)
+                    .frame(minHeight: 100)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.gray.opacity(0.1))
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
+            }
+            
             // Values Tags
             VStack(alignment: .leading, spacing: 8) {
                 Text("Values that describe you *")
@@ -1086,6 +1828,9 @@ struct PersonalitySocialStep: View {
                 .padding(.vertical, 12)
                 .background(Color.gray.opacity(0.1))
                 .cornerRadius(8)
+                .onTapGesture {
+                    // Prevent any unwanted scroll behavior when picker is tapped
+                }
             }
             
             // Communication Style
@@ -1105,6 +1850,9 @@ struct PersonalitySocialStep: View {
                 .padding(.vertical, 12)
                 .background(Color.gray.opacity(0.1))
                 .cornerRadius(8)
+                .onTapGesture {
+                    // Prevent any unwanted scroll behavior when picker is tapped
+                }
             }
         }
         .onAppear {
@@ -1114,12 +1862,14 @@ struct PersonalitySocialStep: View {
                 selectionHelper.selectedHobbies = Set(personalitySocial.hobbies)
                 preferredMeetingVibe = personalitySocial.preferredMeetingVibe
                 communicationStyle = personalitySocial.communicationStyle
+                selfIntroduction = personalitySocial.selfIntroduction ?? ""
             }
         }
         .onChange(of: selectionHelper.selectedValues) { _ in updateProfileData() }
         .onChange(of: selectionHelper.selectedHobbies) { _ in updateProfileData() }
         .onChange(of: preferredMeetingVibe) { _ in updateProfileData() }
         .onChange(of: communicationStyle) { _ in updateProfileData() }
+        .onChange(of: selfIntroduction) { _ in updateProfileData() }
     }
     
     private func updateProfileData() {
@@ -1128,13 +1878,14 @@ struct PersonalitySocialStep: View {
             valuesTags: Array(selectionHelper.selectedValues),
             hobbies: Array(selectionHelper.selectedHobbies),
             preferredMeetingVibe: preferredMeetingVibe,
-            communicationStyle: communicationStyle
+            communicationStyle: communicationStyle,
+            selfIntroduction: selfIntroduction.isEmpty ? nil : selfIntroduction
         )
         profileData.personalitySocial = personalitySocial
     }
 }
 
-// MARK: - Step 5: Privacy & Trust
+// MARK: - Step 6: Privacy & Trust
 struct PrivacyTrustStep: View {
     @Binding var profileData: ProfileCreationData
     @State private var companyVisibility = VisibilityLevel.public_
@@ -1258,6 +2009,9 @@ struct PrivacyToggleRow: View {
             }
             .pickerStyle(MenuPickerStyle())
             .frame(width: 120)
+            .onTapGesture {
+                // Prevent any unwanted scroll behavior when picker is tapped
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

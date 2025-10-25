@@ -26,12 +26,20 @@ struct ProfileDisplayView: View {
                     ProfessionalBackgroundDisplayView(background: profile.professionalBackground)
                 }
                 
-                // Networking Intent Section
+                // Networking Intention Section
                 ProfileSectionView(
-                    title: "Networking Goals",
+                    title: "Networking Intention",
                     icon: "network"
                 ) {
-                    NetworkingIntentDisplayView(intent: profile.networkingIntent)
+                    NetworkingIntentionDisplayView(intention: profile.networkingIntention)
+                }
+                
+                // Networking Preferences Section
+                ProfileSectionView(
+                    title: "Networking Preferences",
+                    icon: "clock.fill"
+                ) {
+                    NetworkingPreferencesDisplayView(preferences: profile.networkingPreferences)
                 }
                 
                 // Personality & Social Section
@@ -233,42 +241,235 @@ struct ProfessionalBackgroundDisplayView: View {
     }
 }
 
-// MARK: - Networking Intent Display
-struct NetworkingIntentDisplayView: View {
-    let intent: NetworkingIntent
+// MARK: - Networking Intention Display
+struct NetworkingIntentionDisplayView: View {
+    let intention: NetworkingIntention
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if !intent.networkingIntent.isEmpty {
-                TagsDisplayView(
-                    title: "Networking Goals",
-                    tags: intent.networkingIntent.map { $0.displayName }
-                )
+            InfoRow(label: "Main Intention", value: intention.selectedIntention.displayName)
+            
+            if let careerDirection = intention.careerDirection {
+                CareerDirectionDisplayView(data: careerDirection)
             }
             
-            if !intent.conversationTopics.isEmpty {
-                TagsDisplayView(
-                    title: "Conversation Topics",
-                    tags: intent.conversationTopics
-                )
+            if let skillDevelopment = intention.skillDevelopment {
+                SkillDevelopmentDisplayView(data: skillDevelopment)
             }
             
-            if !intent.collaborationInterest.isEmpty {
-                TagsDisplayView(
-                    title: "Collaboration Interests",
-                    tags: intent.collaborationInterest.map { $0.displayName }
-                )
+            if let industryTransition = intention.industryTransition {
+                IndustryTransitionDisplayView(data: industryTransition)
             }
+        }
+    }
+}
+
+// MARK: - Networking Preferences Display
+struct NetworkingPreferencesDisplayView: View {
+    let preferences: NetworkingPreferences
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            InfoRow(label: "Preferred Format", value: preferences.preferredChatFormat.displayName)
             
-            if let goal = intent.coffeeChatGoal {
-                InfoRow(label: "Coffee Chat Goal", value: goal)
-            }
-            
-            InfoRow(label: "Preferred Format", value: intent.preferredChatFormat.displayName)
-            
-            if let duration = intent.preferredChatDuration {
+            if let duration = preferences.preferredChatDuration {
                 InfoRow(label: "Preferred Duration", value: duration)
             }
+            
+            AvailableTimeslotDisplayView(timeslot: preferences.availableTimeslot)
+        }
+    }
+}
+
+// MARK: - Career Direction Display
+struct CareerDirectionDisplayView: View {
+    let data: CareerDirectionData
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Career Direction")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.gray)
+            
+            ForEach(data.functions, id: \.functionName) { function in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(function.functionName)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.primary)
+                    
+                    if !function.learnIn.isEmpty {
+                        Text("Learn in: \(function.learnIn.joined(separator: ", "))")
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    if !function.guideIn.isEmpty {
+                        Text("Guide in: \(function.guideIn.joined(separator: ", "))")
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Skill Development Display
+struct SkillDevelopmentDisplayView: View {
+    let data: SkillDevelopmentData
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Skills")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.gray)
+            
+            ForEach(data.skills, id: \.skillName) { skill in
+                HStack {
+                    Text(skill.skillName)
+                        .font(.system(size: 16))
+                        .foregroundColor(.primary)
+                    
+                    Spacer()
+                    
+                    if skill.learnIn {
+                        Text("Learn")
+                            .font(.system(size: 12))
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.1))
+                            .cornerRadius(4)
+                    }
+                    
+                    if skill.guideIn {
+                        Text("Guide")
+                            .font(.system(size: 12))
+                            .foregroundColor(.green)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(Color.green.opacity(0.1))
+                            .cornerRadius(4)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Industry Transition Display
+struct IndustryTransitionDisplayView: View {
+    let data: IndustryTransitionData
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Industries")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.gray)
+            
+            ForEach(data.industries, id: \.industryName) { industry in
+                HStack {
+                    Text(industry.industryName)
+                        .font(.system(size: 16))
+                        .foregroundColor(.primary)
+                    
+                    Spacer()
+                    
+                    if industry.learnIn {
+                        Text("Learn")
+                            .font(.system(size: 12))
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.1))
+                            .cornerRadius(4)
+                    }
+                    
+                    if industry.guideIn {
+                        Text("Guide")
+                            .font(.system(size: 12))
+                            .foregroundColor(.green)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(Color.green.opacity(0.1))
+                            .cornerRadius(4)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Available Timeslot Display
+struct AvailableTimeslotDisplayView: View {
+    let timeslot: AvailableTimeslot
+    
+    private let days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
+    private let timeSlots = ["Morning", "Noon", "Afternoon", "Evening", "Night"]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Available Times")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.gray)
+            
+            VStack(spacing: 4) {
+                // Header row
+                HStack(spacing: 0) {
+                    Text("")
+                        .frame(width: 60)
+                    
+                    ForEach(days, id: \.self) { day in
+                        Text(day)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.gray)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                
+                // Time slot rows
+                ForEach(Array(timeSlots.enumerated()), id: \.offset) { timeIndex, timeSlot in
+                    HStack(spacing: 0) {
+                        Text(timeSlot)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.gray)
+                            .frame(width: 60, alignment: .leading)
+                        
+                        ForEach(Array(days.enumerated()), id: \.offset) { dayIndex, _ in
+                            Rectangle()
+                                .fill(getTimeslotValue(dayIndex: dayIndex, timeIndex: timeIndex) ? Color.blue : Color.gray.opacity(0.1))
+                                .frame(width: 20, height: 20)
+                                .cornerRadius(3)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private func getTimeslotValue(dayIndex: Int, timeIndex: Int) -> Bool {
+        let dayTimeslots = getDayTimeslots(dayIndex: dayIndex)
+        switch timeIndex {
+        case 0: return dayTimeslots.morning
+        case 1: return dayTimeslots.noon
+        case 2: return dayTimeslots.afternoon
+        case 3: return dayTimeslots.evening
+        case 4: return dayTimeslots.night
+        default: return false
+        }
+    }
+    
+    private func getDayTimeslots(dayIndex: Int) -> DayTimeslots {
+        switch dayIndex {
+        case 0: return timeslot.sunday
+        case 1: return timeslot.monday
+        case 2: return timeslot.tuesday
+        case 3: return timeslot.wednesday
+        case 4: return timeslot.thursday
+        case 5: return timeslot.friday
+        case 6: return timeslot.saturday
+        default: return DayTimeslots(morning: false, noon: false, afternoon: false, evening: false, night: false)
         }
     }
 }
