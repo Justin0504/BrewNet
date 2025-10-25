@@ -273,7 +273,24 @@ struct ProfileSetupView: View {
                 await MainActor.run {
                     isLoading = false
                     let errorMessage = error.localizedDescription
-                    if errorMessage.contains("profiles") && errorMessage.contains("table") {
+                    print("❌ Profile creation error: \(errorMessage)")
+                    
+                    if errorMessage.contains("core_identity") || errorMessage.contains("profiles") {
+                        // 数据库架构问题，显示修复指导
+                        showAlert(message: "数据库架构问题：缺少 core_identity 列。请在 Supabase Dashboard 的 SQL Editor 中执行修复脚本。")
+                    } else if errorMessage.contains("does not exist") || errorMessage.contains("profile_image") {
+                        // 缺少列的问题
+                        showAlert(message: "数据库架构问题：缺少必需的列。请执行 fix_missing_columns.sql 修复脚本。")
+                    } else if errorMessage.contains("value too long") || errorMessage.contains("character varying") {
+                        // 字段长度限制问题
+                        showAlert(message: "输入内容过长：某些字段超过了数据库限制。请检查并缩短输入内容，或执行数据库修复脚本。")
+                    } else if errorMessage.contains("row-level security") || errorMessage.contains("violates") {
+                        // RLS 权限问题
+                        showAlert(message: "权限问题：请执行 fix_rls_policies.sql 脚本修复行级安全策略。")
+                    } else if errorMessage.contains("foreign key constraint") || errorMessage.contains("profiles_user_id_fkey") {
+                        // 外键约束问题
+                        showAlert(message: "外键约束问题：请执行 fix_foreign_key.sql 脚本修复外键约束。")
+                    } else if errorMessage.contains("profiles") && errorMessage.contains("table") {
                         showDatabaseSetup = true
                     } else {
                         showAlert(message: "Failed to save profile: \(errorMessage)")
@@ -338,13 +355,27 @@ struct CoreIdentityStep: View {
         VStack(spacing: 20) {
             // Name
             VStack(alignment: .leading, spacing: 8) {
-                Text("Full Name *")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                HStack {
+                    Text("Full Name *")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    
+                    Spacer()
+                    
+                    Text("\(name.count)/100")
+                        .font(.system(size: 12))
+                        .foregroundColor(name.count > 100 ? .red : .gray)
+                }
                 
                 TextField("Enter your full name", text: $name)
                     .textFieldStyle(CustomTextFieldStyle())
                     .autocapitalization(.words)
+                    .onChange(of: name) { newValue in
+                        // 限制长度
+                        if newValue.count > 100 {
+                            name = String(newValue.prefix(100))
+                        }
+                    }
             }
             
             // Email
@@ -372,12 +403,32 @@ struct CoreIdentityStep: View {
             
             // Bio
             VStack(alignment: .leading, spacing: 8) {
-                Text("Bio (LinkedIn-style headline)")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                HStack {
+                    Text("Bio (LinkedIn-style headline)")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    
+                    Spacer()
+                    
+                    Text("\(bio.count)/500")
+                        .font(.system(size: 12))
+                        .foregroundColor(bio.count > 500 ? .red : .gray)
+                }
                 
                 TextField("e.g., Product designer helping teams bridge creativity & data", text: $bio)
                     .textFieldStyle(CustomTextFieldStyle())
+                    .onChange(of: bio) { newValue in
+                        // 限制长度
+                        if newValue.count > 500 {
+                            bio = String(newValue.prefix(500))
+                        }
+                    }
+                
+                if bio.count > 400 {
+                    Text("⚠️ 简介过长，建议缩短到500字符以内")
+                        .font(.system(size: 12))
+                        .foregroundColor(.orange)
+                }
             }
             
             // Pronouns

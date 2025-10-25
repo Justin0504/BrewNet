@@ -64,6 +64,91 @@ class SupabaseService: ObservableObject {
         }
     }
     
+    /// 修复 profiles 表架构
+    func fixProfilesTableSchema() async throws {
+        print("🔧 正在修复 profiles 表架构...")
+        
+        // 由于 Supabase 客户端不支持直接执行 DDL，我们提供一个修复脚本
+        let fixSQL = """
+        -- 快速修复 profiles 表问题
+        -- 请在 Supabase Dashboard 的 SQL Editor 中执行此脚本
+        
+        -- 1. 如果 profiles 表不存在，创建完整的表
+        CREATE TABLE IF NOT EXISTS profiles (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            core_identity JSONB NOT NULL,
+            professional_background JSONB NOT NULL,
+            networking_intent JSONB NOT NULL,
+            personality_social JSONB NOT NULL,
+            privacy_trust JSONB NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(user_id)
+        );
+        
+        -- 2. 如果表存在但缺少列，添加缺少的列
+        ALTER TABLE profiles 
+        ADD COLUMN IF NOT EXISTS core_identity JSONB,
+        ADD COLUMN IF NOT EXISTS professional_background JSONB,
+        ADD COLUMN IF NOT EXISTS networking_intent JSONB,
+        ADD COLUMN IF NOT EXISTS personality_social JSONB,
+        ADD COLUMN IF NOT EXISTS privacy_trust JSONB;
+        
+        -- 3. 为现有记录设置默认值
+        UPDATE profiles 
+        SET 
+            core_identity = COALESCE(core_identity, '{}'::jsonb),
+            professional_background = COALESCE(professional_background, '{}'::jsonb),
+            networking_intent = COALESCE(networking_intent, '{}'::jsonb),
+            personality_social = COALESCE(personality_social, '{}'::jsonb),
+            privacy_trust = COALESCE(privacy_trust, '{}'::jsonb);
+        
+        -- 4. 设置 NOT NULL 约束
+        ALTER TABLE profiles 
+        ALTER COLUMN core_identity SET NOT NULL,
+        ALTER COLUMN professional_background SET NOT NULL,
+        ALTER COLUMN networking_intent SET NOT NULL,
+        ALTER COLUMN personality_social SET NOT NULL,
+        ALTER COLUMN privacy_trust SET NOT NULL;
+        
+        -- 5. 启用行级安全
+        ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+        
+        -- 6. 创建策略
+        DROP POLICY IF EXISTS "Users can view their own profile" ON profiles;
+        DROP POLICY IF EXISTS "Users can insert their own profile" ON profiles;
+        DROP POLICY IF EXISTS "Users can update their own profile" ON profiles;
+        DROP POLICY IF EXISTS "Users can delete their own profile" ON profiles;
+        
+        CREATE POLICY "Users can view their own profile" ON profiles 
+            FOR SELECT USING (auth.uid()::text = user_id::text);
+        
+        CREATE POLICY "Users can insert their own profile" ON profiles 
+            FOR INSERT WITH CHECK (auth.uid()::text = user_id::text);
+        
+        CREATE POLICY "Users can update their own profile" ON profiles 
+            FOR UPDATE USING (auth.uid()::text = user_id::text);
+        
+        CREATE POLICY "Users can delete their own profile" ON profiles 
+            FOR DELETE USING (auth.uid()::text = user_id::text);
+        
+        -- 7. 创建索引
+        CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles(user_id);
+        CREATE INDEX IF NOT EXISTS idx_profiles_created_at ON profiles(created_at);
+        
+        SELECT '✅ 修复完成！现在可以正常保存用户资料了。' as result;
+        """
+        
+        print("📋 请在 Supabase Dashboard 的 SQL Editor 中执行以下修复脚本:")
+        print(String(repeating: "=", count: 80))
+        print(fixSQL)
+        print(String(repeating: "=", count: 80))
+        
+        // 由于无法直接执行 DDL，我们抛出错误提示用户手动执行
+        throw ProfileError.creationFailed("请手动执行上述 SQL 脚本来修复数据库架构问题。")
+    }
+    
     func ensureTablesExist() async {
         print("🔧 开始检查 Supabase 连接...")
         print("🔗 Supabase URL: https://jcxvdolcdifdghaibspy.supabase.co")
@@ -462,37 +547,64 @@ class SupabaseService: ObservableObject {
             throw ProfileError.invalidData("Email is required")
         }
         
-        do {
-            let response = try await client
-                .from(SupabaseTable.profiles.rawValue)
-                .insert(profile)
-                .select()
-                .single()
-                .execute()
-            
-            let data = response.data
-            let createdProfile = try JSONDecoder().decode(SupabaseProfile.self, from: data)
-            print("✅ Profile created successfully: \(createdProfile.id)")
-            return createdProfile
-            
-        } catch {
-            print("❌ Failed to create profile: \(error.localizedDescription)")
-            
-            // If it's a duplicate key error, try to update existing profile
-            if error.localizedDescription.contains("duplicate key value violates unique constraint") {
-                print("🔄 Profile already exists, updating instead...")
-                do {
-                    let existingProfile = try await getProfile(userId: profile.userId)
-                    if let existing = existingProfile {
-                        return try await updateProfile(profileId: existing.id, profile: profile)
+        // 尝试多次创建，处理各种错误
+        for attempt in 1...3 {
+            do {
+                print("🔄 Attempt \(attempt) to create profile...")
+                
+                let response = try await client
+                    .from(SupabaseTable.profiles.rawValue)
+                    .insert(profile)
+                    .select()
+                    .single()
+                    .execute()
+                
+                let data = response.data
+                let createdProfile = try JSONDecoder().decode(SupabaseProfile.self, from: data)
+                print("✅ Profile created successfully: \(createdProfile.id)")
+                return createdProfile
+                
+            } catch {
+                print("❌ Attempt \(attempt) failed: \(error.localizedDescription)")
+                
+                // 检查是否是架构问题
+                if error.localizedDescription.contains("core_identity") || 
+                   error.localizedDescription.contains("Could not find") ||
+                   error.localizedDescription.contains("schema cache") ||
+                   error.localizedDescription.contains("does not exist") ||
+                   error.localizedDescription.contains("profile_image") ||
+                   error.localizedDescription.contains("column") {
+                    
+                    if attempt == 1 {
+                        print("🔧 Database schema issue detected. Please execute force_fix.sql script.")
+                        throw ProfileError.creationFailed("数据库架构问题：请执行 force_fix.sql 脚本修复数据库。")
                     }
-                } catch {
-                    print("❌ Failed to update existing profile: \(error.localizedDescription)")
                 }
+                
+                // 如果是重复键错误，尝试更新
+                if error.localizedDescription.contains("duplicate key value violates unique constraint") {
+                    print("🔄 Profile already exists, updating instead...")
+                    do {
+                        let existingProfile = try await getProfile(userId: profile.userId)
+                        if let existing = existingProfile {
+                            return try await updateProfile(profileId: existing.id, profile: profile)
+                        }
+                    } catch {
+                        print("❌ Failed to update existing profile: \(error.localizedDescription)")
+                    }
+                }
+                
+                // 如果是最后一次尝试，抛出错误
+                if attempt == 3 {
+                    throw ProfileError.creationFailed("Failed to create profile after 3 attempts: \(error.localizedDescription)")
+                }
+                
+                // 等待一秒后重试
+                try await Task.sleep(nanoseconds: 1_000_000_000)
             }
-            
-            throw ProfileError.creationFailed(error.localizedDescription)
         }
+        
+        throw ProfileError.creationFailed("Unexpected error in profile creation")
     }
     
     /// 获取用户资料
