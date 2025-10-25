@@ -141,6 +141,7 @@ struct PersonalitySocial: Codable {
     let hobbies: [String]
     let preferredMeetingVibe: MeetingVibe
     let communicationStyle: CommunicationStyle
+    let selfIntroduction: String?
     
     enum CodingKeys: String, CodingKey {
         case icebreakerPrompts = "icebreaker_prompts"
@@ -148,6 +149,7 @@ struct PersonalitySocial: Codable {
         case hobbies
         case preferredMeetingVibe = "preferred_meeting_vibe"
         case communicationStyle = "communication_style"
+        case selfIntroduction = "self_introduction"
     }
 }
 
@@ -439,7 +441,8 @@ extension BrewNetProfile {
                 valuesTags: [],
                 hobbies: [],
                 preferredMeetingVibe: .casual,
-                communicationStyle: .collaborative
+                communicationStyle: .collaborative,
+                selfIntroduction: nil
             ),
             privacyTrust: PrivacyTrust(
                 visibilitySettings: VisibilitySettings.createDefault(),

@@ -96,10 +96,12 @@ struct ProfileSetupView: View {
                                 }
                                 .padding(.horizontal, 32)
                                 .padding(.top, 32)
-                                .onChange(of: currentStep) { _ in
-                                    // Scroll to top when step changes
-                                    withAnimation(.easeInOut(duration: 0.3)) {
-                                        proxy.scrollTo("step-\(currentStep)", anchor: .top)
+                                .onChange(of: currentStep) { newStep in
+                                    // Only scroll to top when step actually changes, not during picker interactions
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                        withAnimation(.easeInOut(duration: 0.3)) {
+                                            proxy.scrollTo("step-\(newStep)", anchor: .top)
+                                        }
                                     }
                                 }
                             }
@@ -918,10 +920,33 @@ struct PersonalitySocialStep: View {
     @Binding var profileData: ProfileCreationData
     @State private var preferredMeetingVibe = MeetingVibe.casual
     @State private var communicationStyle = CommunicationStyle.collaborative
+    @State private var selfIntroduction = ""
     @StateObject private var selectionHelper = SelectionHelper()
     
     var body: some View {
         VStack(spacing: 20) {
+            // Self Introduction
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Self Introduction")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                
+                Text("Tell us about yourself professionally (e.g., Senior Software Engineer @ Meta, familiar with Redis, K8s, etc.)")
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray)
+                
+                TextEditor(text: $selfIntroduction)
+                    .frame(minHeight: 100)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.gray.opacity(0.1))
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
+            }
+            
             // Values Tags
             VStack(alignment: .leading, spacing: 8) {
                 Text("Values that describe you *")
@@ -1035,6 +1060,9 @@ struct PersonalitySocialStep: View {
                 .padding(.vertical, 12)
                 .background(Color.gray.opacity(0.1))
                 .cornerRadius(8)
+                .onTapGesture {
+                    // Prevent any unwanted scroll behavior when picker is tapped
+                }
             }
             
             // Communication Style
@@ -1054,6 +1082,9 @@ struct PersonalitySocialStep: View {
                 .padding(.vertical, 12)
                 .background(Color.gray.opacity(0.1))
                 .cornerRadius(8)
+                .onTapGesture {
+                    // Prevent any unwanted scroll behavior when picker is tapped
+                }
             }
         }
         .onAppear {
@@ -1063,12 +1094,14 @@ struct PersonalitySocialStep: View {
                 selectionHelper.selectedHobbies = Set(personalitySocial.hobbies)
                 preferredMeetingVibe = personalitySocial.preferredMeetingVibe
                 communicationStyle = personalitySocial.communicationStyle
+                selfIntroduction = personalitySocial.selfIntroduction ?? ""
             }
         }
         .onChange(of: selectionHelper.selectedValues) { _ in updateProfileData() }
         .onChange(of: selectionHelper.selectedHobbies) { _ in updateProfileData() }
         .onChange(of: preferredMeetingVibe) { _ in updateProfileData() }
         .onChange(of: communicationStyle) { _ in updateProfileData() }
+        .onChange(of: selfIntroduction) { _ in updateProfileData() }
     }
     
     private func updateProfileData() {
@@ -1077,7 +1110,8 @@ struct PersonalitySocialStep: View {
             valuesTags: Array(selectionHelper.selectedValues),
             hobbies: Array(selectionHelper.selectedHobbies),
             preferredMeetingVibe: preferredMeetingVibe,
-            communicationStyle: communicationStyle
+            communicationStyle: communicationStyle,
+            selfIntroduction: selfIntroduction.isEmpty ? nil : selfIntroduction
         )
         profileData.personalitySocial = personalitySocial
     }
@@ -1207,6 +1241,9 @@ struct PrivacyToggleRow: View {
             }
             .pickerStyle(MenuPickerStyle())
             .frame(width: 120)
+            .onTapGesture {
+                // Prevent any unwanted scroll behavior when picker is tapped
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
