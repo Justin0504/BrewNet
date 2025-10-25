@@ -14,13 +14,16 @@ struct BrewNetProfile: Codable, Identifiable {
     // MARK: - 2. Professional Background
     let professionalBackground: ProfessionalBackground
     
-    // MARK: - 3. Networking & Intent
-    let networkingIntent: NetworkingIntent
+    // MARK: - 3. Networking Intention
+    let networkingIntention: NetworkingIntention
     
-    // MARK: - 4. Personality & Social Layer
+    // MARK: - 4. Networking Preferences
+    let networkingPreferences: NetworkingPreferences
+    
+    // MARK: - 5. Personality & Social Layer
     let personalitySocial: PersonalitySocial
     
-    // MARK: - 5. Privacy & Trust Controls
+    // MARK: - 6. Privacy & Trust Controls
     let privacyTrust: PrivacyTrust
     
     enum CodingKeys: String, CodingKey {
@@ -30,7 +33,8 @@ struct BrewNetProfile: Codable, Identifiable {
         case updatedAt = "updated_at"
         case coreIdentity = "core_identity"
         case professionalBackground = "professional_background"
-        case networkingIntent = "networking_intent"
+        case networkingIntention = "networking_intention"
+        case networkingPreferences = "networking_preferences"
         case personalitySocial = "personality_social"
         case privacyTrust = "privacy_trust"
     }
@@ -111,7 +115,37 @@ struct ProfessionalBackground: Codable {
     }
 }
 
-// MARK: - 3. Networking & Intent
+// MARK: - 3. Networking Intention
+struct NetworkingIntention: Codable, Equatable {
+    let selectedIntention: NetworkingIntentionType
+    let selectedSubIntentions: [SubIntentionType]
+    let careerDirection: CareerDirectionData?
+    let skillDevelopment: SkillDevelopmentData?
+    let industryTransition: IndustryTransitionData?
+    
+    enum CodingKeys: String, CodingKey {
+        case selectedIntention = "selected_intention"
+        case selectedSubIntentions = "selected_sub_intentions"
+        case careerDirection = "career_direction"
+        case skillDevelopment = "skill_development"
+        case industryTransition = "industry_transition"
+    }
+}
+
+// MARK: - 4. Networking Preferences
+struct NetworkingPreferences: Codable, Equatable {
+    let preferredChatFormat: ChatFormat
+    let availableTimeslot: AvailableTimeslot
+    let preferredChatDuration: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case preferredChatFormat = "preferred_chat_format"
+        case availableTimeslot = "available_timeslot"
+        case preferredChatDuration = "preferred_chat_duration"
+    }
+}
+
+// MARK: - 5. Networking & Intent (Legacy - keeping for backward compatibility)
 struct NetworkingIntent: Codable {
     let networkingIntent: [NetworkingIntentType]
     let conversationTopics: [String]
@@ -170,8 +204,71 @@ struct PrivacyTrust: Codable {
 
 // MARK: - Supporting Models
 
+// Career Direction Data
+struct CareerDirectionData: Codable, Equatable {
+    let functions: [FunctionSelection]
+    
+    enum CodingKeys: String, CodingKey {
+        case functions
+    }
+}
+
+struct FunctionSelection: Codable, Equatable {
+    let functionName: String
+    let learnIn: [String]
+    let guideIn: [String]
+    
+    enum CodingKeys: String, CodingKey {
+        case functionName = "function_name"
+        case learnIn = "learn_in"
+        case guideIn = "guide_in"
+    }
+}
+
+// Skill Development Data
+struct SkillDevelopmentData: Codable, Equatable {
+    let skills: [SkillSelection]
+    
+    enum CodingKeys: String, CodingKey {
+        case skills
+    }
+}
+
+struct SkillSelection: Codable, Equatable {
+    let skillName: String
+    var learnIn: Bool
+    var guideIn: Bool
+    
+    enum CodingKeys: String, CodingKey {
+        case skillName = "skill_name"
+        case learnIn = "learn_in"
+        case guideIn = "guide_in"
+    }
+}
+
+// Industry Transition Data
+struct IndustryTransitionData: Codable, Equatable {
+    let industries: [IndustrySelection]
+    
+    enum CodingKeys: String, CodingKey {
+        case industries
+    }
+}
+
+struct IndustrySelection: Codable, Equatable {
+    let industryName: String
+    var learnIn: Bool
+    var guideIn: Bool
+    
+    enum CodingKeys: String, CodingKey {
+        case industryName = "industry_name"
+        case learnIn = "learn_in"
+        case guideIn = "guide_in"
+    }
+}
+
 // Available Timeslot Matrix (Sunday-Saturday × Morning/Noon/Afternoon/Evening/Night)
-struct AvailableTimeslot: Codable {
+struct AvailableTimeslot: Codable, Equatable {
     let sunday: DayTimeslots
     let monday: DayTimeslots
     let tuesday: DayTimeslots
@@ -185,7 +282,7 @@ struct AvailableTimeslot: Codable {
     }
 }
 
-struct DayTimeslots: Codable {
+struct DayTimeslots: Codable, Equatable {
     let morning: Bool
     let noon: Bool
     let afternoon: Bool
@@ -216,6 +313,49 @@ enum CareerStage: String, CaseIterable, Codable {
     case manager = "Manager"
     case executive = "Executive"
     case founder = "Founder"
+    
+    var displayName: String {
+        return self.rawValue
+    }
+}
+
+enum NetworkingIntentionType: String, CaseIterable, Codable {
+    case learnGrow = "Learn & Grow"
+    case connectShare = "Connect & Share"
+    case buildCollaborate = "Build & Collaborate"
+    case unwindChat = "Unwind & Chat"
+    
+    var displayName: String {
+        return self.rawValue
+    }
+    
+    var subIntentions: [SubIntentionType] {
+        switch self {
+        case .learnGrow:
+            return [.careerDirection, .skillDevelopment, .industryTransition]
+        case .connectShare:
+            return [.industryInsight, .roleBasedExperience]
+        case .buildCollaborate:
+            return [.cofounderMatch, .joinStartup, .ideaValidation]
+        case .unwindChat:
+            return [.casualCoffee, .workplaceWellbeing, .localMeetup, .interestSideProject]
+        }
+    }
+}
+
+enum SubIntentionType: String, CaseIterable, Codable {
+    case careerDirection = "Career Direction & Planning"
+    case skillDevelopment = "Skill Development / Learning Exchange"
+    case industryTransition = "Industry Transition / Guidance"
+    case industryInsight = "Industry Insight Discussion"
+    case roleBasedExperience = "Role-Based Experience Swap"
+    case cofounderMatch = "Co-founder / Startup Partner / Project Member Match"
+    case joinStartup = "Join an Existing Startup / Project"
+    case ideaValidation = "Idea Validation & Feedback"
+    case casualCoffee = "Casual Coffee Chat / Make Friends"
+    case workplaceWellbeing = "Workplace Well-being / Emotional Support"
+    case localMeetup = "Local Meet-up / City Exploration"
+    case interestSideProject = "Interest & Side Project Talk"
     
     var displayName: String {
         return self.rawValue
@@ -364,14 +504,16 @@ struct ReportPreferences: Codable {
 struct ProfileCreationData {
     var coreIdentity: CoreIdentity?
     var professionalBackground: ProfessionalBackground?
-    var networkingIntent: NetworkingIntent?
+    var networkingIntention: NetworkingIntention?
+    var networkingPreferences: NetworkingPreferences?
     var personalitySocial: PersonalitySocial?
     var privacyTrust: PrivacyTrust?
     
     var isComplete: Bool {
         return coreIdentity != nil &&
                professionalBackground != nil &&
-               networkingIntent != nil &&
+               networkingIntention != nil &&
+               networkingPreferences != nil &&
                personalitySocial != nil &&
                privacyTrust != nil
     }
@@ -380,12 +522,13 @@ struct ProfileCreationData {
         let completedSections = [
             coreIdentity != nil,
             professionalBackground != nil,
-            networkingIntent != nil,
+            networkingIntention != nil,
+            networkingPreferences != nil,
             personalitySocial != nil,
             privacyTrust != nil
         ].filter { $0 }.count
         
-        return Double(completedSections) / 5.0
+        return Double(completedSections) / 6.0
     }
 }
 
@@ -426,15 +569,17 @@ extension BrewNetProfile {
                 languagesSpoken: [],
                 workExperiences: []
             ),
-            networkingIntent: NetworkingIntent(
-                networkingIntent: [],
-                conversationTopics: [],
-                collaborationInterest: [],
-                coffeeChatGoal: nil,
+            networkingIntention: NetworkingIntention(
+                selectedIntention: .learnGrow,
+                selectedSubIntentions: [],
+                careerDirection: nil,
+                skillDevelopment: nil,
+                industryTransition: nil
+            ),
+            networkingPreferences: NetworkingPreferences(
                 preferredChatFormat: .virtual,
                 availableTimeslot: AvailableTimeslot.createDefault(),
-                preferredChatDuration: nil,
-                introPromptAnswers: []
+                preferredChatDuration: nil
             ),
             personalitySocial: PersonalitySocial(
                 icebreakerPrompts: [],
@@ -488,7 +633,6 @@ extension BrewNetProfile {
         return !coreIdentity.name.isEmpty &&
                !coreIdentity.email.isEmpty &&
                !professionalBackground.skills.isEmpty &&
-               !networkingIntent.networkingIntent.isEmpty &&
                !personalitySocial.valuesTags.isEmpty
     }
     
@@ -504,9 +648,6 @@ extension BrewNetProfile {
         if professionalBackground.skills.isEmpty {
             errors.append("At least one skill is required")
         }
-        if networkingIntent.networkingIntent.isEmpty {
-            errors.append("At least one networking intent is required")
-        }
         if personalitySocial.valuesTags.isEmpty {
             errors.append("At least one value tag is required")
         }
@@ -519,10 +660,9 @@ extension BrewNetProfile {
             !coreIdentity.name.isEmpty,
             !coreIdentity.email.isEmpty,
             !professionalBackground.skills.isEmpty,
-            !networkingIntent.networkingIntent.isEmpty,
             !personalitySocial.valuesTags.isEmpty
         ].filter { $0 }.count
         
-        return Double(completedSections) / 5.0
+        return Double(completedSections) / 4.0
     }
 }
