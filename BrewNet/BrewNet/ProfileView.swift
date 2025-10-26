@@ -9,9 +9,6 @@ struct ProfileView: View {
     @State private var selectedTab = 0
     @State private var showLogoutAlert = false
     @State private var showUpgradeAlert = false
-    @State private var viewedPosts: [AppPost] = []
-    @State private var likedPosts: [AppPost] = []
-    @State private var savedPosts: [AppPost] = []
     @State private var matchedUsers: [UserProfile] = []
     @State private var coffeeChatSchedules: [CoffeeChatSchedule] = []
     @State private var userProfile: BrewNetProfile?
@@ -300,36 +297,6 @@ struct ProfileView: View {
     private func loadUserData() {
         print("📚 Loading user data...")
 
-        // Load posts from database
-        let postEntities = databaseManager.getAllPosts()
-        let allPosts = postEntities.map { entity in
-            AppPost(
-                id: entity.id ?? UUID().uuidString,
-                title: entity.title ?? "Untitled",
-                content: entity.content ?? "",
-                question: entity.question ?? "",
-                tag: entity.tag ?? "General",
-                tagColor: entity.tagColor ?? "gray",
-                backgroundColor: entity.backgroundColor ?? "white",
-                authorId: entity.authorId ?? "",
-                authorName: entity.authorName ?? "Unknown",
-                likeCount: Int(entity.likeCount),
-                commentCount: 0,
-                viewCount: Int(entity.viewCount),
-                createdAt: entity.createdAt ?? Date(),
-                updatedAt: entity.updatedAt ?? Date()
-            )
-        }
-        
-        // Load viewed posts - get recently viewed posts
-        viewedPosts = Array(allPosts.prefix(10))
-
-        // Load liked posts - TODO: Load actual liked posts from database
-        likedPosts = Array(allPosts.prefix(5))
-
-        // Load saved posts - TODO: Load actual saved posts from database
-        savedPosts = Array(allPosts.prefix(3))
-
         // Load matched users (simulate data)
         matchedUsers = sampleProfiles.filter { _ in Bool.random() }.prefix(4).map { $0 }
 
@@ -366,60 +333,6 @@ struct ProfileView: View {
                 }
             }
         }
-    }
-}
-
-// MARK: - Post History View
-struct PostHistoryView: View {
-    let posts: [AppPost]
-    
-    var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
-                ForEach(posts) { post in
-                    PostCardView(post: post)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-        }
-        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
-    }
-}
-
-// MARK: - Liked Posts View
-struct LikedPostsView: View {
-    let posts: [AppPost]
-    
-    var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
-                ForEach(posts) { post in
-                    LikedPostCardView(post: post)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-        }
-        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
-    }
-}
-
-// MARK: - Saved Posts View
-struct SavedPostsView: View {
-    let posts: [AppPost]
-    
-    var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
-                ForEach(posts) { post in
-                    SavedPostCardView(post: post)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-        }
-        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
     }
 }
 
@@ -537,80 +450,6 @@ struct CalendarView: View {
         return schedules.filter { schedule in
             calendar.isDate(schedule.date, equalTo: selectedDate, toGranularity: .day)
         }
-    }
-}
-
-// MARK: - Liked Post Card View
-struct LikedPostCardView: View {
-    let post: AppPost
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "heart.fill")
-                    .foregroundColor(.red)
-                    .font(.system(size: 16))
-                
-                Text("Liked")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.red)
-                
-                Spacer()
-                
-                Text(timeAgoString(from: Date()))
-                    .font(.system(size: 12))
-                    .foregroundColor(.gray)
-            }
-            
-            PostCardView(post: post)
-        }
-        .padding(16)
-        .background(Color.white)
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
-    }
-    
-    private func timeAgoString(from date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
-    }
-}
-
-// MARK: - Saved Post Card View
-struct SavedPostCardView: View {
-    let post: AppPost
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "bookmark.fill")
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                    .font(.system(size: 16))
-                
-                Text("Saved")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                
-                Spacer()
-                
-                Text(timeAgoString(from: Date()))
-                    .font(.system(size: 12))
-                    .foregroundColor(.gray)
-            }
-            
-            PostCardView(post: post)
-        }
-        .padding(16)
-        .background(Color.white)
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
-    }
-    
-    private func timeAgoString(from date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 

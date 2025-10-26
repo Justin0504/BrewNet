@@ -47,9 +47,6 @@ struct BrewNetApp: App {
         databaseManager.enableHybridMode()
         print("🔄 混合模式已启用 - 云端 + 本地缓存（测试 Supabase 功能）")
         
-        // 清理重复帖子
-        databaseManager.removeDuplicatePosts()
-        
         // Initialize database with sample data
         databaseManager.createSampleData()
         
