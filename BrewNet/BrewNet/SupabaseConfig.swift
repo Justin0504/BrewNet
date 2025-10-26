@@ -23,13 +23,9 @@ class SupabaseConfig {
 enum SupabaseTable: String, CaseIterable {
     case users = "users"
     case profiles = "profiles"
-    case posts = "posts"
-    case likes = "likes"
-    case saves = "saves"
     case matches = "matches"
     case coffeeChats = "coffee_chats"
     case messages = "messages"
-    case anonymousPosts = "anonymous_posts"
 }
 
 // MARK: - Database Schema Helper
@@ -76,44 +72,6 @@ struct DatabaseSchema {
         """
         
         let _ = """
-        CREATE TABLE IF NOT EXISTS posts (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            title TEXT NOT NULL,
-            content TEXT,
-            question TEXT,
-            tag TEXT NOT NULL,
-            tag_color TEXT NOT NULL,
-            background_color TEXT NOT NULL,
-            author_id UUID NOT NULL REFERENCES users(id),
-            author_name TEXT NOT NULL,
-            like_count INTEGER DEFAULT 0,
-            view_count INTEGER DEFAULT 0,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-        """
-        
-        let _ = """
-        CREATE TABLE IF NOT EXISTS likes (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            user_id UUID NOT NULL REFERENCES users(id),
-            post_id UUID NOT NULL REFERENCES posts(id),
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            UNIQUE(user_id, post_id)
-        );
-        """
-        
-        let _ = """
-        CREATE TABLE IF NOT EXISTS saves (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            user_id UUID NOT NULL REFERENCES users(id),
-            post_id UUID NOT NULL REFERENCES posts(id),
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            UNIQUE(user_id, post_id)
-        );
-        """
-        
-        let _ = """
         CREATE TABLE IF NOT EXISTS matches (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id UUID NOT NULL REFERENCES users(id),
@@ -149,22 +107,6 @@ struct DatabaseSchema {
             message_type TEXT NOT NULL,
             is_read BOOLEAN DEFAULT FALSE,
             timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-        """
-        
-        let _ = """
-        CREATE TABLE IF NOT EXISTS anonymous_posts (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            title TEXT NOT NULL,
-            content TEXT,
-            question TEXT,
-            tag TEXT NOT NULL,
-            tag_color TEXT NOT NULL,
-            likes INTEGER DEFAULT 0,
-            comments INTEGER DEFAULT 0,
-            shares INTEGER DEFAULT 0,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
         """
         

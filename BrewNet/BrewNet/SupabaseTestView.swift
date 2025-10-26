@@ -162,11 +162,6 @@ struct SupabaseTestView: View {
                         }
                         
                         VStack(spacing: 8) {
-                            Button("创建测试帖子") {
-                                createTestPost()
-                            }
-                            .buttonStyle(.bordered)
-                            
                             Button("创建测试用户") {
                                 createTestUser()
                             }
@@ -282,26 +277,6 @@ struct SupabaseTestView: View {
         isSyncing = false
         updateSyncStatus()
         showAlert("双向同步完成")
-    }
-    
-    private func createTestPost() {
-        let testPost = databaseManager.createPost(
-            id: UUID().uuidString,
-            title: "测试帖子 - \(Date().formatted())",
-            content: "这是一个测试帖子，用于验证 Supabase 集成功能。",
-            question: "这个功能工作正常吗？",
-            tag: "测试",
-            tagColor: "blue",
-            backgroundColor: "white",
-            authorId: "test_user",
-            authorName: "测试用户"
-        )
-        
-        if testPost != nil {
-            showAlert("测试帖子创建成功")
-        } else {
-            showAlert("测试帖子创建失败")
-        }
     }
     
     private func createTestUser() {

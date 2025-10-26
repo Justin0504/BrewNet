@@ -7,21 +7,13 @@ struct MainView: View {
     
     var body: some View {
         TabView(selection: $selectedTab) {
-            // Home - Recommended Users
-            HomeView()
-                .tabItem {
-                    Image(systemName: "house.fill")
-                    Text("Home")
-                }
-                .tag(0)
-            
             // Matches
             MatchesView()
                 .tabItem {
                     Image(systemName: "heart.fill")
                     Text("Matches")
                 }
-                .tag(1)
+                .tag(0)
             
             // Chat
             ChatView()
@@ -29,7 +21,7 @@ struct MainView: View {
                     Image(systemName: "message.fill")
                     Text("Chat")
                 }
-                .tag(2)
+                .tag(1)
             
             // Profile
             ProfileView()
@@ -37,52 +29,9 @@ struct MainView: View {
                     Image(systemName: "person.fill")
                     Text("Profile")
                 }
-                .tag(3)
+                .tag(2)
         }
         .accentColor(Color(red: 0.4, green: 0.2, blue: 0.1)) // Dark brown theme color
-    }
-}
-
-// MARK: - Home View
-struct HomeView: View {
-    @EnvironmentObject var supabaseService: SupabaseService
-    @State private var selectedTab = 0
-    
-    var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                // Segmented Control
-                Picker("Content Type", selection: $selectedTab) {
-                    Text("Discovery").tag(0)
-                    Text("Following").tag(1)
-                    Text("Anonymous Zone").tag(2)
-                }
-                .pickerStyle(SegmentedPickerStyle())
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                
-                // Content Views
-                TabView(selection: $selectedTab) {
-                    DiscoveryView()
-                        .tag(0)
-                    
-                    FollowingView()
-                        .tag(1)
-                    
-                    AnonymousZoneView()
-                        .tag(2)
-                }
-                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-            }
-            .navigationTitle("BrewNet")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-        .onAppear {
-            // 检查 Supabase 表是否存在
-            Task {
-                await supabaseService.ensureTablesExist()
-            }
-        }
     }
 }
 

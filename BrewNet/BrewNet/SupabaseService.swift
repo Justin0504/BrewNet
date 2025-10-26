@@ -331,206 +331,18 @@ class SupabaseService: ObservableObject {
             .execute()
     }
     
-    // MARK: - Post Operations
-    
-    /// 创建帖子到 Supabase
-    func createPost(post: SupabasePost) async throws -> SupabasePost {
+    /// 获取所有用户
+    func getAllUsers() async throws -> [SupabaseUser] {
         let response = try await client
-            .from(SupabaseTable.posts.rawValue)
-            .insert(post)
-            .select()
-            .single()
-            .execute()
-        
-        let data = response.data
-        let createdPost = try JSONDecoder().decode(SupabasePost.self, from: data)
-        
-        // 同时保存到本地数据库
-        await MainActor.run {
-            let _ = databaseManager?.createPost(
-                id: createdPost.id,
-                title: createdPost.title,
-                content: createdPost.content ?? "",
-                question: createdPost.question ?? "",
-                tag: createdPost.tag,
-                tagColor: createdPost.tagColor,
-                backgroundColor: createdPost.backgroundColor,
-                authorId: createdPost.authorId,
-                authorName: createdPost.authorName
-            )
-        }
-        
-        return createdPost
-    }
-    
-    /// 从 Supabase 获取所有帖子
-    func getAllPosts() async throws -> [SupabasePost] {
-        let response = try await client
-            .from(SupabaseTable.posts.rawValue)
+            .from(SupabaseTable.users.rawValue)
             .select()
             .order("created_at", ascending: false)
             .execute()
         
         let data = response.data
-        return try JSONDecoder().decode([SupabasePost].self, from: data)
+        return try JSONDecoder().decode([SupabaseUser].self, from: data)
     }
     
-    /// 从 Supabase 获取用户的帖子
-    func getPostsByAuthor(authorId: String) async throws -> [SupabasePost] {
-        let response = try await client
-            .from(SupabaseTable.posts.rawValue)
-            .select()
-            .eq("author_id", value: authorId)
-            .order("created_at", ascending: false)
-            .execute()
-        
-        let data = response.data
-        return try JSONDecoder().decode([SupabasePost].self, from: data)
-    }
-    
-    // MARK: - Like Operations
-    
-    /// 点赞帖子
-    func likePost(userId: String, postId: String) async throws -> Bool {
-        // 检查是否已经点赞
-        let existingLikes = try await client
-            .from(SupabaseTable.likes.rawValue)
-            .select()
-            .eq("user_id", value: userId)
-            .eq("post_id", value: postId)
-            .execute()
-        
-        let data = existingLikes.data
-        let likes = try JSONDecoder().decode([SupabaseLike].self, from: data)
-        
-        if !likes.isEmpty {
-            return false // 已经点赞过了
-        }
-        
-        // 创建点赞记录
-        let like = SupabaseLike(
-            id: UUID().uuidString,
-            userId: userId,
-            postId: postId,
-            createdAt: ISO8601DateFormatter().string(from: Date())
-        )
-        
-        try await client
-            .from(SupabaseTable.likes.rawValue)
-            .insert(like)
-            .execute()
-        
-        // 更新帖子点赞数
-        try await updatePostLikeCount(postId: postId, increment: 1)
-        
-        // 同时保存到本地数据库
-        await MainActor.run {
-            _ = databaseManager?.likePost(userId: userId, postId: postId)
-        }
-        
-        return true
-    }
-    
-    /// 取消点赞
-    func unlikePost(userId: String, postId: String) async throws -> Bool {
-        // 删除点赞记录
-        try await client
-            .from(SupabaseTable.likes.rawValue)
-            .delete()
-            .eq("user_id", value: userId)
-            .eq("post_id", value: postId)
-            .execute()
-        
-        // 更新帖子点赞数
-        try await updatePostLikeCount(postId: postId, increment: -1)
-        
-        // 同时从本地数据库删除
-        await MainActor.run {
-            _ = databaseManager?.unlikePost(userId: userId, postId: postId)
-        }
-        
-        return true
-    }
-    
-    /// 更新帖子点赞数
-    private func updatePostLikeCount(postId: String, increment: Int) async throws {
-        // 先获取当前点赞数
-        let response = try await client
-            .from(SupabaseTable.posts.rawValue)
-            .select("like_count")
-            .eq("id", value: postId)
-            .single()
-            .execute()
-        
-        let data = response.data
-        let postData = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-        let currentCount = postData["like_count"] as? Int ?? 0
-        let newCount = max(0, currentCount + increment)
-        
-        // 更新点赞数
-        try await client
-            .from(SupabaseTable.posts.rawValue)
-            .update(["like_count": newCount])
-            .eq("id", value: postId)
-            .execute()
-    }
-    
-    // MARK: - Save Operations
-    
-    /// 保存帖子
-    func savePost(userId: String, postId: String) async throws -> Bool {
-        // 检查是否已经保存
-        let existingSaves = try await client
-            .from(SupabaseTable.saves.rawValue)
-            .select()
-            .eq("user_id", value: userId)
-            .eq("post_id", value: postId)
-            .execute()
-        
-        let data = existingSaves.data
-        let saves = try JSONDecoder().decode([SupabaseSave].self, from: data)
-        
-        if !saves.isEmpty {
-            return false // 已经保存过了
-        }
-        
-        // 创建保存记录
-        let save = SupabaseSave(
-            id: UUID().uuidString,
-            userId: userId,
-            postId: postId,
-            createdAt: ISO8601DateFormatter().string(from: Date())
-        )
-        
-        try await client
-            .from(SupabaseTable.saves.rawValue)
-            .insert(save)
-            .execute()
-        
-        // 同时保存到本地数据库
-        await MainActor.run {
-            _ = databaseManager?.savePost(userId: userId, postId: postId)
-        }
-        
-        return true
-    }
-    
-    /// 取消保存
-    func unsavePost(userId: String, postId: String) async throws -> Bool {
-        try await client
-            .from(SupabaseTable.saves.rawValue)
-            .delete()
-            .eq("user_id", value: userId)
-            .eq("post_id", value: postId)
-            .execute()
-        
-        // 同时从本地数据库删除
-        await MainActor.run {
-            _ = databaseManager?.unsavePost(userId: userId, postId: postId)
-        }
-        
-        return true
-    }
     
     // MARK: - Profile Operations
     
@@ -835,33 +647,6 @@ class SupabaseService: ObservableObject {
         return brewNetProfile.completionPercentage
     }
     
-    // MARK: - Anonymous Post Operations
-    
-    /// 创建匿名帖子
-    func createAnonymousPost(post: SupabaseAnonymousPost) async throws -> SupabaseAnonymousPost {
-        let response = try await client
-            .from(SupabaseTable.anonymousPosts.rawValue)
-            .insert(post)
-            .select()
-            .single()
-            .execute()
-        
-        let data = response.data
-        return try JSONDecoder().decode(SupabaseAnonymousPost.self, from: data)
-    }
-    
-    /// 获取所有匿名帖子
-    func getAllAnonymousPosts() async throws -> [SupabaseAnonymousPost] {
-        let response = try await client
-            .from(SupabaseTable.anonymousPosts.rawValue)
-            .select()
-            .order("created_at", ascending: false)
-            .execute()
-        
-        let data = response.data
-        return try JSONDecoder().decode([SupabaseAnonymousPost].self, from: data)
-    }
-    
     // MARK: - Sync Operations
     
     /// 同步本地数据到云端
@@ -901,40 +686,6 @@ class SupabaseService: ObservableObject {
                 }
             }
             
-            // 同步帖子数据
-            guard let localPosts = databaseManager?.getAllPosts() else { return }
-            for post in localPosts {
-                let supabasePost = SupabasePost(
-                    id: post.id ?? UUID().uuidString,
-                    title: post.title ?? "",
-                    content: post.content,
-                    question: post.question,
-                    tag: post.tag ?? "",
-                    tagColor: post.tagColor ?? "",
-                    backgroundColor: post.backgroundColor ?? "",
-                    authorId: post.authorId ?? "",
-                    authorName: post.authorName ?? "",
-                    likeCount: Int(post.likeCount),
-                    viewCount: Int(post.viewCount),
-                    createdAt: ISO8601DateFormatter().string(from: post.createdAt ?? Date()),
-                    updatedAt: ISO8601DateFormatter().string(from: post.updatedAt ?? Date())
-                )
-                
-                // 检查云端是否已存在
-                if let _ = try? await client
-                    .from(SupabaseTable.posts.rawValue)
-                    .select("id")
-                    .eq("id", value: supabasePost.id)
-                    .single()
-                    .execute() {
-                    // 帖子已存在，跳过
-                    continue
-                } else {
-                    // 创建新帖子
-                    let _ = try await createPost(post: supabasePost)
-                }
-            }
-            
             await MainActor.run {
                 self.lastSyncTime = Date()
             }
@@ -951,24 +702,21 @@ class SupabaseService: ObservableObject {
         guard isOnline else { return }
         
         do {
-            // 同步帖子数据
-            let cloudPosts = try await getAllPosts()
+            // 同步用户数据
+            let cloudUsers = try await getAllUsers()
             await MainActor.run {
-                // 清空本地帖子数据
-                databaseManager?.clearAllPosts()
+                // 清空本地用户数据
+                databaseManager?.clearAllUsers()
                 
-                // 重新创建帖子数据
-                for cloudPost in cloudPosts {
-                    let _ = databaseManager?.createPost(
-                        id: cloudPost.id,
-                        title: cloudPost.title,
-                        content: cloudPost.content ?? "",
-                        question: cloudPost.question ?? "",
-                        tag: cloudPost.tag,
-                        tagColor: cloudPost.tagColor,
-                        backgroundColor: cloudPost.backgroundColor,
-                        authorId: cloudPost.authorId,
-                        authorName: cloudPost.authorName
+                // 重新创建用户数据
+                for cloudUser in cloudUsers {
+                    let _ = databaseManager?.createUser(
+                        id: cloudUser.id,
+                        email: cloudUser.email,
+                        name: cloudUser.name,
+                        phoneNumber: cloudUser.phoneNumber,
+                        isGuest: cloudUser.isGuest,
+                        profileSetupCompleted: cloudUser.profileSetupCompleted
                     )
                 }
             }
