@@ -189,7 +189,7 @@ struct RegisterView: View {
                                         .autocapitalization(.none)
                                     
                                     // Password requirements
-                                    Text("Password must be at least 8 characters and contain letters and numbers")
+                                    Text("Password must be at least 6 characters")
                                         .font(.system(size: 11))
                                         .foregroundColor(.gray)
                                 }
@@ -313,7 +313,7 @@ struct RegisterView: View {
     }
     
     private var isPasswordValid: Bool {
-        return !password.isEmpty && password.count >= 8 && password.contains(where: { $0.isLetter }) && password.contains(where: { $0.isNumber })
+        return !password.isEmpty && password.count >= 6
     }
     
     private var isConfirmPasswordValid: Bool {

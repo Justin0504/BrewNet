@@ -10,8 +10,10 @@ import CoreData
 
 struct ContentView: View {
     @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
     @State private var refreshID = UUID()
     @State private var showDatabaseSetup = false
+    @State private var isCheckingProfile = false
     
     var body: some View {
         Group {
@@ -21,7 +23,25 @@ struct ContentView: View {
                 LoadingView()
             case .authenticated(let user):
                 // 已登录，检查是否需要完成资料设置
-                if user.profileSetupCompleted {
+                if isCheckingProfile {
+                    // 正在检查 profile 状态
+                    VStack(spacing: 24) {
+                        Spacer()
+                        
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
+                            .scaleEffect(1.2)
+                        
+                        Text("Checking profile status...")
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray)
+                        
+                        Spacer()
+                    }
+                    .onAppear {
+                        checkProfileStatus(for: user)
+                    }
+                } else if user.profileSetupCompleted {
                     MainView()
                         .onAppear {
                             print("🏠 主界面已显示，用户: \(user.name)")
@@ -52,6 +72,13 @@ struct ContentView: View {
                 print("🔄 ContentView 认证状态变化: loading")
             case .authenticated(let user):
                 print("🔄 ContentView 认证状态变化: authenticated - \(user.name) (游客: \(user.isGuest))")
+                
+                // 如果用户没有标记为已完成 profile 设置，进行额外检查
+                if !user.profileSetupCompleted {
+                    print("🔍 用户未标记为已完成 profile 设置，开始检查...")
+                    isCheckingProfile = true
+                }
+                
                 // 强制刷新界面，确保立即跳转到主界面
                 self.refreshID = UUID()
                 print("🔄 ContentView 强制刷新界面，跳转到主界面")
@@ -60,6 +87,39 @@ struct ContentView: View {
                 // 强制刷新界面，确保立即跳转到登录页面
                 self.refreshID = UUID()
                 print("🔄 ContentView 强制刷新界面，跳转到登录界面")
+            }
+        }
+    }
+    
+    // MARK: - Profile Status Check
+    private func checkProfileStatus(for user: AppUser) {
+        print("🔍 开始检查用户 profile 状态: \(user.name)")
+        
+        Task {
+            do {
+                // 检查用户是否有 profile 数据
+                let hasProfile = try await supabaseService.getProfile(userId: user.id) != nil
+                
+                print("🔍 Profile 检查结果: hasProfile = \(hasProfile)")
+                
+                await MainActor.run {
+                    if hasProfile && !user.profileSetupCompleted {
+                        // 用户有 profile 数据但状态不正确，更新状态
+                        print("🔄 更新用户 profile 状态: \(user.name)")
+                        authManager.updateProfileSetupCompleted(true)
+                    }
+                    
+                    // 检查完成，隐藏检查界面
+                    isCheckingProfile = false
+                }
+                
+            } catch {
+                print("❌ Profile 检查失败: \(error.localizedDescription)")
+                
+                await MainActor.run {
+                    // 检查失败，隐藏检查界面，让用户继续正常流程
+                    isCheckingProfile = false
+                }
             }
         }
     }

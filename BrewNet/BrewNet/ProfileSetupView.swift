@@ -11,8 +11,123 @@ struct ProfileSetupView: View {
     @State private var showCompletion = false
     @State private var showDatabaseSetup = false
     @State private var isNavigating = false
+    @State private var isLoadingExistingData = false
     
     private let totalSteps = 6
+    
+    // MARK: - Computed Properties
+    private var progressPercentage: Int {
+        Int(Double(currentStep) / Double(totalSteps) * 100)
+    }
+    
+    private var progressHeaderView: some View {
+        VStack(spacing: 16) {
+            // Progress bar
+            ProgressView(value: Double(currentStep), total: Double(totalSteps))
+                .progressViewStyle(LinearProgressViewStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
+                .scaleEffect(x: 1, y: 2, anchor: .center)
+                .padding(.horizontal, 32)
+            
+            // Step indicator
+            HStack {
+                Text("Step \(currentStep) of \(totalSteps)")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.gray)
+                
+                Spacer()
+                
+                Text("\(progressPercentage)% Complete")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.gray)
+            }
+            .padding(.horizontal, 32)
+            
+            // Step title
+            Text(stepTitle)
+                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            
+            // Step description
+            Text(stepDescription)
+                .font(.system(size: 16))
+                .foregroundColor(.gray)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+        }
+    }
+    
+    private var navigationButtonsView: some View {
+        VStack(spacing: 16) {
+            HStack(spacing: 16) {
+                if currentStep > 1 {
+                    Button(action: {
+                        guard !isNavigating else { return }
+                        isNavigating = true
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            currentStep -= 1
+                        }
+                        // Reset navigation state after animation
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            isNavigating = false
+                        }
+                    }) {
+                        Text("Previous")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                    }
+                    .background(Color.white)
+                    .cornerRadius(25)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 25)
+                            .stroke(Color(red: 0.4, green: 0.2, blue: 0.1), lineWidth: 2)
+                    )
+                    .disabled(isNavigating)
+                }
+                
+                Button(action: {
+                    guard !isNavigating else { return }
+                    isNavigating = true
+                    
+                    if currentStep == totalSteps {
+                        completeProfileSetup()
+                    } else {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            currentStep += 1
+                        }
+                    }
+                    
+                    // Reset navigation state after animation
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        isNavigating = false
+                    }
+                }) {
+                    Text(currentStep == totalSteps ? "Complete Setup" : "Next")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                }
+                .background(
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            Color(red: 0.6, green: 0.4, blue: 0.2),
+                            Color(red: 0.4, green: 0.2, blue: 0.1)
+                        ]),
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .cornerRadius(25)
+                .disabled(isNavigating || isLoading)
+                .opacity((isNavigating || isLoading) ? 0.6 : 1.0)
+            }
+            .padding(.horizontal, 32)
+        }
+    }
     
     var body: some View {
         GeometryReader { geometry in
@@ -30,44 +145,34 @@ struct ProfileSetupView: View {
                 
                 if showCompletion {
                     ProfileCompletionView()
-                } else {
-                    VStack(spacing: 0) {
-                        // Header with progress
-                        VStack(spacing: 16) {
-                            // Progress bar
-                            ProgressView(value: Double(currentStep), total: Double(totalSteps))
-                                .progressViewStyle(LinearProgressViewStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
-                                .scaleEffect(x: 1, y: 2, anchor: .center)
-                                .padding(.horizontal, 32)
-                            
-                            // Step indicator
-                            HStack {
-                                Text("Step \(currentStep) of \(totalSteps)")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.gray)
-                                
-                                Spacer()
-                                
-                                Text("\(Int((Double(currentStep) / Double(totalSteps)) * 100))% Complete")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.gray)
-                            }
-                            .padding(.horizontal, 32)
-                            
-                            // Step title
-                            Text(stepTitle)
-                                .font(.system(size: 24, weight: .bold, design: .rounded))
+                } else if isLoadingExistingData {
+                    // 数据加载等待界面
+                    VStack(spacing: 24) {
+                        Spacer()
+                        
+                        // 加载动画
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
+                            .scaleEffect(1.5)
+                        
+                        VStack(spacing: 12) {
+                            Text("Loading Profile Data")
+                                .font(.system(size: 20, weight: .semibold))
                                 .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 32)
                             
-                            // Step description
-                            Text(stepDescription)
+                            Text("Please wait while we load your existing profile information...")
                                 .font(.system(size: 16))
                                 .foregroundColor(.gray)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 32)
                         }
+                        
+                        Spacer()
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        // Header with progress
+                        progressHeaderView
                         .padding(.top, 20)
                         
                         // Content
@@ -111,77 +216,7 @@ struct ProfileSetupView: View {
                         }
                         
                         // Navigation buttons
-                        VStack(spacing: 16) {
-                            HStack(spacing: 16) {
-                                if currentStep > 1 {
-                                    Button(action: {
-                                        guard !isNavigating else { return }
-                                        isNavigating = true
-                                        withAnimation(.easeInOut(duration: 0.3)) {
-                                            currentStep -= 1
-                                        }
-                                        // Reset navigation state after animation
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                            isNavigating = false
-                                        }
-                                    }) {
-                                        Text("Previous")
-                                            .font(.system(size: 16, weight: .medium))
-                                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                                            .frame(maxWidth: .infinity)
-                                            .frame(height: 50)
-                                    }
-                                    .background(Color.white)
-                                    .cornerRadius(25)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 25)
-                                            .stroke(Color(red: 0.4, green: 0.2, blue: 0.1), lineWidth: 2)
-                                    )
-                                    .disabled(isNavigating)
-                                }
-                                
-                                Button(action: {
-                                    guard !isNavigating else { return }
-                                    isNavigating = true
-                                    
-                                    if currentStep == totalSteps {
-                                        completeProfileSetup()
-                                    } else {
-                                        withAnimation(.easeInOut(duration: 0.3)) {
-                                            currentStep += 1
-                                        }
-                                        // Scroll to top when moving to next step
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                            // This will be handled by ScrollViewReader
-                                        }
-                                    }
-                                    
-                                    // Reset navigation state after animation
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                        isNavigating = false
-                                    }
-                                }) {
-                                    Text(currentStep == totalSteps ? "Complete Setup" : "Next")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundColor(.white)
-                                        .frame(maxWidth: .infinity)
-                                        .frame(height: 50)
-                                }
-                                .background(
-                                    LinearGradient(
-                                        gradient: Gradient(colors: [
-                                            Color(red: 0.6, green: 0.4, blue: 0.2),
-                                            Color(red: 0.4, green: 0.2, blue: 0.1)
-                                        ]),
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .cornerRadius(25)
-                                .disabled(isNavigating)
-                            }
-                            .padding(.horizontal, 32)
-                        }
+                        navigationButtonsView
                         .padding(.bottom, 50)
                     }
                 }
@@ -195,6 +230,9 @@ struct ProfileSetupView: View {
         .sheet(isPresented: $showDatabaseSetup) {
             DatabaseSetupView()
                 .environmentObject(SupabaseService.shared)
+        }
+        .onAppear {
+            loadExistingProfileData()
         }
     }
     
@@ -242,37 +280,67 @@ struct ProfileSetupView: View {
                     // Continue anyway, the error will be caught below if table doesn't exist
                 }
                 
-                // Create the complete profile
-                let profile = BrewNetProfile.createDefault(userId: currentUser.id)
+                // Check if profile already exists
+                let existingProfile = try await supabaseService.getProfile(userId: currentUser.id)
                 
-                // Update with collected data
-                let updatedProfile = updateProfileWithCollectedData(profile)
+                let supabaseProfile: SupabaseProfile
                 
-                // Convert to Supabase format
-                let supabaseProfile = SupabaseProfile(
-                    id: updatedProfile.id,
-                    userId: updatedProfile.userId,
-                    coreIdentity: updatedProfile.coreIdentity,
-                    professionalBackground: updatedProfile.professionalBackground,
-                    networkingIntention: updatedProfile.networkingIntention,
-                    networkingPreferences: updatedProfile.networkingPreferences,
-                    personalitySocial: updatedProfile.personalitySocial,
-                    privacyTrust: updatedProfile.privacyTrust,
-                    createdAt: updatedProfile.createdAt,
-                    updatedAt: updatedProfile.updatedAt
-                )
-                
-                // Save to Supabase
-                let _ = try await supabaseService.createProfile(profile: supabaseProfile)
+                if let existing = existingProfile {
+                    // Update existing profile
+                    print("🔄 Updating existing profile...")
+                    
+                    let updatedProfile = SupabaseProfile(
+                        id: existing.id,
+                        userId: existing.userId,
+                        coreIdentity: profileData.coreIdentity ?? existing.coreIdentity,
+                        professionalBackground: profileData.professionalBackground ?? existing.professionalBackground,
+                        networkingIntention: profileData.networkingIntention ?? existing.networkingIntention,
+                        networkingPreferences: profileData.networkingPreferences ?? existing.networkingPreferences,
+                        personalitySocial: profileData.personalitySocial ?? existing.personalitySocial,
+                        privacyTrust: profileData.privacyTrust ?? existing.privacyTrust,
+                        createdAt: existing.createdAt,
+                        updatedAt: ISO8601DateFormatter().string(from: Date())
+                    )
+                    
+                    supabaseProfile = try await supabaseService.updateProfile(profileId: existing.id, profile: updatedProfile)
+                } else {
+                    // Create new profile
+                    print("🆕 Creating new profile...")
+                    
+                    let profile = BrewNetProfile.createDefault(userId: currentUser.id)
+                    let updatedProfile = updateProfileWithCollectedData(profile)
+                    
+                    supabaseProfile = SupabaseProfile(
+                        id: updatedProfile.id,
+                        userId: updatedProfile.userId,
+                        coreIdentity: updatedProfile.coreIdentity,
+                        professionalBackground: updatedProfile.professionalBackground,
+                        networkingIntention: updatedProfile.networkingIntention,
+                        networkingPreferences: updatedProfile.networkingPreferences,
+                        personalitySocial: updatedProfile.personalitySocial,
+                        privacyTrust: updatedProfile.privacyTrust,
+                        createdAt: updatedProfile.createdAt,
+                        updatedAt: updatedProfile.updatedAt
+                    )
+                    
+                    let _ = try await supabaseService.createProfile(profile: supabaseProfile)
+                }
                 
                 // Update user profile setup status
-                try await supabaseService.updateUserProfileSetupCompleted(userId: currentUser.id, completed: true)
+                do {
+                    try await supabaseService.updateUserProfileSetupCompleted(userId: currentUser.id, completed: true)
+                    print("✅ Profile setup status updated in Supabase")
+                } catch {
+                    print("⚠️ Failed to update profile setup status in Supabase: \(error.localizedDescription)")
+                    // Continue anyway, we'll update local state
+                }
                 
                 await MainActor.run {
-                    // Update local auth manager
+                    // Update local auth manager - this is critical for UI state
                     authManager.updateProfileSetupCompleted(true)
                     isLoading = false
                     showCompletion = true
+                    print("✅ Profile setup completed locally")
                 }
                 
             } catch {
@@ -343,6 +411,47 @@ struct ProfileSetupView: View {
     private func showAlert(message: String) {
         alertMessage = message
         showAlert = true
+    }
+    
+    // MARK: - Load Existing Profile Data
+    private func loadExistingProfileData() {
+        guard let currentUser = authManager.currentUser else {
+            print("❌ No current user found")
+            return
+        }
+        
+        isLoadingExistingData = true
+        
+        Task {
+            do {
+                // Try to load existing profile from Supabase
+                if let existingProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                    print("✅ Found existing profile, loading data...")
+                    
+                    await MainActor.run {
+                        // Convert SupabaseProfile to ProfileCreationData
+                        profileData.coreIdentity = existingProfile.coreIdentity
+                        profileData.professionalBackground = existingProfile.professionalBackground
+                        profileData.networkingIntention = existingProfile.networkingIntention
+                        profileData.networkingPreferences = existingProfile.networkingPreferences
+                        profileData.personalitySocial = existingProfile.personalitySocial
+                        profileData.privacyTrust = existingProfile.privacyTrust
+                        
+                        isLoadingExistingData = false
+                    }
+                } else {
+                    print("ℹ️ No existing profile found, starting fresh")
+                    await MainActor.run {
+                        isLoadingExistingData = false
+                    }
+                }
+            } catch {
+                print("❌ Failed to load existing profile: \(error.localizedDescription)")
+                await MainActor.run {
+                    isLoadingExistingData = false
+                }
+            }
+        }
     }
 }
 

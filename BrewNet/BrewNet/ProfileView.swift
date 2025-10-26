@@ -16,6 +16,7 @@ struct ProfileView: View {
     @State private var coffeeChatSchedules: [CoffeeChatSchedule] = []
     @State private var userProfile: BrewNetProfile?
     @State private var isLoadingProfile = true
+    @State private var showingEditProfile = false
     
     var body: some View {
         NavigationView {
@@ -95,7 +96,7 @@ struct ProfileView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Button("Edit Profile") {
-                            // Edit profile action
+                            showingEditProfile = true
                         }
                         
                         Button("Settings") {
@@ -135,6 +136,9 @@ struct ProfileView: View {
             }
         } message: {
             Text("After upgrading to a regular user, your data will be permanently saved and you'll enjoy full functionality.")
+        }
+        .sheet(isPresented: $showingEditProfile) {
+            ProfileSetupView()
         }
     }
     

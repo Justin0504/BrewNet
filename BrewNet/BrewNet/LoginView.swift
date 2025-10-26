@@ -120,14 +120,22 @@ struct LoginView: View {
                             .disabled(isLoading || email.isEmpty || password.isEmpty)
                             .opacity((email.isEmpty || password.isEmpty) ? 0.6 : 1.0)
                             
-                            // 注册按钮
-                            Button(action: {
-                                showingRegisterView = true
-                            }) {
-                                Text("Don't have an account? Sign up")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                                    .underline()
+                            // 提示信息
+                            VStack(spacing: 8) {
+                                Text("💡 New users can login directly - we'll create your account automatically!")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(Color(red: 0.2, green: 0.4, blue: 0.2))
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 20)
+                                
+                                Button(action: {
+                                    showingRegisterView = true
+                                }) {
+                                    Text("Or sign up manually")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                        .underline()
+                                }
                             }
                             .padding(.top, 8)
                             

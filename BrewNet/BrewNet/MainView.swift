@@ -38,22 +38,6 @@ struct MainView: View {
                     Text("Profile")
                 }
                 .tag(3)
-            
-            // Database Test (Debug only)
-            DatabaseTestView()
-                .tabItem {
-                    Image(systemName: "database.fill")
-                    Text("DB Test")
-                }
-                .tag(4)
-            
-            // Supabase Test (Debug only)
-            SupabaseTestView()
-                .tabItem {
-                    Image(systemName: "cloud.fill")
-                    Text("Supabase")
-                }
-                .tag(5)
         }
         .accentColor(Color(red: 0.4, green: 0.2, blue: 0.1)) // Dark brown theme color
     }

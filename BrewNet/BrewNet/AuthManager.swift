@@ -103,8 +103,10 @@ class AuthManager: ObservableObject {
             userEntity = databaseManager?.getUserByEmail(phoneEmail)
         }
         
+        // 如果用户不存在，自动注册
         guard let existingUser = userEntity else {
-            return .failure(.invalidCredentials)
+            print("👤 用户不存在，自动注册新用户: \(email)")
+            return await autoRegisterUser(email: email, password: password)
         }
         
         // Update last login time
@@ -123,6 +125,75 @@ class AuthManager: ObservableObject {
             saveUser(user)
         }
         return .success(user)
+    }
+    
+    /// 自动注册用户（当用户不存在时）
+    private func autoRegisterUser(email: String, password: String) async -> Result<AppUser, AuthError> {
+        print("🔄 自动注册新用户: \(email)")
+        
+        // 从邮箱中提取用户名（@ 符号前的部分）
+        let name = String(email.split(separator: "@").first ?? "User")
+        
+        // 调用本地注册方法
+        return await localRegister(email: email, password: password, name: name)
+    }
+    
+    /// 自动注册 Supabase 用户（当用户认证成功但缺少详细信息时）
+    private func autoRegisterSupabaseUser(email: String, userId: String) async -> Result<AppUser, AuthError> {
+        print("🔄 自动注册 Supabase 用户: \(email)")
+        
+        // 从邮箱中提取用户名
+        let name = String(email.split(separator: "@").first ?? "User")
+        
+        // 创建 Supabase 用户详细信息
+        let supabaseUser = SupabaseUser(
+            id: userId,
+            email: email,
+            name: name,
+            phoneNumber: nil,
+            isGuest: false,
+            profileImage: nil,
+            bio: nil,
+            company: nil,
+            jobTitle: nil,
+            location: nil,
+            skills: nil,
+            interests: nil,
+            profileSetupCompleted: false,
+            createdAt: ISO8601DateFormatter().string(from: Date()),
+            lastLoginAt: ISO8601DateFormatter().string(from: Date()),
+            updatedAt: ISO8601DateFormatter().string(from: Date())
+        )
+        
+        do {
+            // 保存到 Supabase
+            if let createdUser = try await supabaseService?.createUser(user: supabaseUser) {
+                print("✅ Supabase 用户详细信息创建成功")
+                
+                // 同时保存到本地数据库
+                let userEntity = databaseManager?.createUser(
+                    id: createdUser.id,
+                    email: createdUser.email,
+                    name: createdUser.name,
+                    isGuest: createdUser.isGuest,
+                    profileSetupCompleted: createdUser.profileSetupCompleted
+                )
+                
+                let appUser = createdUser.toAppUser()
+                
+                await MainActor.run {
+                    saveUser(appUser)
+                }
+                
+                return .success(appUser)
+            } else {
+                print("❌ 无法创建 Supabase 用户详细信息")
+                return .failure(.unknownError)
+            }
+        } catch {
+            print("❌ 创建 Supabase 用户详细信息失败: \(error)")
+            return .failure(.unknownError)
+        }
     }
     
     /// Supabase 登录
@@ -145,13 +216,26 @@ class AuthManager: ObservableObject {
                 
                 let appUser = supabaseUser.toAppUser()
                 
+                // 额外检查：如果用户有 profile 数据，确保 profileSetupCompleted 为 true
+                let hasProfile = try await supabaseService?.getProfile(userId: supabaseUser.id) != nil
+                let finalAppUser = AppUser(
+                    id: appUser.id,
+                    email: appUser.email,
+                    name: appUser.name,
+                    isGuest: appUser.isGuest,
+                    profileSetupCompleted: appUser.profileSetupCompleted || hasProfile
+                )
+                
                 await MainActor.run {
-                    saveUser(appUser)
+                    saveUser(finalAppUser)
+                    print("✅ User logged in: \(finalAppUser.name), profile completed: \(finalAppUser.profileSetupCompleted)")
                 }
                 
-                return .success(appUser)
+                return .success(finalAppUser)
             } else {
-                return .failure(.invalidCredentials)
+                // 如果 Supabase 中没有用户详细信息，自动创建
+                print("👤 Supabase 用户不存在详细信息，自动创建: \(email)")
+                return await autoRegisterSupabaseUser(email: email, userId: user.id.uuidString)
             }
             
         } catch {

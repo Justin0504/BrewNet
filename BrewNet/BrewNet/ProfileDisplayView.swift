@@ -2,60 +2,19 @@ import SwiftUI
 
 struct ProfileDisplayView: View {
     let profile: BrewNetProfile
-    @State private var showingEditProfile = false
     
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
-                // Profile Header
+                // Profile Header - 只显示头像和姓名
                 ProfileHeaderView(profile: profile)
                 
-                // Core Identity Section
+                // Networking Preferences Section - 保留这个部分
                 ProfileSectionView(
-                    title: "About",
-                    icon: "person.circle.fill"
-                ) {
-                    CoreIdentityDisplayView(identity: profile.coreIdentity)
-                }
-                
-                // Professional Background Section
-                ProfileSectionView(
-                    title: "Professional Background",
-                    icon: "briefcase.fill"
-                ) {
-                    ProfessionalBackgroundDisplayView(background: profile.professionalBackground)
-                }
-                
-                // Networking Intention Section
-                ProfileSectionView(
-                    title: "Networking Intention",
-                    icon: "network"
-                ) {
-                    NetworkingIntentionDisplayView(intention: profile.networkingIntention)
-                }
-                
-                // Networking Preferences Section
-                ProfileSectionView(
-                    title: "Networking Preferences",
+                    title: "Network Preferences",
                     icon: "clock.fill"
                 ) {
                     NetworkingPreferencesDisplayView(preferences: profile.networkingPreferences)
-                }
-                
-                // Personality & Social Section
-                ProfileSectionView(
-                    title: "Personality & Interests",
-                    icon: "heart.fill"
-                ) {
-                    PersonalitySocialDisplayView(personality: profile.personalitySocial)
-                }
-                
-                // Privacy Settings Section
-                ProfileSectionView(
-                    title: "Privacy Settings",
-                    icon: "lock.fill"
-                ) {
-                    PrivacyTrustDisplayView(privacy: profile.privacyTrust)
                 }
             }
             .padding(.horizontal, 16)
@@ -63,16 +22,6 @@ struct ProfileDisplayView: View {
         }
         .navigationTitle("My Profile")
         .navigationBarTitleDisplayMode(.large)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Edit") {
-                    showingEditProfile = true
-                }
-            }
-        }
-        .sheet(isPresented: $showingEditProfile) {
-            ProfileSetupView()
-        }
     }
 }
 
@@ -99,43 +48,10 @@ struct ProfileHeaderView: View {
                     .stroke(Color(red: 0.6, green: 0.4, blue: 0.2), lineWidth: 3)
             )
             
-            // Name and Title
-            VStack(spacing: 4) {
-                Text(profile.coreIdentity.name)
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                
-                if let jobTitle = profile.professionalBackground.jobTitle {
-                    Text(jobTitle)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.gray)
-                }
-                
-                if let company = profile.professionalBackground.currentCompany {
-                    Text(company)
-                        .font(.system(size: 14))
-                        .foregroundColor(.gray)
-                }
-                
-                if let location = profile.coreIdentity.location {
-                    HStack {
-                        Image(systemName: "location")
-                            .font(.system(size: 12))
-                        Text(location)
-                            .font(.system(size: 14))
-                    }
-                    .foregroundColor(.gray)
-                }
-            }
-            
-            // Bio
-            if let bio = profile.coreIdentity.bio {
-                Text(bio)
-                    .font(.system(size: 16))
-                    .foregroundColor(.gray)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 20)
-            }
+            // Name only
+            Text(profile.coreIdentity.name)
+                .font(.system(size: 24, weight: .bold))
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
         }
         .padding(.vertical, 20)
         .frame(maxWidth: .infinity)

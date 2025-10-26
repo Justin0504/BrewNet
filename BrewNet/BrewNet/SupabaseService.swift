@@ -612,26 +612,66 @@ class SupabaseService: ObservableObject {
         print("🔍 Fetching profile for user: \(userId)")
         
         do {
+            // 首先尝试获取所有匹配的记录
             let response = try await client
                 .from(SupabaseTable.profiles.rawValue)
                 .select()
                 .eq("user_id", value: userId)
-                .single()
                 .execute()
             
             let data = response.data
-            let profile = try JSONDecoder().decode(SupabaseProfile.self, from: data)
-            print("✅ Profile fetched successfully: \(profile.id)")
-            return profile
+            let profiles = try JSONDecoder().decode([SupabaseProfile].self, from: data)
             
-        } catch {
-            if error.localizedDescription.contains("No rows found") {
+            if profiles.isEmpty {
                 print("ℹ️ No profile found for user: \(userId)")
                 return nil
+            } else if profiles.count == 1 {
+                let profile = profiles.first!
+                print("✅ Profile fetched successfully: \(profile.id)")
+                return profile
             } else {
-                print("❌ Failed to fetch profile: \(error.localizedDescription)")
-                throw ProfileError.fetchFailed(error.localizedDescription)
+                print("⚠️ Multiple profiles found for user: \(userId), returning the first one")
+                let profile = profiles.first!
+                print("✅ Profile fetched successfully: \(profile.id)")
+                return profile
             }
+            
+        } catch {
+            print("❌ Failed to fetch profile: \(error.localizedDescription)")
+            
+            // 如果是 JSON 解析错误，可能是数据结构问题
+            if error.localizedDescription.contains("Cannot coerce") || 
+               error.localizedDescription.contains("single JSON object") {
+                print("🔧 JSON coercion error detected, trying alternative approach...")
+                
+                // 尝试使用 .limit(1) 方法
+                do {
+                    let response = try await client
+                        .from(SupabaseTable.profiles.rawValue)
+                        .select()
+                        .eq("user_id", value: userId)
+                        .limit(1)
+                        .execute()
+                    
+                    let data = response.data
+                    let profiles = try JSONDecoder().decode([SupabaseProfile].self, from: data)
+                    
+                    if profiles.isEmpty {
+                        print("ℹ️ No profile found for user: \(userId)")
+                        return nil
+                    } else {
+                        let profile = profiles.first!
+                        print("✅ Profile fetched successfully with limit(1): \(profile.id)")
+                        return profile
+                    }
+                    
+                } catch {
+                    print("❌ Alternative approach also failed: \(error.localizedDescription)")
+                    throw ProfileError.fetchFailed(error.localizedDescription)
+                }
+            }
+            
+            throw ProfileError.fetchFailed(error.localizedDescription)
         }
     }
     
@@ -654,16 +694,58 @@ class SupabaseService: ObservableObject {
                 .update(profile)
                 .eq("id", value: profileId)
                 .select()
-                .single()
                 .execute()
             
             let data = response.data
-            let updatedProfile = try JSONDecoder().decode(SupabaseProfile.self, from: data)
-            print("✅ Profile updated successfully: \(updatedProfile.id)")
-            return updatedProfile
+            let profiles = try JSONDecoder().decode([SupabaseProfile].self, from: data)
+            
+            if profiles.isEmpty {
+                throw ProfileError.updateFailed("No profile found with ID: \(profileId)")
+            } else if profiles.count == 1 {
+                let updatedProfile = profiles.first!
+                print("✅ Profile updated successfully: \(updatedProfile.id)")
+                return updatedProfile
+            } else {
+                print("⚠️ Multiple profiles updated, returning the first one")
+                let updatedProfile = profiles.first!
+                print("✅ Profile updated successfully: \(updatedProfile.id)")
+                return updatedProfile
+            }
             
         } catch {
             print("❌ Failed to update profile: \(error.localizedDescription)")
+            
+            // 如果是 JSON 解析错误，尝试使用 maybeSingle
+            if error.localizedDescription.contains("Cannot coerce") || 
+               error.localizedDescription.contains("single JSON object") {
+                print("🔧 JSON coercion error in update, trying alternative approach...")
+                
+                do {
+                    let response = try await client
+                        .from(SupabaseTable.profiles.rawValue)
+                        .update(profile)
+                        .eq("id", value: profileId)
+                        .select()
+                        .limit(1)
+                        .execute()
+                    
+                    let data = response.data
+                    let profiles = try JSONDecoder().decode([SupabaseProfile].self, from: data)
+                    
+                    if profiles.isEmpty {
+                        throw ProfileError.updateFailed("No profile found with ID: \(profileId)")
+                    } else {
+                        let updatedProfile = profiles.first!
+                        print("✅ Profile updated successfully with limit(1): \(updatedProfile.id)")
+                        return updatedProfile
+                    }
+                    
+                } catch {
+                    print("❌ Alternative update approach also failed: \(error.localizedDescription)")
+                    throw ProfileError.updateFailed(error.localizedDescription)
+                }
+            }
+            
             throw ProfileError.updateFailed(error.localizedDescription)
         }
     }
