@@ -12,11 +12,11 @@ struct TinderMatchesView: View {
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
-    
+     
     var body: some View {
         ZStack {
             // Background
-            Color(red: 0.98, green: 0.97, blue: 0.95)
+            BrewTheme.background
                 .ignoresSafeArea()
             
             VStack(spacing: 0) {
@@ -79,7 +79,7 @@ struct TinderMatchesView: View {
             }) {
                 Image(systemName: "line.horizontal.3")
                     .font(.system(size: 20))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
             }
             
             Spacer()
@@ -88,7 +88,7 @@ struct TinderMatchesView: View {
             VStack(spacing: 4) {
                 Text("Daily Recommendations")
                     .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 Text("\(currentIndex + 1)/\(profiles.count)")
                     .font(.system(size: 14))
@@ -103,7 +103,7 @@ struct TinderMatchesView: View {
             }) {
                 Image(systemName: "gearshape")
                     .font(.system(size: 20))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
             }
         }
         .padding(.horizontal, 20)
@@ -114,11 +114,11 @@ struct TinderMatchesView: View {
         VStack(spacing: 20) {
             Image(systemName: "heart.circle.fill")
                 .font(.system(size: 80))
-                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                .foregroundColor(BrewTheme.secondaryBrown)
             
             Text("No More Profiles")
                 .font(.system(size: 24, weight: .bold))
-                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                .foregroundColor(BrewTheme.primaryBrown)
             
             Text("You've seen all available profiles!\nCheck back later for new recommendations.")
                 .font(.system(size: 16))
@@ -132,7 +132,7 @@ struct TinderMatchesView: View {
             .foregroundColor(.white)
             .padding(.horizontal, 30)
             .padding(.vertical, 12)
-            .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+            .background(BrewTheme.gradientPrimary())
             .cornerRadius(25)
         }
         .padding(40)

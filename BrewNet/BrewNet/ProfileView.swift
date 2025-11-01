@@ -23,7 +23,7 @@ struct ProfileView: View {
                     VStack {
                         Spacer()
                         ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
+                            .progressViewStyle(CircularProgressViewStyle(tint: BrewTheme.secondaryBrown))
                             .scaleEffect(1.2)
                         Text("Loading profile...")
                             .font(.system(size: 16))
@@ -46,7 +46,7 @@ struct ProfileView: View {
                         VStack(spacing: 12) {
                             Text("Complete Your Profile")
                                 .font(.system(size: 24, weight: .bold))
-                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .foregroundColor(BrewTheme.primaryBrown)
                             
                             Text("Set up your profile to start networking with other professionals")
                                 .font(.system(size: 16))
@@ -61,16 +61,7 @@ struct ProfileView: View {
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .frame(height: 50)
-                        .background(
-                            LinearGradient(
-                                gradient: Gradient(colors: [
-                                    Color(red: 0.6, green: 0.4, blue: 0.2),
-                                    Color(red: 0.4, green: 0.2, blue: 0.1)
-                                ]),
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
+                        .background(BrewTheme.gradientPrimary())
                         .cornerRadius(25)
                         .shadow(color: Color.brown.opacity(0.3), radius: 8, x: 0, y: 4)
                         .padding(.horizontal, 32)
@@ -107,10 +98,11 @@ struct ProfileView: View {
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .foregroundColor(BrewTheme.primaryBrown)
                     }
                 }
             }
+            .background(BrewTheme.background)
         }
         .onAppear {
             loadUserData()
@@ -148,7 +140,7 @@ struct ProfileView: View {
                 ZStack {
                     Image(systemName: "person.circle.fill")
                         .font(.system(size: 80))
-                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        .foregroundColor(BrewTheme.secondaryBrown)
                     
                     // Guest indicator
                     if authManager.isCurrentUserGuest() {
@@ -176,7 +168,7 @@ struct ProfileView: View {
                             Text(user.name)
                                 .font(.title2)
                                 .fontWeight(.bold)
-                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .foregroundColor(BrewTheme.primaryBrown)
                             
                             if user.isGuest {
                                 Text("Guest")
@@ -233,7 +225,7 @@ struct ProfileView: View {
             }
         }
         .padding(.vertical, 16)
-        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+        .background(BrewTheme.background)
     }
     
     // MARK: - Tab Selection View
@@ -253,12 +245,12 @@ struct ProfileView: View {
                             Text(tabTitle(for: index))
                                 .font(.system(size: 12, weight: .medium))
                         }
-                        .foregroundColor(selectedTab == index ? Color(red: 0.4, green: 0.2, blue: 0.1) : .gray)
+                        .foregroundColor(selectedTab == index ? BrewTheme.primaryBrown : .gray)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
                         .background(
                             selectedTab == index ? 
-                            Color(red: 0.4, green: 0.2, blue: 0.1).opacity(0.1) : 
+                            BrewTheme.primaryBrown.opacity(0.1) : 
                             Color.clear
                         )
                         .cornerRadius(8)
@@ -353,7 +345,7 @@ struct MatchedUsersView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
-        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+        .background(BrewTheme.background)
     }
 }
 
@@ -373,7 +365,7 @@ struct CalendarView: View {
                     }
                 }) {
                     Image(systemName: "chevron.left")
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                         .font(.system(size: 16, weight: .semibold))
                 }
                 
@@ -382,7 +374,7 @@ struct CalendarView: View {
                 Text(monthYearFormatter.string(from: currentMonth))
                     .font(.title2)
                     .fontWeight(.semibold)
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 Spacer()
                 
@@ -392,7 +384,7 @@ struct CalendarView: View {
                     }
                 }) {
                     Image(systemName: "chevron.right")
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                         .font(.system(size: 16, weight: .semibold))
                 }
             }
@@ -405,7 +397,7 @@ struct CalendarView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Upcoming Coffee Chats")
                     .font(.headline)
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                     .padding(.horizontal, 20)
                 
                 ScrollView {
@@ -463,14 +455,7 @@ struct MatchedUserCardView: View {
             ZStack {
                 Circle()
                     .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color(red: 0.6, green: 0.4, blue: 0.2),
-                                Color(red: 0.4, green: 0.2, blue: 0.1)
-                            ]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+                                BrewTheme.gradientPrimary()
                     )
                     .frame(width: 60, height: 60)
                 
@@ -482,7 +467,7 @@ struct MatchedUserCardView: View {
             VStack(spacing: 4) {
                 Text(user.name)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                     .lineLimit(1)
                 
                 Text(user.jobTitle)
@@ -587,14 +572,14 @@ struct CalendarDayView: View {
                 
                 if hasSchedule {
                     Circle()
-                        .fill(isSelected ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .fill(isSelected ? .white : BrewTheme.primaryBrown)
                         .frame(width: 4, height: 4)
                 }
             }
             .frame(width: 32, height: 32)
             .background(
                 isSelected ? 
-                Color(red: 0.4, green: 0.2, blue: 0.1) : 
+                BrewTheme.primaryBrown : 
                 Color.clear
             )
             .cornerRadius(16)
@@ -614,7 +599,7 @@ struct CoffeeChatScheduleCard: View {
             VStack(spacing: 2) {
                 Text(timeFormatter.string(from: schedule.date))
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 Text(dateFormatter.string(from: schedule.date))
                     .font(.system(size: 10))

@@ -25,6 +25,8 @@ struct BrewNetApp: App {
                 .environmentObject(authManager)
                 .environmentObject(databaseManager)
                 .environmentObject(supabaseService)
+                .accentColor(BrewTheme.primaryBrown)
+                .background(BrewTheme.background)
                 .onAppear {
                     setupDependencies()
                 }

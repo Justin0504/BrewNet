@@ -15,13 +15,21 @@ struct MainView: View {
                 }
                 .tag(0)
             
-            // Chat
+            // Requests (moved before Chat)
+            RequestsTabView()
+                .tabItem {
+                    Image(systemName: "person.badge.plus.fill")
+                    Text("Requests")
+                }
+                .tag(1)
+            
+            // Chat (moved after Requests)
             ChatView()
                 .tabItem {
                     Image(systemName: "message.fill")
                     Text("Chat")
                 }
-                .tag(1)
+                .tag(2)
             
             // Profile
             ProfileView()
@@ -29,9 +37,10 @@ struct MainView: View {
                     Image(systemName: "person.fill")
                     Text("Profile")
                 }
-                .tag(2)
+                .tag(3)
         }
-        .accentColor(Color(red: 0.4, green: 0.2, blue: 0.1)) // Dark brown theme color
+        .accentColor(BrewTheme.primaryBrown)
+        .background(BrewTheme.background)
     }
 }
 
@@ -46,6 +55,20 @@ struct MatchesView: View {
 struct ChatView: View {
     var body: some View {
         ChatInterfaceView()
+    }
+}
+
+// MARK: - Requests Tab Wrapper
+struct RequestsTabView: View {
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var databaseManager: DatabaseManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    var body: some View {
+        ConnectionRequestsView()
+            .environmentObject(authManager)
+            .environmentObject(databaseManager)
+            .environmentObject(supabaseService)
     }
 }
 

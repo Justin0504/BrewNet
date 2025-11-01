@@ -24,13 +24,13 @@ struct CustomPasswordField: View {
                 }
             }
             .font(.system(size: 16))
-            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            .foregroundColor(BrewTheme.primaryBrown)
             
             Button(action: {
                 isSecure.toggle()
             }) {
                 Image(systemName: isSecure ? "eye.slash" : "eye")
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                     .font(.system(size: 16))
             }
         }
