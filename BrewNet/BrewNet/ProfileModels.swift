@@ -174,7 +174,6 @@ struct PersonalitySocial: Codable {
     let valuesTags: [String]
     let hobbies: [String]
     let preferredMeetingVibe: MeetingVibe
-    let communicationStyle: CommunicationStyle
     let selfIntroduction: String?
     
     enum CodingKeys: String, CodingKey {
@@ -182,7 +181,6 @@ struct PersonalitySocial: Codable {
         case valuesTags = "values_tags"
         case hobbies
         case preferredMeetingVibe = "preferred_meeting_vibe"
-        case communicationStyle = "communication_style"
         case selfIntroduction = "self_introduction"
     }
 }
@@ -403,9 +401,10 @@ enum ChatFormat: String, CaseIterable, Codable {
 
 enum MeetingVibe: String, CaseIterable, Codable {
     case casual = "Casual"
-    case deep = "Deep"
-    case goalDriven = "Goal-driven"
-    case mentorMentee = "Mentor-mentee"
+    case reflective = "Reflective"
+    case goalOriented = "GoalOriented"
+    case exploratory = "Exploratory"
+    case supportive = "Supportive"
     
     var displayName: String {
         return self.rawValue
@@ -465,6 +464,7 @@ struct VisibilitySettings: Codable, Equatable {
     let location: VisibilityLevel
     let skills: VisibilityLevel
     let interests: VisibilityLevel
+    let timeslot: VisibilityLevel
     
     enum CodingKeys: String, CodingKey {
         case company
@@ -473,6 +473,7 @@ struct VisibilitySettings: Codable, Equatable {
         case location
         case skills
         case interests
+        case timeslot
     }
 }
 
@@ -586,7 +587,6 @@ extension BrewNetProfile {
                 valuesTags: [],
                 hobbies: [],
                 preferredMeetingVibe: .casual,
-                communicationStyle: .collaborative,
                 selfIntroduction: nil
             ),
             privacyTrust: PrivacyTrust(
@@ -622,7 +622,8 @@ extension VisibilitySettings {
             phoneNumber: .private_,
             location: .public_,
             skills: .public_,
-            interests: .public_
+            interests: .public_,
+            timeslot: .private_
         )
     }
 }

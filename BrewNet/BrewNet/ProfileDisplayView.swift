@@ -411,7 +411,6 @@ struct PersonalitySocialDisplayView: View {
             }
             
             InfoRow(label: "Meeting Vibe", value: personality.preferredMeetingVibe.displayName)
-            InfoRow(label: "Communication Style", value: personality.communicationStyle.displayName)
         }
     }
 }

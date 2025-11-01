@@ -12,12 +12,44 @@ struct ProfileSetupView: View {
     @State private var showDatabaseSetup = false
     @State private var isNavigating = false
     @State private var isLoadingExistingData = false
+    @State private var hasReachedBottom: [Int: Bool] = [:]
+    @State private var scrollOffset: CGFloat = 0
+    @State private var contentHeight: CGFloat = 0
+    @State private var scrollViewHeight: CGFloat = 0
     
     private let totalSteps = 6
     
     // MARK: - Computed Properties
     private var progressPercentage: Int {
         Int(Double(currentStep) / Double(totalSteps) * 100)
+    }
+    
+    private var canGoToNextStep: Bool {
+        // Next button is always available (only disabled during navigation or loading)
+        return true
+    }
+    
+    private func checkIfReachedBottom() {
+        // Check if content is scrollable
+        guard contentHeight > 0 && scrollViewHeight > 0 else { 
+            // If measurements aren't ready yet, we can't determine if scrolling is needed
+            return 
+        }
+        
+        // If content doesn't need scrolling (content fits in view), automatically allow next step
+        let scrollableHeight = contentHeight - scrollViewHeight
+        if scrollableHeight <= 10 { // 10pt tolerance for layout rounding
+            // Content fits in view, no scrolling needed - allow next step
+            hasReachedBottom[currentStep] = true
+            return
+        }
+        
+        // Check if scroll has reached bottom (with 50pt tolerance)
+        let hasReached = scrollOffset >= scrollableHeight - 50
+        
+        if hasReached {
+            hasReachedBottom[currentStep] = true
+        }
     }
     
     private var progressHeaderView: some View {
@@ -123,7 +155,7 @@ struct ProfileSetupView: View {
                 )
                 .cornerRadius(25)
                 .disabled(isNavigating || isLoading)
-                .opacity((isNavigating || isLoading) ? 0.6 : 1.0)
+                .opacity((isNavigating || isLoading) ? 0.4 : 1.0)
             }
             .padding(.horizontal, 32)
         }
@@ -177,39 +209,80 @@ struct ProfileSetupView: View {
                         
                         // Content
                         ScrollViewReader { proxy in
-                            ScrollView {
-                                VStack(spacing: 24) {
-                                    switch currentStep {
-                                    case 1:
-                                        CoreIdentityStep(profileData: $profileData)
-                                            .id("step-1")
-                                    case 2:
-                                        ProfessionalBackgroundStep(profileData: $profileData)
-                                            .id("step-2")
-                                    case 3:
-                                        NetworkingIntentionStep(profileData: $profileData)
-                                            .id("step-3")
-                                    case 4:
-                                        NetworkingPreferencesStep(profileData: $profileData)
-                                            .id("step-4")
-                                    case 5:
-                                        PersonalitySocialStep(profileData: $profileData)
-                                            .id("step-5")
-                                    case 6:
-                                        PrivacyTrustStep(profileData: $profileData)
-                                            .id("step-6")
-                                    default:
-                                        EmptyView()
+                            GeometryReader { scrollGeometry in
+                                ScrollView {
+                                    VStack(spacing: 24) {
+                                        switch currentStep {
+                                        case 1:
+                                            CoreIdentityStep(profileData: $profileData)
+                                                .id("step-1")
+                                        case 2:
+                                            ProfessionalBackgroundStep(profileData: $profileData)
+                                                .id("step-2")
+                                        case 3:
+                                            NetworkingIntentionStep(profileData: $profileData)
+                                                .id("step-3")
+                                        case 4:
+                                            NetworkingPreferencesStep(profileData: $profileData)
+                                                .id("step-4")
+                                        case 5:
+                                            PersonalitySocialStep(profileData: $profileData)
+                                                .id("step-5")
+                                        case 6:
+                                            PrivacyTrustStep(profileData: $profileData)
+                                                .id("step-6")
+                                        default:
+                                            EmptyView()
+                                        }
+                                    }
+                                    .padding(.horizontal, 32)
+                                    .padding(.top, 32)
+                                    .background(
+                                        GeometryReader { contentGeometry in
+                                            Color.clear
+                                                .preference(key: ScrollOffsetPreferenceKey.self, value: contentGeometry.frame(in: .named("scroll")).minY)
+                                                .preference(key: ContentHeightPreferenceKey.self, value: contentGeometry.size.height)
+                                        }
+                                    )
+                                    .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+                                        scrollOffset = -value
+                                        checkIfReachedBottom()
+                                    }
+                                    .onPreferenceChange(ContentHeightPreferenceKey.self) { value in
+                                        contentHeight = value
+                                        // Delay check to allow layout to settle
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                            checkIfReachedBottom()
+                                        }
+                                    }
+                                    .onChange(of: currentStep) { newStep in
+                                        // Reset bottom state when step changes
+                                        hasReachedBottom[newStep] = false
+                                        // Only scroll to top when step actually changes, not during picker interactions
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                            withAnimation(.easeInOut(duration: 0.3)) {
+                                                proxy.scrollTo("step-\(newStep)", anchor: .top)
+                                            }
+                                            // Check if bottom reached after scroll animation
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                                checkIfReachedBottom()
+                                            }
+                                        }
                                     }
                                 }
-                                .padding(.horizontal, 32)
-                                .padding(.top, 32)
-                                .onChange(of: currentStep) { newStep in
-                                    // Only scroll to top when step actually changes, not during picker interactions
+                                .coordinateSpace(name: "scroll")
+                                .onAppear {
+                                    scrollViewHeight = scrollGeometry.size.height
+                                    // Check if bottom reached after layout completes
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                        withAnimation(.easeInOut(duration: 0.3)) {
-                                            proxy.scrollTo("step-\(newStep)", anchor: .top)
-                                        }
+                                        checkIfReachedBottom()
+                                    }
+                                }
+                                .onChange(of: scrollGeometry.size.height) { newHeight in
+                                    scrollViewHeight = newHeight
+                                    // Delay check to allow layout to settle
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                        checkIfReachedBottom()
                                     }
                                 }
                             }
@@ -461,12 +534,11 @@ struct CoreIdentityStep: View {
     @State private var name = ""
     @State private var email = ""
     @State private var phoneNumber = ""
+    @State private var selectedCountryCode: CountryCode = .china
     @State private var bio = ""
     @State private var pronouns = ""
     @State private var location = ""
     @State private var personalWebsite = ""
-    @State private var githubUrl = ""
-    @State private var linkedinUrl = ""
     
     var body: some View {
         VStack(spacing: 20) {
@@ -513,9 +585,28 @@ struct CoreIdentityStep: View {
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 
-                TextField("Enter your phone number", text: $phoneNumber)
-                    .textFieldStyle(CustomTextFieldStyle())
-                    .keyboardType(.phonePad)
+                VStack(spacing: 8) {
+                    // Country code selector
+                    HStack {
+                        Text("Country Code")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        
+                        Spacer()
+                        
+                        Picker("Country Code", selection: $selectedCountryCode) {
+                            ForEach(CountryCode.allCases, id: \.self) { code in
+                                Text(code.displayName).tag(code)
+                            }
+                        }
+                        .pickerStyle(MenuPickerStyle())
+                        .frame(width: 120)
+                    }
+                    
+                    TextField("Enter your phone number", text: $phoneNumber)
+                        .textFieldStyle(CustomTextFieldStyle())
+                        .keyboardType(.phonePad)
+                }
             }
             
             // Bio
@@ -570,35 +661,17 @@ struct CoreIdentityStep: View {
             
             // Personal Website
             VStack(alignment: .leading, spacing: 8) {
-                Text("Personal Website")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                HStack {
+                    Text("Personal Website")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    
+                    Text("(LinkedIn, GitHub, etc.)")
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                }
                 
                 TextField("https://yourwebsite.com", text: $personalWebsite)
-                    .textFieldStyle(CustomTextFieldStyle())
-                    .keyboardType(.URL)
-                    .autocapitalization(.none)
-            }
-            
-            // GitHub URL
-            VStack(alignment: .leading, spacing: 8) {
-                Text("GitHub Profile")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                
-                TextField("https://github.com/username", text: $githubUrl)
-                    .textFieldStyle(CustomTextFieldStyle())
-                    .keyboardType(.URL)
-                    .autocapitalization(.none)
-            }
-            
-            // LinkedIn URL
-            VStack(alignment: .leading, spacing: 8) {
-                Text("LinkedIn Profile")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                
-                TextField("https://linkedin.com/in/username", text: $linkedinUrl)
                     .textFieldStyle(CustomTextFieldStyle())
                     .keyboardType(.URL)
                     .autocapitalization(.none)
@@ -609,42 +682,75 @@ struct CoreIdentityStep: View {
             if let coreIdentity = profileData.coreIdentity {
                 name = coreIdentity.name
                 email = coreIdentity.email
-                phoneNumber = coreIdentity.phoneNumber ?? ""
+                
+                // Parse phone number if it includes country code
+                if let storedPhoneNumber = coreIdentity.phoneNumber, !storedPhoneNumber.isEmpty {
+                    let (countryCode, localNumber) = parsePhoneNumber(storedPhoneNumber)
+                    if let code = countryCode {
+                        selectedCountryCode = code
+                    }
+                    phoneNumber = localNumber
+                } else {
+                    phoneNumber = ""
+                }
+                
                 bio = coreIdentity.bio ?? ""
                 pronouns = coreIdentity.pronouns ?? ""
                 location = coreIdentity.location ?? ""
                 personalWebsite = coreIdentity.personalWebsite ?? ""
-                githubUrl = coreIdentity.githubUrl ?? ""
-                linkedinUrl = coreIdentity.linkedinUrl ?? ""
             }
         }
         .onChange(of: name) { _ in updateProfileData() }
         .onChange(of: email) { _ in updateProfileData() }
         .onChange(of: phoneNumber) { _ in updateProfileData() }
+        .onChange(of: selectedCountryCode) { _ in updateProfileData() }
         .onChange(of: bio) { _ in updateProfileData() }
         .onChange(of: pronouns) { _ in updateProfileData() }
         .onChange(of: location) { _ in updateProfileData() }
         .onChange(of: personalWebsite) { _ in updateProfileData() }
-        .onChange(of: githubUrl) { _ in updateProfileData() }
-        .onChange(of: linkedinUrl) { _ in updateProfileData() }
     }
     
     private func updateProfileData() {
+        // Combine country code and phone number when saving
+        let fullPhoneNumber: String?
+        if phoneNumber.isEmpty {
+            fullPhoneNumber = nil
+        } else {
+            fullPhoneNumber = "\(selectedCountryCode.code)\(phoneNumber)"
+        }
+        
         let coreIdentity = CoreIdentity(
             name: name,
             email: email,
-            phoneNumber: phoneNumber.isEmpty ? nil : phoneNumber,
+            phoneNumber: fullPhoneNumber,
             profileImage: nil,
             bio: bio.isEmpty ? nil : bio,
             pronouns: pronouns.isEmpty ? nil : pronouns,
             location: location.isEmpty ? nil : location,
             personalWebsite: personalWebsite.isEmpty ? nil : personalWebsite,
-            githubUrl: githubUrl.isEmpty ? nil : githubUrl,
-            linkedinUrl: linkedinUrl.isEmpty ? nil : linkedinUrl,
+            githubUrl: nil,
+            linkedinUrl: nil,
             timeZone: TimeZone.current.identifier,
             availableTimeslot: AvailableTimeslot.createDefault()
         )
         profileData.coreIdentity = coreIdentity
+    }
+    
+    // Helper function to parse phone number with country code
+    private func parsePhoneNumber(_ phoneNumber: String) -> (CountryCode?, String) {
+        // Sort country codes by length (longest first) to match longer codes before shorter ones
+        // This prevents "+886" from being matched as "+86"
+        let sortedCodes = CountryCode.allCases.sorted { $0.code.count > $1.code.count }
+        
+        // Check if phone number starts with a country code
+        for countryCode in sortedCodes {
+            if phoneNumber.hasPrefix(countryCode.code) {
+                let localNumber = String(phoneNumber.dropFirst(countryCode.code.count))
+                return (countryCode, localNumber)
+            }
+        }
+        // If no country code found, assume it's already a local number
+        return (nil, phoneNumber)
     }
 }
 
@@ -1343,11 +1449,32 @@ struct NetworkingIntentionStep: View {
                     ForEach(Array(selectedSubIntentions), id: \.self) { subIntention in
                         switch subIntention {
                         case .careerDirection:
-                            CareerDirectionForm(functions: $marketingFunctions, productTech: $productTechFunctions, dataAnalytics: $dataAnalyticsFunctions, financeConsulting: $financeConsultingFunctions, operationsHR: $operationsHRFunctions, creativeMedia: $creativeMediaFunctions)
+                            CareerDirectionForm(
+                                functions: $marketingFunctions,
+                                productTech: $productTechFunctions,
+                                dataAnalytics: $dataAnalyticsFunctions,
+                                financeConsulting: $financeConsultingFunctions,
+                                operationsHR: $operationsHRFunctions,
+                                creativeMedia: $creativeMediaFunctions,
+                                onUpdate: {
+                                    updateCareerDirectionData()
+                                }
+                            )
                         case .skillDevelopment:
-                            SkillDevelopmentForm(skills: $skills, newSkill: $newSkill)
+                            SkillDevelopmentForm(
+                                skills: $skills,
+                                newSkill: $newSkill,
+                                onUpdate: {
+                                    updateSkillDevelopmentData()
+                                }
+                            )
                         case .industryTransition:
-                            IndustryTransitionForm(industries: $industries)
+                            IndustryTransitionForm(
+                                industries: $industries,
+                                onUpdate: {
+                                    updateIndustryTransitionData()
+                                }
+                            )
                         default:
                             EmptyView()
                         }
@@ -1358,11 +1485,19 @@ struct NetworkingIntentionStep: View {
         .onAppear {
             loadExistingData()
         }
-        .onChange(of: selectedIntention) { _ in updateProfileData() }
+        .onChange(of: selectedIntention) { _ in
+            selectedSubIntentions.removeAll()
+            updateProfileData()
+        }
         .onChange(of: selectedSubIntentions) { _ in updateProfileData() }
-        .onChange(of: careerDirectionData) { _ in updateProfileData() }
-        .onChange(of: skillDevelopmentData) { _ in updateProfileData() }
-        .onChange(of: industryTransitionData) { _ in updateProfileData() }
+        .onChange(of: marketingFunctions) { _ in updateCareerDirectionData() }
+        .onChange(of: productTechFunctions) { _ in updateCareerDirectionData() }
+        .onChange(of: dataAnalyticsFunctions) { _ in updateCareerDirectionData() }
+        .onChange(of: financeConsultingFunctions) { _ in updateCareerDirectionData() }
+        .onChange(of: operationsHRFunctions) { _ in updateCareerDirectionData() }
+        .onChange(of: creativeMediaFunctions) { _ in updateCareerDirectionData() }
+        .onChange(of: skills) { _ in updateSkillDevelopmentData() }
+        .onChange(of: industries) { _ in updateIndustryTransitionData() }
     }
     
     private func getIntentionDescription(_ intention: NetworkingIntentionType) -> String {
@@ -1385,7 +1520,95 @@ struct NetworkingIntentionStep: View {
             careerDirectionData = networkingIntention.careerDirection
             skillDevelopmentData = networkingIntention.skillDevelopment
             industryTransitionData = networkingIntention.industryTransition
+            
+            // Load career direction functions from data
+            if let careerData = careerDirectionData {
+                loadCareerDirectionFunctions(from: careerData)
+            }
+            
+            // Load skill development from data
+            if let skillData = skillDevelopmentData {
+                skills = skillData.skills
+            }
+            
+            // Load industry transition from data
+            if let industryData = industryTransitionData {
+                industries = industryData.industries
+            }
         }
+    }
+    
+    private func loadCareerDirectionFunctions(from data: CareerDirectionData) {
+        // Reset all functions
+        marketingFunctions = [:]
+        productTechFunctions = [:]
+        dataAnalyticsFunctions = [:]
+        financeConsultingFunctions = [:]
+        operationsHRFunctions = [:]
+        creativeMediaFunctions = [:]
+        
+        // Load from CareerDirectionData
+        for functionSelection in data.functions {
+            var options: [String] = []
+            if !functionSelection.learnIn.isEmpty {
+                options.append("learn")
+            }
+            if !functionSelection.guideIn.isEmpty {
+                options.append("guide")
+            }
+            
+            let functionName = functionSelection.functionName
+            
+            // Determine which dictionary to use based on function name
+            if ["Brand Marketing", "Digital Marketing", "Social Media Operations", "Content Strategy"].contains(functionName) {
+                marketingFunctions[functionName] = options
+            } else if ["Product Management", "Product Operations", "Front-end Development", "UX / UI Design", "Product Data Analytics", "Backend Development"].contains(functionName) {
+                productTechFunctions[functionName] = options
+            } else if ["Data Analyst", "Growth Analyst", "Marketing Data", "Business Intelligence", "Machine Learning Ops", "Research Analyst"].contains(functionName) {
+                dataAnalyticsFunctions[functionName] = options
+            } else if ["Investment Banking", "Equity Research", "VC / PE Analyst", "Strategy Consulting", "Corporate Finance", "Financial Planning"].contains(functionName) {
+                financeConsultingFunctions[functionName] = options
+            } else if ["Project Management", "Business Operations", "Supply Chain", "HR / Talent Acquisition", "Training & L&D", "Organizational Development"].contains(functionName) {
+                operationsHRFunctions[functionName] = options
+            } else if ["Copywriting", "PR & Communications", "Art Direction", "Video Editing / Motion Design", "Creative Strategy", "Advertising Production"].contains(functionName) {
+                creativeMediaFunctions[functionName] = options
+            }
+        }
+    }
+    
+    private func updateCareerDirectionData() {
+        var allFunctions: [FunctionSelection] = []
+        
+        // Combine all function dictionaries
+        let allFunctionDicts: [String: [String]] = marketingFunctions
+            .merging(productTechFunctions) { (_, new) in new }
+            .merging(dataAnalyticsFunctions) { (_, new) in new }
+            .merging(financeConsultingFunctions) { (_, new) in new }
+            .merging(operationsHRFunctions) { (_, new) in new }
+            .merging(creativeMediaFunctions) { (_, new) in new }
+        
+        for (functionName, options) in allFunctionDicts {
+            let learnIn = options.contains("learn") ? ["learn"] : []
+            let guideIn = options.contains("guide") ? ["guide"] : []
+            allFunctions.append(FunctionSelection(
+                functionName: functionName,
+                learnIn: learnIn,
+                guideIn: guideIn
+            ))
+        }
+        
+        careerDirectionData = allFunctions.isEmpty ? nil : CareerDirectionData(functions: allFunctions)
+        updateProfileData()
+    }
+    
+    private func updateSkillDevelopmentData() {
+        skillDevelopmentData = skills.isEmpty ? nil : SkillDevelopmentData(skills: skills)
+        updateProfileData()
+    }
+    
+    private func updateIndustryTransitionData() {
+        industryTransitionData = industries.isEmpty ? nil : IndustryTransitionData(industries: industries)
+        updateProfileData()
     }
     
     private func updateProfileData() {
@@ -1408,6 +1631,7 @@ struct CareerDirectionForm: View {
     @Binding var financeConsulting: [String: [String]]
     @Binding var operationsHR: [String: [String]]
     @Binding var creativeMedia: [String: [String]]
+    var onUpdate: (() -> Void)? = nil
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -1419,42 +1643,48 @@ struct CareerDirectionForm: View {
             FunctionSection(
                 title: "Marketing & Branding",
                 functions: ["Brand Marketing", "Digital Marketing", "Social Media Operations", "Content Strategy"],
-                selectedFunctions: $functions
+                selectedFunctions: $functions,
+                onUpdate: onUpdate
             )
             
             // Product & Tech
             FunctionSection(
                 title: "Product & Tech",
                 functions: ["Product Management", "Product Operations", "Front-end Development", "UX / UI Design", "Product Data Analytics", "Backend Development"],
-                selectedFunctions: $productTech
+                selectedFunctions: $productTech,
+                onUpdate: onUpdate
             )
             
             // Data & Analytics
             FunctionSection(
                 title: "Data & Analytics",
                 functions: ["Data Analyst", "Growth Analyst", "Marketing Data", "Business Intelligence", "Machine Learning Ops", "Research Analyst"],
-                selectedFunctions: $dataAnalytics
+                selectedFunctions: $dataAnalytics,
+                onUpdate: onUpdate
             )
             
             // Finance & Consulting
             FunctionSection(
                 title: "Finance & Consulting",
                 functions: ["Investment Banking", "Equity Research", "VC / PE Analyst", "Strategy Consulting", "Corporate Finance", "Financial Planning"],
-                selectedFunctions: $financeConsulting
+                selectedFunctions: $financeConsulting,
+                onUpdate: onUpdate
             )
             
             // Operations & HR
             FunctionSection(
                 title: "Operations & HR",
                 functions: ["Project Management", "Business Operations", "Supply Chain", "HR / Talent Acquisition", "Training & L&D", "Organizational Development"],
-                selectedFunctions: $operationsHR
+                selectedFunctions: $operationsHR,
+                onUpdate: onUpdate
             )
             
             // Creative & Media
             FunctionSection(
                 title: "Creative & Media",
                 functions: ["Copywriting", "PR & Communications", "Art Direction", "Video Editing / Motion Design", "Creative Strategy", "Advertising Production"],
-                selectedFunctions: $creativeMedia
+                selectedFunctions: $creativeMedia,
+                onUpdate: onUpdate
             )
         }
     }
@@ -1465,6 +1695,7 @@ struct FunctionSection: View {
     let title: String
     let functions: [String]
     @Binding var selectedFunctions: [String: [String]]
+    var onUpdate: (() -> Void)? = nil
     
     var body: some View {
             VStack(alignment: .leading, spacing: 8) {
@@ -1491,6 +1722,7 @@ struct FunctionSection: View {
                                         selectedFunctions[function] = nil
                                     }
                                 }
+                                onUpdate?()
                             }
                         ),
                         guideIn: Binding(
@@ -1508,6 +1740,7 @@ struct FunctionSection: View {
                                         selectedFunctions[function] = nil
                                     }
                                 }
+                                onUpdate?()
                             }
                         )
                     )
@@ -1571,6 +1804,7 @@ struct FunctionRow: View {
 struct SkillDevelopmentForm: View {
     @Binding var skills: [SkillSelection]
     @Binding var newSkill: String
+    var onUpdate: (() -> Void)? = nil
     
     private let commonSkills = ["Product Strategy", "Presentation Skills", "Data Analytics", "AIGC", "Project Management", "Leadership", "Communication", "Problem Solving"]
     
@@ -1585,12 +1819,13 @@ struct SkillDevelopmentForm: View {
                 TextField("Add a skill", text: $newSkill)
                     .textFieldStyle(CustomTextFieldStyle())
                 
-                Button("Add") {
-                    if !newSkill.isEmpty && !skills.contains(where: { $0.skillName == newSkill }) {
-                        skills.append(SkillSelection(skillName: newSkill, learnIn: false, guideIn: false))
-                        newSkill = ""
+                    Button("Add") {
+                        if !newSkill.isEmpty && !skills.contains(where: { $0.skillName == newSkill }) {
+                            skills.append(SkillSelection(skillName: newSkill, learnIn: false, guideIn: false))
+                            newSkill = ""
+                            onUpdate?()
+                        }
                     }
-                }
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
             }
@@ -1601,6 +1836,7 @@ struct SkillDevelopmentForm: View {
                     if !skills.contains(where: { $0.skillName == skill }) {
                         Button(action: {
                             skills.append(SkillSelection(skillName: skill, learnIn: false, guideIn: false))
+                            onUpdate?()
                         }) {
                             Text("+ \(skill)")
                                 .font(.system(size: 14, weight: .medium))
@@ -1622,7 +1858,9 @@ struct SkillDevelopmentForm: View {
                             skill: $skills[index],
                             onDelete: {
                                 skills.remove(at: index)
-                            }
+                                onUpdate?()
+                            },
+                            onUpdate: onUpdate
                         )
                     }
                 }
@@ -1635,6 +1873,7 @@ struct SkillDevelopmentForm: View {
 struct SkillRow: View {
     @Binding var skill: SkillSelection
     let onDelete: () -> Void
+    var onUpdate: (() -> Void)? = nil
     
     var body: some View {
         HStack {
@@ -1652,6 +1891,7 @@ struct SkillRow: View {
                     
                     Button(action: {
                         skill.learnIn.toggle()
+                        onUpdate?()
                     }) {
                         Image(systemName: skill.learnIn ? "checkmark.square.fill" : "square")
                             .font(.system(size: 16))
@@ -1666,6 +1906,7 @@ struct SkillRow: View {
                     
                     Button(action: {
                         skill.guideIn.toggle()
+                        onUpdate?()
                     }) {
                         Image(systemName: skill.guideIn ? "checkmark.square.fill" : "square")
                             .font(.system(size: 16))
@@ -1690,6 +1931,7 @@ struct SkillRow: View {
 // MARK: - Industry Transition Form
 struct IndustryTransitionForm: View {
     @Binding var industries: [IndustrySelection]
+    var onUpdate: (() -> Void)? = nil
     
     private let industryOptions = [
         "Technology (Software, Data, AI, IT)",
@@ -1718,20 +1960,26 @@ struct IndustryTransitionForm: View {
                             get: { industries.first(where: { $0.industryName == industry })?.learnIn ?? false },
                             set: { isSelected in
                                 if let index = industries.firstIndex(where: { $0.industryName == industry }) {
-                                    industries[index].learnIn = isSelected
+                                    var updated = industries[index]
+                                    updated.learnIn = isSelected
+                                    industries[index] = updated
                                 } else {
                                     industries.append(IndustrySelection(industryName: industry, learnIn: isSelected, guideIn: false))
                                 }
+                                onUpdate?()
                             }
                         ),
                         guideIn: Binding(
                             get: { industries.first(where: { $0.industryName == industry })?.guideIn ?? false },
                             set: { isSelected in
                                 if let index = industries.firstIndex(where: { $0.industryName == industry }) {
-                                    industries[index].guideIn = isSelected
+                                    var updated = industries[index]
+                                    updated.guideIn = isSelected
+                                    industries[index] = updated
                                 } else {
                                     industries.append(IndustrySelection(industryName: industry, learnIn: false, guideIn: isSelected))
                                 }
+                                onUpdate?()
                             }
                         )
                     )
@@ -1796,9 +2044,10 @@ struct IndustryRow: View {
 struct PersonalitySocialStep: View {
     @Binding var profileData: ProfileCreationData
     @State private var preferredMeetingVibe = MeetingVibe.casual
-    @State private var communicationStyle = CommunicationStyle.collaborative
     @State private var selfIntroduction = ""
     @StateObject private var selectionHelper = SelectionHelper()
+    @State private var scrollOffset: CGFloat = 0
+    @State private var pickerFrame: CGRect = .zero
     
     var body: some View {
         VStack(spacing: 20) {
@@ -1937,31 +2186,6 @@ struct PersonalitySocialStep: View {
                 .padding(.vertical, 12)
                 .background(Color.gray.opacity(0.1))
                 .cornerRadius(8)
-                .onTapGesture {
-                    // Prevent any unwanted scroll behavior when picker is tapped
-                }
-            }
-            
-            // Communication Style
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Communication Style")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                
-                Picker("Communication Style", selection: $communicationStyle) {
-                    ForEach(CommunicationStyle.allCases, id: \.self) { style in
-                        Text(style.displayName).tag(style)
-                    }
-                }
-                .pickerStyle(MenuPickerStyle())
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(8)
-                .onTapGesture {
-                    // Prevent any unwanted scroll behavior when picker is tapped
-                }
             }
         }
         .onAppear {
@@ -1970,14 +2194,12 @@ struct PersonalitySocialStep: View {
                 selectionHelper.selectedValues = Set(personalitySocial.valuesTags)
                 selectionHelper.selectedHobbies = Set(personalitySocial.hobbies)
                 preferredMeetingVibe = personalitySocial.preferredMeetingVibe
-                communicationStyle = personalitySocial.communicationStyle
                 selfIntroduction = personalitySocial.selfIntroduction ?? ""
             }
         }
         .onChange(of: selectionHelper.selectedValues) { _ in updateProfileData() }
         .onChange(of: selectionHelper.selectedHobbies) { _ in updateProfileData() }
         .onChange(of: preferredMeetingVibe) { _ in updateProfileData() }
-        .onChange(of: communicationStyle) { _ in updateProfileData() }
         .onChange(of: selfIntroduction) { _ in updateProfileData() }
     }
     
@@ -1987,7 +2209,6 @@ struct PersonalitySocialStep: View {
             valuesTags: Array(selectionHelper.selectedValues),
             hobbies: Array(selectionHelper.selectedHobbies),
             preferredMeetingVibe: preferredMeetingVibe,
-            communicationStyle: communicationStyle,
             selfIntroduction: selfIntroduction.isEmpty ? nil : selfIntroduction
         )
         profileData.personalitySocial = personalitySocial
@@ -2003,6 +2224,7 @@ struct PrivacyTrustStep: View {
     @State private var locationVisibility = VisibilityLevel.public_
     @State private var skillsVisibility = VisibilityLevel.public_
     @State private var interestsVisibility = VisibilityLevel.public_
+    @State private var timeslotVisibility = VisibilityLevel.private_
     @State private var dataSharingConsent = false
     
     var body: some View {
@@ -2043,6 +2265,11 @@ struct PrivacyTrustStep: View {
                         title: "Interests",
                         visibility: $interestsVisibility
                     )
+                    
+                    PrivacyToggleRow(
+                        title: "Timeslot",
+                        visibility: $timeslotVisibility
+                    )
                 }
             }
             
@@ -2066,6 +2293,7 @@ struct PrivacyTrustStep: View {
                 locationVisibility = privacyTrust.visibilitySettings.location
                 skillsVisibility = privacyTrust.visibilitySettings.skills
                 interestsVisibility = privacyTrust.visibilitySettings.interests
+                timeslotVisibility = privacyTrust.visibilitySettings.timeslot
                 dataSharingConsent = privacyTrust.dataSharingConsent
             }
         }
@@ -2075,6 +2303,7 @@ struct PrivacyTrustStep: View {
         .onChange(of: locationVisibility) { _ in updateProfileData() }
         .onChange(of: skillsVisibility) { _ in updateProfileData() }
         .onChange(of: interestsVisibility) { _ in updateProfileData() }
+        .onChange(of: timeslotVisibility) { _ in updateProfileData() }
         .onChange(of: dataSharingConsent) { _ in updateProfileData() }
     }
     
@@ -2085,7 +2314,8 @@ struct PrivacyTrustStep: View {
             phoneNumber: phoneNumberVisibility,
             location: locationVisibility,
             skills: skillsVisibility,
-            interests: interestsVisibility
+            interests: interestsVisibility,
+            timeslot: timeslotVisibility
         )
         
         let privacyTrust = PrivacyTrust(
@@ -2535,6 +2765,21 @@ struct AddEducationView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Preference Keys for Scroll Detection
+struct ScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+struct ContentHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

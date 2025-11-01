@@ -99,11 +99,11 @@ struct DiscussionTopics {
 // MARK: - Values Options
 struct ValuesOptions {
     static let allValues = [
-        "Innovation", "Integrity", "Collaboration", "Excellence", "Creativity",
-        "Leadership", "Empathy", "Resilience", "Authenticity", "Growth",
-        "Service", "Curiosity", "Passion", "Humility", "Courage",
-        "Trust", "Transparency", "Diversity", "Inclusion", "Sustainability",
-        "Accountability", "Adaptability", "Optimism", "Perseverance", "Wisdom"
+        "Innovative", "Principled", "Collaborative", "Excellent", "Creative",
+        "Leadership-oriented", "Empathetic", "Resilient", "Authentic", "Growth-oriented",
+        "Service-oriented", "Curious", "Passionate", "Humble", "Courageous",
+        "Trustworthy", "Transparent", "Diverse", "Inclusive", "Sustainable",
+        "Accountable", "Adaptable", "Optimistic", "Persistent", "Wise"
     ]
 }
 
@@ -114,8 +114,8 @@ struct HobbiesOptions {
         "Hiking", "Swimming", "Running", "Cycling", "Yoga",
         "Music", "Dancing", "Painting", "Drawing", "Gardening",
         "Gaming", "Movies", "Theater", "Museums", "Volunteering",
-        "Learning Languages", "Chess", "Board Games", "Coffee", "Wine Tasting",
-        "Fitness", "Meditation", "Podcasts", "Blogging", "Networking"
+        "Chess", "Board Games", "Coffee", "Wine Tasting",
+        "Fitness", "Podcasts", "Blogging"
     ]
 }
 
