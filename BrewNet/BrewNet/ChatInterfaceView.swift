@@ -25,7 +25,7 @@ struct ChatInterfaceView: View {
                     Button("AI Assistant") {
                         showingAISuggestions.toggle()
                     }
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 }
             }
         }
@@ -69,12 +69,12 @@ struct ChatInterfaceView: View {
         VStack(spacing: 20) {
             Image(systemName: "message.circle.fill")
                 .font(.system(size: 80))
-                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                .foregroundColor(BrewTheme.secondaryBrown)
             
             Text("No Chats Yet")
                 .font(.title2)
                 .fontWeight(.bold)
-                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                .foregroundColor(BrewTheme.primaryBrown)
             
             Text("Start swiping to find your perfect match and begin chatting!")
                 .font(.body)
@@ -89,7 +89,7 @@ struct ChatInterfaceView: View {
             .foregroundColor(.white)
             .padding(.horizontal, 30)
             .padding(.vertical, 12)
-            .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+            .background(BrewTheme.gradientPrimary())
             .cornerRadius(25)
         }
         .padding(40)
@@ -138,7 +138,7 @@ struct ChatInterfaceView: View {
             }) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
             }
             
             // User Info with match indicator
@@ -146,7 +146,7 @@ struct ChatInterfaceView: View {
                 ZStack(alignment: .bottomTrailing) {
                     Image(systemName: session.user.avatar)
                         .font(.system(size: 40))
-                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        .foregroundColor(BrewTheme.secondaryBrown)
                     
                     // Match indicator
                     if session.user.isMatched {
@@ -167,7 +167,7 @@ struct ChatInterfaceView: View {
                     HStack(spacing: 8) {
                         Text(session.user.name)
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .foregroundColor(BrewTheme.primaryBrown)
                         
                         // Match type indicator
                         if session.user.isMatched {
@@ -214,7 +214,7 @@ struct ChatInterfaceView: View {
             }) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 18))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
             }
         }
         .padding(.horizontal, 16)
@@ -266,7 +266,7 @@ struct ChatInterfaceView: View {
             .padding(.horizontal, 16)
         }
         .padding(.vertical, 8)
-        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+        .background(BrewTheme.background)
     }
     
     private var messageInputView: some View {
@@ -286,7 +286,7 @@ struct ChatInterfaceView: View {
                     .font(.system(size: 16))
                     .foregroundColor(.white)
                     .frame(width: 36, height: 36)
-                    .background(messageText.isEmpty ? Color.gray : Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .background(messageText.isEmpty ? Color.gray : BrewTheme.primaryBrown)
                     .clipShape(Circle())
             }
             .disabled(messageText.isEmpty)
@@ -535,12 +535,12 @@ struct MessageBubbleView: View {
             
             Text(message.content)
                 .font(.system(size: 16))
-                .foregroundColor(message.isFromUser ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                .foregroundColor(message.isFromUser ? .white : BrewTheme.primaryBrown)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
                 .background(
                     message.isFromUser
-                        ? Color(red: 0.4, green: 0.2, blue: 0.1)
+                        ? BrewTheme.primaryBrown
                         : Color.gray.opacity(0.1)
                 )
                 .cornerRadius(20, corners: message.isFromUser ? [.topLeft, .topRight, .bottomLeft] : [.topLeft, .topRight, .bottomRight])
