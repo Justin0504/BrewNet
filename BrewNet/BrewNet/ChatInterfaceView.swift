@@ -10,23 +10,21 @@ struct ChatInterfaceView: View {
     @State private var isLoadingSuggestions = false
     
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                if let session = selectedSession {
-                    chatView(for: session)
-                } else {
-                    chatListView
-                }
+        VStack(spacing: 0) {
+            if let session = selectedSession {
+                chatView(for: session)
+            } else {
+                chatListView
             }
-            .navigationTitle("Chat")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("AI Assistant") {
-                        showingAISuggestions.toggle()
-                    }
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+        }
+        .navigationTitle("Chat")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("AI Assistant") {
+                    showingAISuggestions.toggle()
                 }
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
             }
         }
         .onAppear {

@@ -122,7 +122,7 @@ struct LoginView: View {
                             
                             // 提示信息
                             VStack(spacing: 8) {
-                                Text("💡 New users can login directly - we'll create your account automatically!")
+                                Text("New user? Create an account to get started!")
                                     .font(.system(size: 14, weight: .medium))
                                     .foregroundColor(Color(red: 0.2, green: 0.4, blue: 0.2))
                                     .multilineTextAlignment(.center)
@@ -131,7 +131,7 @@ struct LoginView: View {
                                 Button(action: {
                                     showingRegisterView = true
                                 }) {
-                                    Text("Or sign up manually")
+                                    Text("Sign up now")
                                         .font(.system(size: 16, weight: .medium))
                                         .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                                         .underline()

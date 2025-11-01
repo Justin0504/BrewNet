@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     core_identity JSONB NOT NULL,
     professional_background JSONB NOT NULL,
-    networking_intent JSONB NOT NULL,
+    networking_intention JSONB NOT NULL,
+    networking_preferences JSONB NOT NULL,
     personality_social JSONB NOT NULL,
     privacy_trust JSONB NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -185,6 +186,55 @@ ALTER TABLE coffee_chats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE anonymous_posts ENABLE ROW LEVEL SECURITY;
 
+-- =====================================================
+-- 删除旧的策略（如果存在）
+-- =====================================================
+
+-- users 表策略
+DROP POLICY IF EXISTS "Users can view their own data" ON users;
+DROP POLICY IF EXISTS "Users can update their own data" ON users;
+DROP POLICY IF EXISTS "Users can insert their own data" ON users;
+
+-- profiles 表策略
+DROP POLICY IF EXISTS "Users can view their own profile" ON profiles;
+DROP POLICY IF EXISTS "Users can update their own profile" ON profiles;
+DROP POLICY IF EXISTS "Users can insert their own profile" ON profiles;
+
+-- posts 表策略
+DROP POLICY IF EXISTS "Anyone can view posts" ON posts;
+DROP POLICY IF EXISTS "Users can insert their own posts" ON posts;
+DROP POLICY IF EXISTS "Users can update their own posts" ON posts;
+DROP POLICY IF EXISTS "Users can delete their own posts" ON posts;
+
+-- likes 表策略
+DROP POLICY IF EXISTS "Users can view all likes" ON likes;
+DROP POLICY IF EXISTS "Users can manage their own likes" ON likes;
+
+-- saves 表策略
+DROP POLICY IF EXISTS "Users can view their own saves" ON saves;
+DROP POLICY IF EXISTS "Users can manage their own saves" ON saves;
+
+-- matches 表策略
+DROP POLICY IF EXISTS "Users can view their own matches" ON matches;
+DROP POLICY IF EXISTS "Users can manage their own matches" ON matches;
+
+-- coffee_chats 表策略
+DROP POLICY IF EXISTS "Users can view their own coffee chats" ON coffee_chats;
+DROP POLICY IF EXISTS "Users can manage their own coffee chats" ON coffee_chats;
+
+-- messages 表策略
+DROP POLICY IF EXISTS "Users can view their own messages" ON messages;
+DROP POLICY IF EXISTS "Users can send messages" ON messages;
+DROP POLICY IF EXISTS "Users can update their own messages" ON messages;
+
+-- anonymous_posts 表策略
+DROP POLICY IF EXISTS "Anyone can view anonymous posts" ON anonymous_posts;
+DROP POLICY IF EXISTS "Anyone can insert anonymous posts" ON anonymous_posts;
+
+-- =====================================================
+-- 创建新的策略
+-- =====================================================
+
 -- users 表策略
 CREATE POLICY "Users can view their own data" ON users
     FOR SELECT USING (auth.uid() = id);
@@ -276,7 +326,19 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+-- =====================================================
+-- 删除旧的触发器（如果存在）
+-- =====================================================
+
+DROP TRIGGER IF EXISTS update_users_updated_at ON users CASCADE;
+DROP TRIGGER IF EXISTS update_profiles_updated_at ON profiles CASCADE;
+DROP TRIGGER IF EXISTS update_posts_updated_at ON posts CASCADE;
+DROP TRIGGER IF EXISTS update_anonymous_posts_updated_at ON anonymous_posts CASCADE;
+
+-- =====================================================
 -- 为所有表添加 updated_at 触发器
+-- =====================================================
+
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -303,7 +365,8 @@ RETURNS TABLE (
     user_id UUID,
     core_identity JSONB,
     professional_background JSONB,
-    networking_intent JSONB,
+    networking_intention JSONB,
+    networking_preferences JSONB,
     personality_social JSONB,
     privacy_trust JSONB,
     created_at TIMESTAMP WITH TIME ZONE,
@@ -316,7 +379,8 @@ BEGIN
         p.user_id,
         p.core_identity,
         p.professional_background,
-        p.networking_intent,
+        p.networking_intention,
+        p.networking_preferences,
         p.personality_social,
         p.privacy_trust,
         p.created_at,

@@ -46,7 +46,8 @@ class SupabaseService: ObservableObject {
                 user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 core_identity JSONB NOT NULL,
                 professional_background JSONB NOT NULL,
-                networking_intent JSONB NOT NULL,
+                networking_intention JSONB NOT NULL,
+                networking_preferences JSONB NOT NULL,
                 personality_social JSONB NOT NULL,
                 privacy_trust JSONB NOT NULL,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -79,7 +80,8 @@ class SupabaseService: ObservableObject {
             user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             core_identity JSONB NOT NULL,
             professional_background JSONB NOT NULL,
-            networking_intent JSONB NOT NULL,
+            networking_intention JSONB NOT NULL,
+            networking_preferences JSONB NOT NULL,
             personality_social JSONB NOT NULL,
             privacy_trust JSONB NOT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -91,7 +93,8 @@ class SupabaseService: ObservableObject {
         ALTER TABLE profiles 
         ADD COLUMN IF NOT EXISTS core_identity JSONB,
         ADD COLUMN IF NOT EXISTS professional_background JSONB,
-        ADD COLUMN IF NOT EXISTS networking_intent JSONB,
+        ADD COLUMN IF NOT EXISTS networking_intention JSONB,
+        ADD COLUMN IF NOT EXISTS networking_preferences JSONB,
         ADD COLUMN IF NOT EXISTS personality_social JSONB,
         ADD COLUMN IF NOT EXISTS privacy_trust JSONB;
         
@@ -100,7 +103,8 @@ class SupabaseService: ObservableObject {
         SET 
             core_identity = COALESCE(core_identity, '{}'::jsonb),
             professional_background = COALESCE(professional_background, '{}'::jsonb),
-            networking_intent = COALESCE(networking_intent, '{}'::jsonb),
+            networking_intention = COALESCE(networking_intention, '{}'::jsonb),
+            networking_preferences = COALESCE(networking_preferences, '{}'::jsonb),
             personality_social = COALESCE(personality_social, '{}'::jsonb),
             privacy_trust = COALESCE(privacy_trust, '{}'::jsonb);
         
@@ -108,7 +112,8 @@ class SupabaseService: ObservableObject {
         ALTER TABLE profiles 
         ALTER COLUMN core_identity SET NOT NULL,
         ALTER COLUMN professional_background SET NOT NULL,
-        ALTER COLUMN networking_intent SET NOT NULL,
+        ALTER COLUMN networking_intention SET NOT NULL,
+        ALTER COLUMN networking_preferences SET NOT NULL,
         ALTER COLUMN personality_social SET NOT NULL,
         ALTER COLUMN privacy_trust SET NOT NULL;
         

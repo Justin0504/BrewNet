@@ -41,7 +41,8 @@
 存储用户详细资料（JSONB 格式）：
 - `core_identity`: 核心身份信息
 - `professional_background`: 职业背景
-- `networking_intent`: 网络意图
+- `networking_intention`: 网络意图
+- `networking_preferences`: 网络偏好设置
 - `personality_social`: 个性社交信息
 - `privacy_trust`: 隐私信任设置
 
@@ -133,12 +134,13 @@
 
 ### 1. 创建用户资料
 ```sql
-INSERT INTO profiles (user_id, core_identity, professional_background, networking_intent, personality_social, privacy_trust)
+INSERT INTO profiles (user_id, core_identity, professional_background, networking_intention, networking_preferences, personality_social, privacy_trust)
 VALUES (
   'user-uuid-here',
   '{"firstName": "John", "lastName": "Doe", ...}',
   '{"company": "Tech Corp", "jobTitle": "Developer", ...}',
   '{"primaryGoal": "Networking", "openToCoffeeChats": true, ...}',
+  '{"preferredChatFormat": "Virtual", ...}',
   '{"interests": ["Technology", "Coffee"], ...}',
   '{"visibilitySettings": {...}, ...}'
 );

@@ -285,7 +285,6 @@ struct RegisterView: View {
                 }
             }
         }
-        .navigationBarHidden(true)
         .alert("Notice", isPresented: $showAlert) {
             Button("OK") { }
         } message: {
@@ -344,7 +343,9 @@ struct RegisterView: View {
             if selectedAuthMethod == .email {
                 result = await authManager.register(email: email, password: password, name: name)
             } else {
-                result = await authManager.registerWithPhone(phoneNumber: phoneNumber, password: password, name: name)
+                // 拼接国家码和手机号
+                let fullPhoneNumber = "\(selectedCountryCode.code)\(phoneNumber)"
+                result = await authManager.registerWithPhone(phoneNumber: fullPhoneNumber, password: password, name: name)
             }
             
             await MainActor.run {

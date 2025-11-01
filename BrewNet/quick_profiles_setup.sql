@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     core_identity JSONB NOT NULL,
     professional_background JSONB NOT NULL,
-    networking_intent JSONB NOT NULL,
+    networking_intention JSONB NOT NULL,
+    networking_preferences JSONB NOT NULL,
     personality_social JSONB NOT NULL,
     privacy_trust JSONB NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -44,7 +45,12 @@ CREATE INDEX IF NOT EXISTS idx_profiles_created_at ON profiles(created_at);
 -- 4. 启用行级安全
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
--- 5. 创建 RLS 策略
+-- 5. 删除旧的策略（如果存在）
+DROP POLICY IF EXISTS "Users can view their own profile" ON profiles;
+DROP POLICY IF EXISTS "Users can update their own profile" ON profiles;
+DROP POLICY IF EXISTS "Users can insert their own profile" ON profiles;
+
+-- 6. 创建 RLS 策略
 CREATE POLICY "Users can view their own profile" ON profiles
     FOR SELECT USING (auth.uid() = user_id);
 
@@ -54,7 +60,7 @@ CREATE POLICY "Users can update their own profile" ON profiles
 CREATE POLICY "Users can insert their own profile" ON profiles
     FOR INSERT WITH CHECK (auth.uid() = user_id);
 
--- 6. 创建更新时间戳触发器
+-- 7. 创建更新时间戳触发器
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -63,10 +69,14 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+-- 删除旧的触发器（如果存在）
+DROP TRIGGER IF EXISTS update_profiles_updated_at ON profiles CASCADE;
+
+-- 创建触发器
 CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON profiles
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- 7. 完成提示
+-- 8. 完成提示
 DO $$
 BEGIN
     RAISE NOTICE '✅ BrewNet Profiles 表设置完成！';

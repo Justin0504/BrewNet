@@ -8,7 +8,9 @@ struct MainView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             // Matches
-            MatchesView()
+            NavigationStack {
+                MatchesView()
+            }
                 .tabItem {
                     Image(systemName: "heart.fill")
                     Text("Matches")
@@ -16,7 +18,9 @@ struct MainView: View {
                 .tag(0)
             
             // Chat
-            ChatView()
+            NavigationStack {
+                ChatView()
+            }
                 .tabItem {
                     Image(systemName: "message.fill")
                     Text("Chat")
@@ -24,7 +28,9 @@ struct MainView: View {
                 .tag(1)
             
             // Profile
-            ProfileView()
+            NavigationStack {
+                ProfileView()
+            }
                 .tabItem {
                     Image(systemName: "person.fill")
                     Text("Profile")
