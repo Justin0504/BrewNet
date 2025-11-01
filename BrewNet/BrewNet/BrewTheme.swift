@@ -6,6 +6,7 @@ struct BrewTheme {
     static let secondaryBrown = Color(red: 0.60, green: 0.40, blue: 0.20)
     static let background = Color(red: 0.98, green: 0.97, blue: 0.95) // off-white
     static let backgroundCard = Color.white
+    static let accentColor = Color(red: 1.0, green: 0.5, blue: 0.0) // Orange accent
     
     // Helpers
     static func gradientPrimary() -> LinearGradient {

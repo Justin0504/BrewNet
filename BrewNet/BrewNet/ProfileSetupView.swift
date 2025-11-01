@@ -24,7 +24,7 @@ struct ProfileSetupView: View {
         VStack(spacing: 16) {
             // Progress bar
             ProgressView(value: Double(currentStep), total: Double(totalSteps))
-                .progressViewStyle(LinearProgressViewStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
+                .progressViewStyle(LinearProgressViewStyle(tint: BrewTheme.secondaryBrown))
                 .scaleEffect(x: 1, y: 2, anchor: .center)
                 .padding(.horizontal, 32)
             
@@ -45,7 +45,7 @@ struct ProfileSetupView: View {
             // Step title
             Text(stepTitle)
                 .font(.system(size: 24, weight: .bold, design: .rounded))
-                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                .foregroundColor(BrewTheme.primaryBrown)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
             
@@ -75,7 +75,7 @@ struct ProfileSetupView: View {
                     }) {
                         Text("Previous")
                             .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .foregroundColor(BrewTheme.primaryBrown)
                             .frame(maxWidth: .infinity)
                             .frame(height: 50)
                     }
@@ -83,7 +83,7 @@ struct ProfileSetupView: View {
                     .cornerRadius(25)
                     .overlay(
                         RoundedRectangle(cornerRadius: 25)
-                            .stroke(Color(red: 0.4, green: 0.2, blue: 0.1), lineWidth: 2)
+                            .stroke(BrewTheme.primaryBrown, lineWidth: 2)
                     )
                     .disabled(isNavigating)
                 }
@@ -112,14 +112,7 @@ struct ProfileSetupView: View {
                         .frame(height: 50)
                 }
                 .background(
-                    LinearGradient(
-                        gradient: Gradient(colors: [
-                            Color(red: 0.6, green: 0.4, blue: 0.2),
-                            Color(red: 0.4, green: 0.2, blue: 0.1)
-                        ]),
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
+BrewTheme.gradientPrimary()
                 )
                 .cornerRadius(25)
                 .disabled(isNavigating || isLoading)
@@ -135,7 +128,7 @@ struct ProfileSetupView: View {
                 // Background gradient
                 LinearGradient(
                     gradient: Gradient(colors: [
-                        Color(red: 0.98, green: 0.97, blue: 0.95),
+                        BrewTheme.background,
                         Color.white
                     ]),
                     startPoint: .top,
@@ -152,13 +145,13 @@ struct ProfileSetupView: View {
                         
                         // 加载动画
                         ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
+                            .progressViewStyle(CircularProgressViewStyle(tint: BrewTheme.secondaryBrown))
                             .scaleEffect(1.5)
                         
                         VStack(spacing: 12) {
                             Text("Loading Profile Data")
                                 .font(.system(size: 20, weight: .semibold))
-                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .foregroundColor(BrewTheme.primaryBrown)
                             
                             Text("Please wait while we load your existing profile information...")
                                 .font(.system(size: 16))
@@ -475,7 +468,7 @@ struct CoreIdentityStep: View {
                 HStack {
                     Text("Full Name *")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                     
                     Spacer()
                     
@@ -499,7 +492,7 @@ struct CoreIdentityStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Email Address *")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 TextField("Enter your email", text: $email)
                     .textFieldStyle(CustomTextFieldStyle())
@@ -511,7 +504,7 @@ struct CoreIdentityStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Phone Number")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 TextField("Enter your phone number", text: $phoneNumber)
                     .textFieldStyle(CustomTextFieldStyle())
@@ -523,7 +516,7 @@ struct CoreIdentityStep: View {
                 HStack {
                     Text("Bio (LinkedIn-style headline)")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                     
                     Spacer()
                     
@@ -552,7 +545,7 @@ struct CoreIdentityStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Pronouns")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 TextField("e.g., she/her, they/them", text: $pronouns)
                     .textFieldStyle(CustomTextFieldStyle())
@@ -562,7 +555,7 @@ struct CoreIdentityStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Location")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 TextField("e.g., San Francisco, CA", text: $location)
                     .textFieldStyle(CustomTextFieldStyle())
@@ -572,7 +565,7 @@ struct CoreIdentityStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Personal Website")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 TextField("https://yourwebsite.com", text: $personalWebsite)
                     .textFieldStyle(CustomTextFieldStyle())
@@ -584,7 +577,7 @@ struct CoreIdentityStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("GitHub Profile")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 TextField("https://github.com/username", text: $githubUrl)
                     .textFieldStyle(CustomTextFieldStyle())
@@ -596,7 +589,7 @@ struct CoreIdentityStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("LinkedIn Profile")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 TextField("https://linkedin.com/in/username", text: $linkedinUrl)
                     .textFieldStyle(CustomTextFieldStyle())
@@ -675,7 +668,7 @@ struct ProfessionalBackgroundStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Current Company")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 TextField("e.g., Google", text: $currentCompany)
                     .textFieldStyle(CustomTextFieldStyle())
@@ -685,7 +678,7 @@ struct ProfessionalBackgroundStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Job Title")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 TextField("e.g., Software Engineer", text: $jobTitle)
                     .textFieldStyle(CustomTextFieldStyle())
@@ -695,7 +688,7 @@ struct ProfessionalBackgroundStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Industry *")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 Menu {
                     ForEach(IndustryOption.allCases, id: \.self) { industry in
@@ -722,7 +715,7 @@ struct ProfessionalBackgroundStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Experience Level")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 Picker("Experience Level", selection: $experienceLevel) {
                     ForEach(ExperienceLevel.allCases, id: \.self) { level in
@@ -741,7 +734,7 @@ struct ProfessionalBackgroundStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Years of Experience")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 TextField("e.g., 3.5", text: $yearsOfExperience)
                     .textFieldStyle(CustomTextFieldStyle())
@@ -760,7 +753,7 @@ struct ProfessionalBackgroundStep: View {
                 HStack {
                     Text("Education")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                     
                     Spacer()
                     
@@ -771,7 +764,7 @@ struct ProfessionalBackgroundStep: View {
                             .font(.system(size: 16, weight: .medium))
                             .foregroundColor(.white)
                             .frame(width: 32, height: 32)
-                            .background(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            .background(BrewTheme.secondaryBrown)
                             .clipShape(Circle())
                     }
                 }
@@ -795,7 +788,7 @@ struct ProfessionalBackgroundStep: View {
                 HStack {
                     Text("Work Experience")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                     
                     Spacer()
                     
@@ -806,7 +799,7 @@ struct ProfessionalBackgroundStep: View {
                             .font(.system(size: 16, weight: .medium))
                             .foregroundColor(.white)
                             .frame(width: 32, height: 32)
-                            .background(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            .background(BrewTheme.secondaryBrown)
                             .clipShape(Circle())
                     }
                 }
@@ -829,7 +822,7 @@ struct ProfessionalBackgroundStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Skills *")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 HStack {
                     TextField("Add a skill", text: $newSkill)
@@ -842,7 +835,7 @@ struct ProfessionalBackgroundStep: View {
                         }
                     }
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 }
                 
                 if !skills.isEmpty {
@@ -863,7 +856,7 @@ struct ProfessionalBackgroundStep: View {
                             }
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
-                            .background(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            .background(BrewTheme.secondaryBrown)
                             .cornerRadius(16)
                         }
                     }
@@ -941,7 +934,7 @@ struct NetworkingPreferencesStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Preferred Chat Format")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 HStack(spacing: 8) {
                     ForEach(ChatFormat.allCases, id: \.self) { format in
@@ -950,10 +943,10 @@ struct NetworkingPreferencesStep: View {
                         }) {
                             Text(format.displayName)
                                 .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(preferredChatFormat == format ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .foregroundColor(preferredChatFormat == format ? .white : BrewTheme.primaryBrown)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
-                                .background(preferredChatFormat == format ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
+                                .background(preferredChatFormat == format ? BrewTheme.secondaryBrown : Color.gray.opacity(0.1))
                                 .cornerRadius(8)
                         }
                     }
@@ -964,7 +957,7 @@ struct NetworkingPreferencesStep: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Available Timeslots")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 Text("Select your available times for networking")
                                 .font(.system(size: 14))
@@ -1016,7 +1009,7 @@ struct TimeslotMatrix: View {
                 ForEach(days, id: \.self) { day in
                     Text(day)
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -1026,7 +1019,7 @@ struct TimeslotMatrix: View {
                 HStack(spacing: 2) {
                     Text(timeSlot)
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                         .frame(width: 60, alignment: .leading)
                     
                     ForEach(Array(days.enumerated()), id: \.offset) { dayIndex, _ in
@@ -1233,7 +1226,7 @@ struct TimeslotCell: View {
     var body: some View {
         Button(action: onTap) {
             Rectangle()
-                .fill(isSelected ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
+                .fill(isSelected ? BrewTheme.secondaryBrown : Color.gray.opacity(0.1))
                 .frame(width: 30, height: 30)
                 .cornerRadius(4)
                 .overlay(
@@ -1275,7 +1268,7 @@ struct NetworkingIntentionStep: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("What's your main networking intention? *")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 12) {
                     ForEach(NetworkingIntentionType.allCases, id: \.self) { intention in
@@ -1286,12 +1279,12 @@ struct NetworkingIntentionStep: View {
                             VStack(spacing: 8) {
                                 Text(getIntentionDescription(intention))
                                     .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(selectedIntention == intention ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    .foregroundColor(selectedIntention == intention ? .white : BrewTheme.primaryBrown)
                                     .multilineTextAlignment(.center)
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
-                            .background(selectedIntention == intention ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
+                            .background(selectedIntention == intention ? BrewTheme.secondaryBrown : Color.gray.opacity(0.1))
                             .cornerRadius(12)
                         }
                     }
@@ -1303,7 +1296,7 @@ struct NetworkingIntentionStep: View {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Select your sub-intentions:")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                     
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 1), spacing: 8) {
                         ForEach(selectedIntention.subIntentions, id: \.self) { subIntention in
@@ -1317,7 +1310,7 @@ struct NetworkingIntentionStep: View {
                                 HStack {
                                     Text(subIntention.displayName)
                                         .font(.system(size: 16, weight: .semibold))
-                                        .foregroundColor(selectedSubIntentions.contains(subIntention) ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                                        .foregroundColor(selectedSubIntentions.contains(subIntention) ? .white : BrewTheme.primaryBrown)
                                     
                                     Spacer()
                                     
@@ -1329,7 +1322,7 @@ struct NetworkingIntentionStep: View {
                                 }
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 12)
-                                .background(selectedSubIntentions.contains(subIntention) ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
+                                .background(selectedSubIntentions.contains(subIntention) ? BrewTheme.secondaryBrown : Color.gray.opacity(0.1))
                                 .cornerRadius(8)
                             }
                         }
@@ -1470,7 +1463,7 @@ struct FunctionSection: View {
             VStack(alignment: .leading, spacing: 8) {
             Text(title)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
                 ForEach(functions, id: \.self) { function in
@@ -1527,7 +1520,7 @@ struct FunctionRow: View {
         VStack(spacing: 8) {
             Text(functionName)
                 .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 .multilineTextAlignment(.center)
             
             HStack(spacing: 8) {
@@ -1541,7 +1534,7 @@ struct FunctionRow: View {
                     }) {
                         Image(systemName: learnIn ? "checkmark.square.fill" : "square")
                             .font(.system(size: 16))
-                            .foregroundColor(learnIn ? Color(red: 0.6, green: 0.4, blue: 0.2) : .gray)
+                            .foregroundColor(learnIn ? BrewTheme.secondaryBrown : .gray)
                     }
                 }
                 
@@ -1555,7 +1548,7 @@ struct FunctionRow: View {
                     }) {
                         Image(systemName: guideIn ? "checkmark.square.fill" : "square")
                             .font(.system(size: 16))
-                            .foregroundColor(guideIn ? Color(red: 0.6, green: 0.4, blue: 0.2) : .gray)
+                            .foregroundColor(guideIn ? BrewTheme.secondaryBrown : .gray)
                     }
                 }
             }
@@ -1592,7 +1585,7 @@ struct SkillDevelopmentForm: View {
                     }
                 }
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                .foregroundColor(BrewTheme.primaryBrown)
             }
             
             // Common skills
@@ -1604,10 +1597,10 @@ struct SkillDevelopmentForm: View {
                         }) {
                             Text("+ \(skill)")
                                 .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                .foregroundColor(BrewTheme.secondaryBrown)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
-                                .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                                .background(BrewTheme.secondaryBrown.opacity(0.1))
                                 .cornerRadius(16)
                         }
                     }
@@ -1640,7 +1633,7 @@ struct SkillRow: View {
         HStack {
             Text(skill.skillName)
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                .foregroundColor(BrewTheme.primaryBrown)
             
             Spacer()
             
@@ -1655,7 +1648,7 @@ struct SkillRow: View {
                     }) {
                         Image(systemName: skill.learnIn ? "checkmark.square.fill" : "square")
                             .font(.system(size: 16))
-                            .foregroundColor(skill.learnIn ? Color(red: 0.6, green: 0.4, blue: 0.2) : .gray)
+                            .foregroundColor(skill.learnIn ? BrewTheme.secondaryBrown : .gray)
                     }
                 }
                 
@@ -1669,7 +1662,7 @@ struct SkillRow: View {
                     }) {
                         Image(systemName: skill.guideIn ? "checkmark.square.fill" : "square")
                             .font(.system(size: 16))
-                            .foregroundColor(skill.guideIn ? Color(red: 0.6, green: 0.4, blue: 0.2) : .gray)
+                            .foregroundColor(skill.guideIn ? BrewTheme.secondaryBrown : .gray)
                     }
                 }
                 
@@ -1751,7 +1744,7 @@ struct IndustryRow: View {
         HStack {
             Text(industryName)
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                .foregroundColor(BrewTheme.primaryBrown)
             
             Spacer()
             
@@ -1766,7 +1759,7 @@ struct IndustryRow: View {
                     }) {
                         Image(systemName: learnIn ? "checkmark.square.fill" : "square")
                             .font(.system(size: 16))
-                            .foregroundColor(learnIn ? Color(red: 0.6, green: 0.4, blue: 0.2) : .gray)
+                            .foregroundColor(learnIn ? BrewTheme.secondaryBrown : .gray)
                     }
                 }
                 
@@ -1780,7 +1773,7 @@ struct IndustryRow: View {
                     }) {
                         Image(systemName: guideIn ? "checkmark.square.fill" : "square")
                             .font(.system(size: 16))
-                            .foregroundColor(guideIn ? Color(red: 0.6, green: 0.4, blue: 0.2) : .gray)
+                            .foregroundColor(guideIn ? BrewTheme.secondaryBrown : .gray)
                     }
                 }
             }
@@ -1806,7 +1799,7 @@ struct PersonalitySocialStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Self Introduction")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 Text("Tell us about yourself professionally (e.g., Senior Software Engineer @ Meta, familiar with Redis, K8s, etc.)")
                     .font(.system(size: 12))
@@ -1828,7 +1821,7 @@ struct PersonalitySocialStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Values that describe you *")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 Text("Select up to 6 values (tap to add/remove)")
                     .font(.system(size: 12))
@@ -1847,7 +1840,7 @@ struct PersonalitySocialStep: View {
                             HStack {
                                 Text(value)
                                     .font(.system(size: 14))
-                                    .foregroundColor(selectionHelper.selectedValues.contains(value) ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    .foregroundColor(selectionHelper.selectedValues.contains(value) ? .white : BrewTheme.primaryBrown)
                                 
                                 if selectionHelper.selectedValues.contains(value) {
                                     Image(systemName: "checkmark")
@@ -1857,7 +1850,7 @@ struct PersonalitySocialStep: View {
                             }
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
-                            .background(selectionHelper.selectedValues.contains(value) ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
+                            .background(selectionHelper.selectedValues.contains(value) ? BrewTheme.secondaryBrown : Color.gray.opacity(0.1))
                             .cornerRadius(16)
                         }
                         .disabled(selectionHelper.selectedValues.count >= 6 && !selectionHelper.selectedValues.contains(value))
@@ -1876,7 +1869,7 @@ struct PersonalitySocialStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Hobbies & Interests")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 Text("Select up to 6 hobbies (tap to add/remove)")
                     .font(.system(size: 12))
@@ -1895,7 +1888,7 @@ struct PersonalitySocialStep: View {
                             HStack {
                                 Text(hobby)
                                     .font(.system(size: 14))
-                                    .foregroundColor(selectionHelper.selectedHobbies.contains(hobby) ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    .foregroundColor(selectionHelper.selectedHobbies.contains(hobby) ? .white : BrewTheme.primaryBrown)
                                 
                                 if selectionHelper.selectedHobbies.contains(hobby) {
                                     Image(systemName: "checkmark")
@@ -1905,7 +1898,7 @@ struct PersonalitySocialStep: View {
                             }
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
-                            .background(selectionHelper.selectedHobbies.contains(hobby) ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
+                            .background(selectionHelper.selectedHobbies.contains(hobby) ? BrewTheme.secondaryBrown : Color.gray.opacity(0.1))
                             .cornerRadius(16)
                         }
                         .disabled(selectionHelper.selectedHobbies.count >= 6 && !selectionHelper.selectedHobbies.contains(hobby))
@@ -1924,7 +1917,7 @@ struct PersonalitySocialStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Preferred Meeting Vibe")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 Picker("Meeting Vibe", selection: $preferredMeetingVibe) {
                     ForEach(MeetingVibe.allCases, id: \.self) { vibe in
@@ -1946,7 +1939,7 @@ struct PersonalitySocialStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Communication Style")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 Picker("Communication Style", selection: $communicationStyle) {
                     ForEach(CommunicationStyle.allCases, id: \.self) { style in
@@ -2011,7 +2004,7 @@ struct PrivacyTrustStep: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Privacy Settings")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 VStack(spacing: 12) {
                     PrivacyToggleRow(
@@ -2050,11 +2043,11 @@ struct PrivacyTrustStep: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Data Sharing")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 Toggle("Allow data sharing for better recommendations", isOn: $dataSharingConsent)
                     .font(.system(size: 16))
-                    .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
+                    .toggleStyle(SwitchToggleStyle(tint: BrewTheme.secondaryBrown))
             }
         }
         .onAppear {
@@ -2107,7 +2100,7 @@ struct PrivacyToggleRow: View {
         HStack {
             Text(title)
                 .font(.system(size: 16))
-                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                .foregroundColor(BrewTheme.primaryBrown)
             
             Spacer()
             
@@ -2149,7 +2142,7 @@ struct ProfileCompletionView: View {
                 VStack(spacing: 12) {
                     Text("Profile Setup Complete!")
                         .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                         .multilineTextAlignment(.center)
                     
                     Text("Start your networking journey!")
@@ -2173,8 +2166,8 @@ struct ProfileCompletionView: View {
             .background(
                 LinearGradient(
                     gradient: Gradient(colors: [
-                        Color(red: 0.6, green: 0.4, blue: 0.2),
-                        Color(red: 0.4, green: 0.2, blue: 0.1)
+                        BrewTheme.secondaryBrown,
+                        BrewTheme.primaryBrown
                     ]),
                     startPoint: .leading,
                     endPoint: .trailing
@@ -2205,7 +2198,7 @@ struct EducationCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(education.schoolName)
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 Text(education.degree.displayName)
                     .font(.system(size: 14))
@@ -2251,7 +2244,7 @@ struct WorkExperienceCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(workExperience.companyName)
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 if let position = workExperience.position {
                     Text(position)
@@ -2307,7 +2300,7 @@ struct AddWorkExperienceView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Company Name *")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                     
                     TextField("Enter company name", text: $companyName)
                         .textFieldStyle(CustomTextFieldStyle())
@@ -2317,7 +2310,7 @@ struct AddWorkExperienceView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Position")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                     
                     TextField("e.g., Software Engineer, Marketing Manager", text: $position)
                         .textFieldStyle(CustomTextFieldStyle())
@@ -2327,7 +2320,7 @@ struct AddWorkExperienceView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Start Year *")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                     
                     Picker("Start Year", selection: $startYear) {
                         ForEach(YearOptions.workExperienceYears, id: \.self) { year in
@@ -2347,7 +2340,7 @@ struct AddWorkExperienceView: View {
                     HStack {
                         Text("End Year")
                             .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .foregroundColor(BrewTheme.primaryBrown)
                         
                         Spacer()
                         
@@ -2422,7 +2415,7 @@ struct AddEducationView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("School/University/College Name *")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                     
                     TextField("Enter school name", text: $schoolName)
                         .textFieldStyle(CustomTextFieldStyle())
@@ -2432,7 +2425,7 @@ struct AddEducationView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Start Year *")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                     
                     Picker("Start Year", selection: $startYear) {
                         ForEach(YearOptions.years, id: \.self) { year in
@@ -2452,7 +2445,7 @@ struct AddEducationView: View {
                     HStack {
                         Text("End Year")
                             .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .foregroundColor(BrewTheme.primaryBrown)
                         
                         Spacer()
                         
@@ -2482,7 +2475,7 @@ struct AddEducationView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Degree *")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                     
                     Picker("Degree", selection: $degree) {
                         ForEach(DegreeType.allCases, id: \.self) { degree in
@@ -2501,7 +2494,7 @@ struct AddEducationView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Field of Study")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                     
                     TextField("e.g., Computer Science, Business Administration", text: $fieldOfStudy)
                         .textFieldStyle(CustomTextFieldStyle())

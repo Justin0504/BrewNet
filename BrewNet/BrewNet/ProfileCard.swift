@@ -50,7 +50,7 @@ struct ProfileCardView: View {
         ZStack {
             // Background
             RoundedRectangle(cornerRadius: 20)
-                .fill(Color(red: 0.98, green: 0.97, blue: 0.95))
+                .fill(BrewTheme.background)
                 .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
             
             VStack(spacing: 0) {
@@ -58,14 +58,7 @@ struct ProfileCardView: View {
                 ZStack(alignment: .topTrailing) {
                     // Use placeholder image with gradient background
                     ZStack {
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color(red: 0.6, green: 0.4, blue: 0.2),
-                                Color(red: 0.4, green: 0.2, blue: 0.1)
-                            ]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+                        BrewTheme.gradientPrimary()
                         
                         VStack {
                             Image(systemName: "person.fill")
@@ -122,7 +115,7 @@ struct ProfileCardView: View {
                     HStack {
                         Text("\(profile.name), \(profile.age)")
                             .font(.system(size: 24, weight: .bold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .foregroundColor(BrewTheme.primaryBrown)
                         Spacer()
                     }
                     
@@ -143,7 +136,7 @@ struct ProfileCardView: View {
                                     .foregroundColor(.white)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 6)
-                                    .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    .background(BrewTheme.primaryBrown)
                                     .cornerRadius(15)
                             }
                         }

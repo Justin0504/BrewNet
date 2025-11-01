@@ -29,7 +29,7 @@ struct ContentView: View {
                         Spacer()
                         
                         ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
+                            .progressViewStyle(CircularProgressViewStyle(tint: BrewTheme.secondaryBrown))
                             .scaleEffect(1.2)
                         
                         Text("Checking profile status...")
@@ -84,9 +84,7 @@ struct ContentView: View {
                 print("🔄 ContentView 强制刷新界面，跳转到主界面")
             case .unauthenticated:
                 print("🔄 ContentView 认证状态变化: unauthenticated")
-                // 强制刷新界面，确保立即跳转到登录页面
-                self.refreshID = UUID()
-                print("🔄 ContentView 强制刷新界面，跳转到登录界面")
+                print("🔄 ContentView 跳转到登录界面")
             }
         }
     }
@@ -132,7 +130,7 @@ struct LoadingView: View {
             // 背景渐变
             LinearGradient(
                 gradient: Gradient(colors: [
-                    Color(red: 0.98, green: 0.97, blue: 0.95),
+                    BrewTheme.background,
                     Color.white
                 ]),
                 startPoint: .top,
@@ -156,11 +154,11 @@ struct LoadingView: View {
                 // 应用名称
                 Text("BrewNet")
                     .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 // 加载指示器
                 ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.4, green: 0.2, blue: 0.1)))
+                    .progressViewStyle(CircularProgressViewStyle(tint: BrewTheme.primaryBrown))
                     .scaleEffect(1.2)
             }
         }

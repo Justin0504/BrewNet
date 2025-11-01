@@ -394,7 +394,7 @@ struct ChatSessionRowView: View {
                 ZStack(alignment: .bottomTrailing) {
                     Image(systemName: session.user.avatar)
                         .font(.system(size: 50))
-                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        .foregroundColor(BrewTheme.secondaryBrown)
                     
                     // Match indicator
                     if session.user.isMatched {
@@ -415,7 +415,7 @@ struct ChatSessionRowView: View {
                     HStack {
                         Text(session.user.name)
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .foregroundColor(BrewTheme.primaryBrown)
                         
                         // Match type badge
                         if session.user.isMatched {
@@ -458,7 +458,7 @@ struct ChatSessionRowView: View {
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 2)
-                                .background(session.user.isMatched ? session.user.matchType.color : Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .background(session.user.isMatched ? session.user.matchType.color : BrewTheme.primaryBrown)
                                 .cornerRadius(10)
                         }
                     }
@@ -583,14 +583,14 @@ struct AISuggestionsView: View {
                     
                     Text("AI Ice Breaker")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                     
                     Spacer()
                     
                     Button("Refresh") {
                         onRefresh()
                     }
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -611,7 +611,7 @@ struct AISuggestionsView: View {
     private var loadingView: some View {
         VStack(spacing: 20) {
             ProgressView()
-                .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.4, green: 0.2, blue: 0.1)))
+                .progressViewStyle(CircularProgressViewStyle(tint: BrewTheme.primaryBrown))
                 .scaleEffect(1.2)
             
             Text("AI is generating ice breaker topics...")
@@ -636,7 +636,7 @@ struct AISuggestionsView: View {
                                 
                                 Text(category.displayName)
                                     .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    .foregroundColor(BrewTheme.primaryBrown)
                                 
                                 Spacer()
                             }
@@ -661,7 +661,7 @@ struct AISuggestionsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(suggestion.content)
                         .font(.system(size: 16))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                         .multilineTextAlignment(.leading)
                     
                     HStack {

@@ -365,7 +365,7 @@ struct CalendarView: View {
                     }
                 }) {
                     Image(systemName: "chevron.left")
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                         .font(.system(size: 16, weight: .semibold))
                 }
                 
@@ -374,7 +374,7 @@ struct CalendarView: View {
                 Text(monthYearFormatter.string(from: currentMonth))
                     .font(.title2)
                     .fontWeight(.semibold)
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 Spacer()
                 
@@ -384,7 +384,7 @@ struct CalendarView: View {
                     }
                 }) {
                     Image(systemName: "chevron.right")
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .foregroundColor(BrewTheme.primaryBrown)
                         .font(.system(size: 16, weight: .semibold))
                 }
             }
@@ -397,7 +397,7 @@ struct CalendarView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Upcoming Coffee Chats")
                     .font(.headline)
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                     .padding(.horizontal, 20)
                 
                 ScrollView {
@@ -455,14 +455,7 @@ struct MatchedUserCardView: View {
             ZStack {
                 Circle()
                     .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color(red: 0.6, green: 0.4, blue: 0.2),
-                                Color(red: 0.4, green: 0.2, blue: 0.1)
-                            ]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+                                BrewTheme.gradientPrimary()
                     )
                     .frame(width: 60, height: 60)
                 
@@ -474,7 +467,7 @@ struct MatchedUserCardView: View {
             VStack(spacing: 4) {
                 Text(user.name)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                     .lineLimit(1)
                 
                 Text(user.jobTitle)
@@ -579,14 +572,14 @@ struct CalendarDayView: View {
                 
                 if hasSchedule {
                     Circle()
-                        .fill(isSelected ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .fill(isSelected ? .white : BrewTheme.primaryBrown)
                         .frame(width: 4, height: 4)
                 }
             }
             .frame(width: 32, height: 32)
             .background(
                 isSelected ? 
-                Color(red: 0.4, green: 0.2, blue: 0.1) : 
+                BrewTheme.primaryBrown : 
                 Color.clear
             )
             .cornerRadius(16)
@@ -606,7 +599,7 @@ struct CoffeeChatScheduleCard: View {
             VStack(spacing: 2) {
                 Text(timeFormatter.string(from: schedule.date))
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 Text(dateFormatter.string(from: schedule.date))
                     .font(.system(size: 10))
