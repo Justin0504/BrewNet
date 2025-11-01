@@ -45,13 +45,13 @@ struct ProfileHeaderView: View {
             .clipShape(Circle())
             .overlay(
                 Circle()
-                    .stroke(Color(red: 0.6, green: 0.4, blue: 0.2), lineWidth: 3)
+                    .stroke(BrewTheme.secondaryBrown, lineWidth: 3)
             )
             
             // Name only
             Text(profile.coreIdentity.name)
                 .font(.system(size: 24, weight: .bold))
-                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                .foregroundColor(BrewTheme.primaryBrown)
         }
         .padding(.vertical, 20)
         .frame(maxWidth: .infinity)
@@ -79,11 +79,11 @@ struct ProfileSectionView<Content: View>: View {
             HStack {
                 Image(systemName: icon)
                     .font(.system(size: 18))
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    .foregroundColor(BrewTheme.secondaryBrown)
                 
                 Text(title)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 Spacer()
             }
@@ -428,7 +428,7 @@ struct PrivacyTrustDisplayView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Visibility Settings")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .foregroundColor(BrewTheme.primaryBrown)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     VisibilityRow(label: "Company", level: privacy.visibilitySettings.company)
@@ -458,7 +458,7 @@ struct InfoRow: View {
             
             Text(value)
                 .font(.system(size: 14))
-                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                .foregroundColor(BrewTheme.primaryBrown)
             
             Spacer()
         }
@@ -482,7 +482,7 @@ struct TagsDisplayView: View {
                         .foregroundColor(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        .background(BrewTheme.secondaryBrown)
                         .cornerRadius(16)
                 }
             }

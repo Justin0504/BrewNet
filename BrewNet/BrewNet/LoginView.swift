@@ -8,7 +8,6 @@ struct LoginView: View {
     @State private var isLoading = false
     @State private var showAlert = false
     @State private var alertMessage = ""
-    @State private var forceRefresh = UUID()
     @State private var showingRegisterView = false
     
     var body: some View {
@@ -25,7 +24,7 @@ struct LoginView: View {
                 )
                 .ignoresSafeArea()
                 
-                ScrollView {
+                ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: 0) {
                         Spacer()
                             .frame(height: 60)
@@ -219,7 +218,7 @@ struct LoginView: View {
                 }
             }
         }
-        .id(forceRefresh) // 添加强制刷新ID
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .onReceive(authManager.$authState) { newState in
             print("🔐 LoginView received state change: \(newState)")
             switch newState {
@@ -289,8 +288,6 @@ struct LoginView: View {
                 case .success(let user):
                     print("✅ Guest login successful: \(user.name)")
                     print("🔄 Waiting for view navigation...")
-                    // Force refresh interface
-                    self.forceRefresh = UUID()
                     // Guest login successful, state will automatically update and trigger view navigation
                 case .failure(let error):
                     print("❌ Guest login failed: \(error.localizedDescription)")

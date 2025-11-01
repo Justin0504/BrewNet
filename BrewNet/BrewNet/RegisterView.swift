@@ -30,7 +30,7 @@ struct RegisterView: View {
                 // Background gradient
                 LinearGradient(
                     gradient: Gradient(colors: [
-                        Color(red: 0.98, green: 0.97, blue: 0.95),
+                        BrewTheme.background,
                         Color.white
                     ]),
                     startPoint: .top,
@@ -56,7 +56,7 @@ struct RegisterView: View {
                                         Text("Back")
                                             .font(.system(size: 16, weight: .medium))
                                     }
-                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    .foregroundColor(BrewTheme.primaryBrown)
                                 }
                                 
                                 Spacer()
@@ -74,7 +74,7 @@ struct RegisterView: View {
                                 
                                 Text("Join BrewNet")
                                     .font(.system(size: 28, weight: .bold, design: .rounded))
-                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    .foregroundColor(BrewTheme.primaryBrown)
                                 
                                 Text("Connect with professionals over coffee")
                                     .font(.system(size: 16))
@@ -92,7 +92,7 @@ struct RegisterView: View {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("Sign up with")
                                     .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    .foregroundColor(BrewTheme.primaryBrown)
                                 
                                 Picker("Auth Method", selection: $selectedAuthMethod) {
                                     ForEach(AuthMethod.allCases, id: \.self) { method in
@@ -107,7 +107,7 @@ struct RegisterView: View {
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("Full Name")
                                         .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                        .foregroundColor(BrewTheme.primaryBrown)
                                     
                                     TextField("Enter your full name", text: $name)
                                         .textFieldStyle(CustomTextFieldStyle())
@@ -125,7 +125,7 @@ struct RegisterView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(selectedAuthMethod == .email ? "Email Address" : "Phone Number")
                                     .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    .foregroundColor(BrewTheme.primaryBrown)
                                 
                                 if selectedAuthMethod == .email {
                                     HStack {
@@ -146,7 +146,7 @@ struct RegisterView: View {
                                         HStack {
                                             Text("Country Code")
                                                 .font(.system(size: 14, weight: .medium))
-                                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                                .foregroundColor(BrewTheme.primaryBrown)
                                             
                                             Spacer()
                                             
@@ -179,7 +179,7 @@ struct RegisterView: View {
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("Password")
                                         .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                        .foregroundColor(BrewTheme.primaryBrown)
                                     
                                     SecureField("Create a password", text: $password)
                                         .textFieldStyle(CustomTextFieldStyle())
@@ -206,7 +206,7 @@ struct RegisterView: View {
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("Confirm Password")
                                         .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                        .foregroundColor(BrewTheme.primaryBrown)
                                     
                                     SecureField("Confirm your password", text: $confirmPassword)
                                         .textFieldStyle(CustomTextFieldStyle())
@@ -240,16 +240,7 @@ struct RegisterView: View {
                                 }
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 50)
-                                .background(
-                                    LinearGradient(
-                                        gradient: Gradient(colors: [
-                                            Color(red: 0.6, green: 0.4, blue: 0.2),
-                                            Color(red: 0.4, green: 0.2, blue: 0.1)
-                                        ]),
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
+                                .background(BrewTheme.gradientPrimary())
                                 .foregroundColor(.white)
                                 .cornerRadius(25)
                                 .shadow(color: Color.brown.opacity(0.3), radius: 8, x: 0, y: 4)
@@ -268,7 +259,7 @@ struct RegisterView: View {
                                         // Open terms
                                     }
                                     .font(.system(size: 12))
-                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    .foregroundColor(BrewTheme.primaryBrown)
                                     
                                     Text("and")
                                         .font(.system(size: 12))
@@ -278,7 +269,7 @@ struct RegisterView: View {
                                         // Open privacy policy
                                     }
                                     .font(.system(size: 12))
-                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    .foregroundColor(BrewTheme.primaryBrown)
                                 }
                             }
                         }
