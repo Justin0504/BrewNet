@@ -187,11 +187,6 @@ struct RegisterView: View {
                                         .textContentType(.none)
                                         .disableAutocorrection(true)
                                         .autocapitalization(.none)
-                                    
-                                    // Password requirements
-                                    Text("Password must be at least 6 characters")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.gray)
                                 }
                                 
                                 // Validation indicator
