@@ -29,85 +29,86 @@ struct ProfileDisplayView: View {
                 .padding(.top, 20)
                 
                 // Action Buttons Section (在 Profile Header 和 Network Preferences 之间)
-                VStack(spacing: 12) {
+                HStack(spacing: 12) {
                     // 查看 Match 按钮
                     Button(action: {
                         loadMatches()
                         showingMatches = true
                     }) {
-                        HStack {
+                        HStack(spacing: 8) {
                             Image(systemName: "cup.and.saucer.fill")
-                                .font(.system(size: 16))
+                                .font(.system(size: 12))
                                 .foregroundColor(.white)
                             
-                            VStack(alignment: .leading, spacing: 2) {
+                            VStack(alignment: .leading, spacing: 1) {
                                 if isLoadingMatches {
                                     ProgressView()
                                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        .scaleEffect(0.7)
+                                        .scaleEffect(0.5)
                                 } else {
                                     Text("Matches")
-                                        .font(.system(size: 16, weight: .semibold))
+                                        .font(.system(size: 12, weight: .semibold))
                                         .foregroundColor(.white)
                                     
                                     Text("\(matches.count)")
-                                        .font(.system(size: 12))
+                                        .font(.system(size: 10))
                                         .foregroundColor(.white.opacity(0.8))
                                 }
                             }
                             
-                            Spacer()
+                            Spacer(minLength: 0)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 14)
-                        .frame(maxWidth: .infinity, minHeight: 60)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                         .background(Color(red: 0.75, green: 0.65, blue: 0.5)) // 浅棕色
-                        .cornerRadius(12)
-                        .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                        .cornerRadius(8)
+                        .shadow(color: Color.black.opacity(0.08), radius: 2, x: 0, y: 1)
                     }
                     .disabled(isLoadingMatches)
                     .buttonStyle(PlainButtonStyle())
                     
-                    // 查看发送的 Invitation 按钮 - 单独占一行
+                    // 查看发送的 Invitation 按钮
                     Button(action: {
                         loadSentInvitations()
                         showingSentInvitations = true
                     }) {
-                        HStack {
+                        HStack(spacing: 8) {
                             Image(systemName: "paperplane.fill")
-                                .font(.system(size: 16))
+                                .font(.system(size: 12))
                                 .foregroundColor(.white)
                             
-                            VStack(alignment: .leading, spacing: 2) {
+                            VStack(alignment: .leading, spacing: 1) {
                                 if isLoadingInvitations {
                                     ProgressView()
                                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        .scaleEffect(0.7)
+                                        .scaleEffect(0.5)
                                 } else {
                                     Text("Sent")
-                                        .font(.system(size: 16, weight: .semibold))
+                                        .font(.system(size: 12, weight: .semibold))
                                         .foregroundColor(.white)
                                     
                                     Text("\(sentInvitations.filter { $0.status == .pending }.count)")
-                                        .font(.system(size: 12))
+                                        .font(.system(size: 10))
                                         .foregroundColor(.white.opacity(0.8))
                                 }
                             }
                             
-                            Spacer()
+                            Spacer(minLength: 0)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 14)
-                        .frame(maxWidth: .infinity, minHeight: 60)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                         .background(Color(red: 0.75, green: 0.65, blue: 0.5)) // 浅棕色
-                        .cornerRadius(12)
-                        .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                        .cornerRadius(8)
+                        .shadow(color: Color.black.opacity(0.08), radius: 2, x: 0, y: 1)
                     }
                     .disabled(isLoadingInvitations)
                     .buttonStyle(PlainButtonStyle())
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 20)
+                .padding(.top, 10)
+                .padding(.bottom, 6)
                 
                 // Networking Preferences Section
                 ProfileSectionView(
@@ -122,8 +123,7 @@ struct ProfileDisplayView: View {
             .padding(.bottom, 20)
         }
         .background(Color(red: 0.98, green: 0.97, blue: 0.95))
-        .navigationTitle("My Profile")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             loadMatches()
             loadSentInvitations()
