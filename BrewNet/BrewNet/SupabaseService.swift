@@ -773,6 +773,86 @@ class SupabaseService: ObservableObject {
         return profiles
     }
     
+    /// 获取指定 Networking Intention 的推荐用户列表（带分页和统计信息）
+    func getProfilesByNetworkingIntention(userId: String, intention: NetworkingIntentionType, limit: Int = 20, offset: Int = 0) async throws -> ([SupabaseProfile], totalInBatch: Int, filteredCount: Int) {
+        print("🔍 Fetching profiles for intention: \(intention.rawValue), limit: \(limit), offset: \(offset)")
+        
+        do {
+            // 构建查询（使用 JSONB 过滤）
+            var query = client
+                .from(SupabaseTable.profiles.rawValue)
+                .select()
+                .neq("user_id", value: userId)
+                .eq("networking_intention->selected_intention", value: intention.rawValue)
+                .order("created_at", ascending: false)
+            
+            // 使用 range 进行分页
+            query = query.range(from: offset, to: offset + limit - 1)
+            
+            let response = try await query.execute()
+            
+            let data = response.data
+            
+            // 尝试解码
+            do {
+                let profiles = try JSONDecoder().decode([SupabaseProfile].self, from: data)
+                print("✅ Fetched \(profiles.count) profiles for intention \(intention.rawValue) (offset: \(offset))")
+                return (profiles, profiles.count, 0)
+            } catch let decodingError as DecodingError {
+                // 详细解析解码错误
+                print("❌ Decoding error details:")
+                switch decodingError {
+                case .keyNotFound(let key, let context):
+                    print("  - Missing key: \(key.stringValue)")
+                    print("  - Context: \(context.debugDescription)")
+                case .valueNotFound(let type, let context):
+                    print("  - Missing value for type: \(type)")
+                    print("  - Context: \(context.debugDescription)")
+                case .typeMismatch(let type, let context):
+                    print("  - Type mismatch for type: \(type)")
+                    print("  - Context: \(context.debugDescription)")
+                case .dataCorrupted(let context):
+                    print("  - Data corrupted")
+                    print("  - Context: \(context.debugDescription)")
+                @unknown default:
+                    print("  - Unknown decoding error: \(decodingError)")
+                }
+                
+                // 尝试解析为 JSON 数组，检查每条记录
+                if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                    print("📊 Found \(jsonArray.count) records in response")
+                    var validProfiles: [SupabaseProfile] = []
+                    
+                    for (index, record) in jsonArray.enumerated() {
+                        // 尝试解码单个记录
+                        do {
+                            let recordData = try JSONSerialization.data(withJSONObject: record)
+                            let profile = try JSONDecoder().decode(SupabaseProfile.self, from: recordData)
+                            validProfiles.append(profile)
+                            print("    ✅ Record \(index + 1) decoded successfully")
+                        } catch {
+                            print("    ❌ Record \(index + 1) failed to decode: \(error.localizedDescription)")
+                        }
+                    }
+                    
+                    let filteredCount = jsonArray.count - validProfiles.count
+                    if !validProfiles.isEmpty {
+                        print("✅ Successfully decoded \(validProfiles.count) out of \(jsonArray.count) profiles (filtered: \(filteredCount))")
+                        return (validProfiles, jsonArray.count, filteredCount)
+                    } else {
+                        throw ProfileError.fetchFailed("All profiles failed to decode. Error: \(decodingError.localizedDescription)")
+                    }
+                }
+                
+                throw ProfileError.fetchFailed("Decoding failed: \(decodingError.localizedDescription)")
+            }
+            
+        } catch {
+            print("❌ Failed to fetch profiles by intention: \(error.localizedDescription)")
+            throw ProfileError.fetchFailed(error.localizedDescription)
+        }
+    }
+    
     /// 搜索用户资料
     func searchProfiles(query: String, limit: Int = 20) async throws -> [SupabaseProfile] {
         print("🔍 Searching profiles with query: \(query)")
@@ -814,6 +894,88 @@ class SupabaseService: ObservableObject {
         
         let brewNetProfile = profile.toBrewNetProfile()
         return brewNetProfile.completionPercentage
+    }
+    
+    /// 获取所有 Networking Intention 的用户数量映射
+    /// 由于 JSONB 过滤可能不支持 .eq() 操作符，采用获取所有profiles后过滤的方式
+    func getUserCountsByAllIntentions() async throws -> [String: Int] {
+        print("🔍 Fetching user counts for all intentions")
+        
+        var counts: [String: Int] = [:]
+        
+        // Initialize counts to 0
+        for intention in NetworkingIntentionType.allCases {
+            counts[intention.rawValue] = 0
+        }
+        
+        do {
+            // Fetch a reasonable sample of profiles to count (or all if fewer than 10000)
+            let response = try await client
+                .from(SupabaseTable.profiles.rawValue)
+                .select("networking_intention")
+                .limit(10000)
+                .execute()
+            
+            let data = response.data
+            
+            // Parse JSON to extract networking_intention
+            if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                for record in jsonArray {
+                    if let networkingIntentionJson = record["networking_intention"] as? [String: Any],
+                       let selectedIntention = networkingIntentionJson["selected_intention"] as? String {
+                        counts[selectedIntention, default: 0] += 1
+                    }
+                }
+                
+                print("✅ User counts from sample: \(counts)")
+                return counts
+            }
+            
+            print("⚠️ Could not parse profiles, returning 0 counts")
+            return counts
+            
+        } catch {
+            print("❌ Failed to fetch user counts: \(error.localizedDescription)")
+            // Return 0 counts on error instead of throwing
+            return counts
+        }
+    }
+    
+    /// 获取数据库中的总用户数量
+    func getTotalUserCount() async throws -> Int {
+        print("🔍 Fetching total user count")
+        
+        do {
+            let response = try await client
+                .from(SupabaseTable.profiles.rawValue)
+                .select("id", head: false, count: .exact)
+                .limit(1)
+                .execute()
+            
+            // Get count from response headers
+            if let countHeader = response.response.value(forHTTPHeaderField: "content-range") {
+                // Parse count from header like "0-0/150" or "*/150"
+                if let rangeEnd = countHeader.split(separator: "/").last, let count = Int(rangeEnd) {
+                    print("✅ Total user count: \(count)")
+                    return count
+                }
+            }
+            
+            // Fallback: decode and count
+            let data = response.data
+            if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                print("✅ Total user count from data: \(jsonArray.count)")
+                return jsonArray.count
+            }
+            
+            print("⚠️ Could not parse total count, returning 0")
+            return 0
+            
+        } catch {
+            print("❌ Failed to fetch total user count: \(error.localizedDescription)")
+            // Return 0 on error instead of throwing
+            return 0
+        }
     }
     
     // MARK: - Sync Operations

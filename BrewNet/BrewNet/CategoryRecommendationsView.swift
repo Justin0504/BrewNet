@@ -8,15 +8,19 @@ struct CategoryRecommendationsView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var supabaseService: SupabaseService
-    @State private var profiles: [UserProfile] = []
+    @State private var profiles: [BrewNetProfile] = []
     @State private var currentIndex = 0
     @State private var dragOffset = CGSize.zero
     @State private var rotationAngle = 0.0
     @State private var showingMatchAlert = false
-    @State private var matchedProfile: UserProfile?
-    @State private var likedProfiles: [UserProfile] = []
-    @State private var passedProfiles: [UserProfile] = []
+    @State private var matchedProfile: BrewNetProfile?
+    @State private var likedProfiles: [BrewNetProfile] = []
+    @State private var passedProfiles: [BrewNetProfile] = []
     @State private var isLoading = true
+    @State private var isLoadingMore = false
+    @State private var hasMoreProfiles = true
+    @State private var isConnection: Bool = false
+    @State private var databaseOffset: Int = 0 // Track offset for database queries
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -38,52 +42,71 @@ struct CategoryRecommendationsView: View {
                 .ignoresSafeArea()
             
             VStack(spacing: 0) {
-                // Header
-                headerView
-                
+                // Loading indicator
                 if isLoading {
-                    // Loading state
-                    VStack {
-                        Spacer()
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
-                            .scaleEffect(1.2)
-                        Text("Loading recommendations...")
-                            .font(.system(size: 16))
-                            .foregroundColor(.gray)
-                            .padding(.top, 16)
-                        Spacer()
-                    }
-                } else if currentIndex < profiles.count {
-                    // Cards Stack
+                    ProgressView()
+                        .frame(height: screenHeight * 0.6)
+                }
+                // Cards Stack
+                else if currentIndex < profiles.count {
                     ZStack {
                         // Next card (background)
                         if currentIndex + 1 < profiles.count {
-                            ProfileCardView(
+                            UserProfileCardView(
                                 profile: profiles[currentIndex + 1],
                                 dragOffset: .constant(.zero),
                                 rotationAngle: .constant(0),
-                                onSwipe: { _ in }
+                                onSwipe: { _ in },
+                                isConnection: isConnection
                             )
                             .scaleEffect(0.95)
                             .offset(y: 10)
                         }
                         
                         // Current card (foreground)
-                        ProfileCardView(
+                        UserProfileCardView(
                             profile: profiles[currentIndex],
                             dragOffset: $dragOffset,
                             rotationAngle: $rotationAngle,
-                            onSwipe: handleSwipe
+                            onSwipe: handleSwipe,
+                            isConnection: isConnection
                         )
                     }
                     .frame(height: screenHeight * 0.8)
-                    
-                    // Action Buttons
-                    actionButtonsView
+                    .padding(.top, 50) // Add top padding to avoid status bar overlap
                 } else {
                     // No more profiles
                     noMoreProfilesView
+                }
+                
+                // Loading more indicator
+                if isLoadingMore {
+                    HStack {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle())
+                        Text("Loading more profiles...")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                    }
+                    .padding(.vertical, 20)
+                }
+                
+                Spacer()
+            }
+            
+            // Header - positioned at the top over content
+            VStack {
+                headerView
+                    .background(.ultraThinMaterial)
+                Spacer()
+            }
+            
+            // Action Buttons - positioned at the bottom over content (only when showing cards)
+            if !isLoading && currentIndex < profiles.count {
+                VStack {
+                    Spacer()
+                    actionButtonsView
+                        .padding(.bottom, 40) // Distance from bottom
                 }
             }
         }
@@ -96,7 +119,7 @@ struct CategoryRecommendationsView: View {
             }
         } message: {
             if let profile = matchedProfile {
-                Text("You and \(profile.name) liked each other!")
+                Text("You and \(profile.coreIdentity.name) liked each other!")
             }
         }
         .onAppear {
@@ -117,18 +140,10 @@ struct CategoryRecommendationsView: View {
             
             Spacer()
             
-            // Title and counter
-            VStack(spacing: 4) {
-                Text(displayTitle)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                
-                if !profiles.isEmpty {
-                    Text("\(min(currentIndex + 1, profiles.count))/\(profiles.count)")
-                        .font(.system(size: 14))
-                        .foregroundColor(.gray)
-                }
-            }
+            // Title only
+            Text(displayTitle)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
             
             Spacer()
             
@@ -137,7 +152,8 @@ struct CategoryRecommendationsView: View {
                 .frame(width: 20, height: 20)
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(.top, 15) // Top padding adjusted to 15
+        .padding(.bottom, 16)
     }
     
     private var noMoreProfilesView: some View {
@@ -146,26 +162,52 @@ struct CategoryRecommendationsView: View {
                 .font(.system(size: 80))
                 .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
             
-            Text("No More Profiles")
+            Text(hasMoreProfiles ? "Loading More..." : "No More Profiles")
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
             
-            Text("You've seen all available profiles in this category!\nCheck back later for new recommendations.")
-                .font(.system(size: 16))
-                .foregroundColor(.gray)
-                .multilineTextAlignment(.center)
-            
-            Button("Back to Explore") {
-                dismiss()
+            if hasMoreProfiles {
+                Text("You've seen \(profiles.count) profiles.\nLoading more from database...")
+                    .font(.system(size: 16))
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+            } else {
+                Text("You've seen all available profiles in this category!\nCheck back later for new recommendations.")
+                    .font(.system(size: 16))
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
             }
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundColor(.white)
-            .padding(.horizontal, 30)
-            .padding(.vertical, 12)
-            .background(Color(red: 0.4, green: 0.2, blue: 0.1))
-            .cornerRadius(25)
+            
+            if hasMoreProfiles {
+                Button("Load More") {
+                    loadMoreProfiles()
+                }
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 30)
+                .padding(.vertical, 12)
+                .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+                .cornerRadius(25)
+            } else {
+                Button("Back to Explore") {
+                    dismiss()
+                }
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 30)
+                .padding(.vertical, 12)
+                .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+                .cornerRadius(25)
+            }
         }
         .padding(40)
+        .frame(height: screenHeight * 0.6)
+        .onAppear {
+            // Auto load more if there is data
+            if hasMoreProfiles && !isLoadingMore {
+                loadMoreProfiles()
+            }
+        }
     }
     
     private var actionButtonsView: some View {
@@ -204,7 +246,6 @@ struct CategoryRecommendationsView: View {
             }
             .disabled(currentIndex >= profiles.count)
         }
-        .padding(.bottom, 40)
     }
     
     private func handleSwipe(_ direction: SwipeDirection) {
@@ -288,65 +329,94 @@ struct CategoryRecommendationsView: View {
     // MARK: - Load Recommendations
     private func loadRecommendations() {
         isLoading = true
-        
-        guard let currentUser = authManager.currentUser else {
-            // Fallback to sample profiles if no user
-            self.profiles = sampleProfiles.shuffled()
-            self.isLoading = false
-            return
-        }
+        currentIndex = 0
+        profiles.removeAll()
+        databaseOffset = 0
         
         Task {
-            do {
-                // Try to fetch profiles from Supabase
-                let supabaseProfiles = try await supabaseService.getRecommendedProfiles(userId: currentUser.id, limit: 50)
-                
-                // Filter profiles by the selected category (intention) if applicable
-                let filteredProfiles: [SupabaseProfile]
-                if let category = category {
-                    // Filter by networking intention
-                    filteredProfiles = supabaseProfiles.filter { profile in
-                        profile.networkingIntention.selectedIntention == category
-                    }
+            await loadProfilesBatch(isInitial: true)
+        }
+    }
+    
+    private func loadMoreProfiles() {
+        guard !isLoadingMore && hasMoreProfiles else { return }
+        
+        isLoadingMore = true
+        
+        Task {
+            await loadProfilesBatch(isInitial: false)
+        }
+    }
+    
+    private func loadProfilesBatch(isInitial: Bool) async {
+        do {
+            // Get current user ID
+            guard let currentUser = authManager.currentUser else {
+                await MainActor.run {
+                    isLoading = false
+                    isLoadingMore = false
+                }
+                return
+            }
+            
+            // Load profiles from Supabase with pagination using database offset
+            let (supabaseProfiles, totalInBatch, filteredCount) = try await supabaseService.getRecommendedProfiles(
+                userId: currentUser.id,
+                limit: 200,
+                offset: databaseOffset
+            )
+            
+            // Convert SupabaseProfile to BrewNetProfile
+            let brewNetProfiles = supabaseProfiles.map { $0.toBrewNetProfile() }
+            
+            // Filter profiles by the selected category (intention) if applicable
+            let filteredProfiles: [BrewNetProfile]
+            if let category = category {
+                // Filter by networking intention
+                filteredProfiles = brewNetProfiles.filter { profile in
+                    profile.networkingIntention.selectedIntention == category
+                }
+                print("📊 Filtered \(filteredProfiles.count) profiles from \(brewNetProfiles.count) for category \(category.rawValue)")
+            } else {
+                // For "Out of Orbit" or other special categories, show all profiles
+                filteredProfiles = brewNetProfiles
+            }
+            
+            await MainActor.run {
+                if isInitial {
+                    profiles = filteredProfiles
+                    isLoading = false
+                    print("✅ Initially loaded \(filteredProfiles.count) profiles for category")
                 } else {
-                    // For "Out of Orbit" or other special categories, show all profiles (or random selection)
-                    filteredProfiles = supabaseProfiles.shuffled()
+                    profiles.append(contentsOf: filteredProfiles)
+                    isLoadingMore = false
+                    print("✅ Loaded \(filteredProfiles.count) more profiles (total: \(profiles.count))")
                 }
                 
-                // Convert SupabaseProfile to UserProfile
-                var userProfiles: [UserProfile] = Array(filteredProfiles.prefix(20)).map { supabaseProfile in
-                    let coreIdentity = supabaseProfile.coreIdentity
-                    let professional = supabaseProfile.professionalBackground
-                    
-                    return UserProfile(
-                        name: coreIdentity.name,
-                        age: 0, // Age not stored in BrewNetProfile
-                        company: professional.currentCompany ?? "Unknown",
-                        jobTitle: professional.jobTitle ?? "Professional",
-                        skills: professional.skills,
-                        bio: coreIdentity.bio ?? "No bio available",
-                        imageName: "profile\(Int.random(in: 1...5))",
-                        location: coreIdentity.location ?? "Unknown",
-                        education: professional.education ?? "Not specified",
-                        interests: supabaseProfile.personalitySocial.hobbies
-                    )
+                // Update database offset for next query
+                databaseOffset += supabaseProfiles.count
+                
+                // If returned count is less than requested, no more profiles from database
+                if supabaseProfiles.count < 200 {
+                    hasMoreProfiles = false
+                    print("ℹ️ No more profiles available. Total loaded: \(profiles.count)")
+                } else {
+                    hasMoreProfiles = true
                 }
                 
-                // If no profiles found with this intention, use sample profiles as fallback
-                if userProfiles.isEmpty {
-                    userProfiles = sampleProfiles.shuffled()
+                // If current index is beyond profiles count, reset to 0
+                if currentIndex >= profiles.count && !profiles.isEmpty {
+                    currentIndex = 0
                 }
-                
-                await MainActor.run {
-                    self.profiles = userProfiles
-                    self.isLoading = false
-                }
-            } catch {
-                print("❌ Failed to load recommendations: \(error)")
-                // Fallback to sample profiles on error
-                await MainActor.run {
-                    self.profiles = sampleProfiles.shuffled()
-                    self.isLoading = false
+            }
+            
+        } catch {
+            print("❌ Failed to load recommendations: \(error.localizedDescription)")
+            await MainActor.run {
+                if isInitial {
+                    isLoading = false
+                } else {
+                    isLoadingMore = false
                 }
             }
         }
