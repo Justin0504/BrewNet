@@ -42,8 +42,9 @@ struct ChatUser: Identifiable, Codable {
     let isMatched: Bool
     let matchDate: Date?
     let matchType: MatchType
+    let userId: String? // Optional userId for fetching profile from database
     
-    init(name: String, avatar: String, isOnline: Bool = false, lastSeen: Date = Date(), interests: [String] = [], bio: String = "", isMatched: Bool = false, matchDate: Date? = nil, matchType: MatchType = .none) {
+    init(name: String, avatar: String, isOnline: Bool = false, lastSeen: Date = Date(), interests: [String] = [], bio: String = "", isMatched: Bool = false, matchDate: Date? = nil, matchType: MatchType = .none, userId: String? = nil) {
         self.id = UUID()
         self.name = name
         self.avatar = avatar
@@ -54,6 +55,7 @@ struct ChatUser: Identifiable, Codable {
         self.isMatched = isMatched
         self.matchDate = matchDate
         self.matchType = matchType
+        self.userId = userId
     }
 }
 
