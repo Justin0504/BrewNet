@@ -6,6 +6,7 @@ struct BrewNetMatchesView: View {
     @EnvironmentObject var supabaseService: SupabaseService
     
     @State private var profiles: [BrewNetProfile] = []
+    @State private var cachedProfiles: [BrewNetProfile] = [] // 缓存数据
     @State private var currentIndex = 0
     @State private var dragOffset = CGSize.zero
     @State private var rotationAngle = 0.0
@@ -15,11 +16,13 @@ struct BrewNetMatchesView: View {
     @State private var passedProfiles: [BrewNetProfile] = []
     @State private var isLoading = false
     @State private var isLoadingMore = false
+    @State private var isRefreshing = false // 后台刷新标识
     @State private var hasMoreProfiles = true
     @State private var isConnection: Bool = false // Whether the viewer is connected to profiles
     @State private var errorMessage: String?
     @State private var totalFetched = 0
     @State private var totalFiltered = 0
+    @State private var lastLoadTime: Date? = nil // 记录上次加载时间
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -106,7 +109,24 @@ struct BrewNetMatchesView: View {
             }
         }
         .onAppear {
-            loadProfiles()
+            // 先尝试从持久化缓存加载
+            loadCachedProfilesFromStorage()
+            
+            // 如果有缓存数据且距离上次加载不到5分钟，先显示缓存，然后后台刷新
+            if !cachedProfiles.isEmpty, let lastLoad = lastLoadTime, Date().timeIntervalSince(lastLoad) < 300 {
+                // 显示缓存数据（立即显示，无延迟）
+                profiles = cachedProfiles
+                isLoading = false
+                currentIndex = 0 // 重置到第一张卡片
+                print("✅ Using cached profiles: \(cachedProfiles.count) profiles")
+                // 后台静默刷新
+                Task {
+                    await refreshProfilesSilently()
+                }
+            } else {
+                // 首次加载或缓存过期，正常加载
+                loadProfiles()
+            }
         }
         .alert("It's a Match! 🎉", isPresented: $showingMatchAlert) {
             Button("Keep Swiping") {
@@ -300,15 +320,72 @@ struct BrewNetMatchesView: View {
     }
     
     private func loadProfiles() {
-        isLoading = true
         errorMessage = nil
         currentIndex = 0
-        profiles.removeAll()
+        // 如果有缓存，先显示缓存（提供即时反馈）
+        if !cachedProfiles.isEmpty {
+            profiles = cachedProfiles
+            isLoading = false // 允许用户立即看到数据
+            print("✅ Displaying cached profiles immediately: \(cachedProfiles.count) profiles")
+        } else {
+            // 没有缓存时才显示加载状态
+            isLoading = true
+            profiles.removeAll()
+        }
         totalFetched = 0
         totalFiltered = 0
         
         Task {
-            await loadProfilesBatch(offset: 0, limit: 200, isInitial: true)
+            await loadProfilesBatch(offset: 0, limit: 20, isInitial: true) // 先加载少量数据（20个）快速显示
+        }
+    }
+    
+    // 后台静默刷新，不显示加载状态
+    private func refreshProfilesSilently() async {
+        isRefreshing = true
+        await loadProfilesBatch(offset: 0, limit: 20, isInitial: true)
+        isRefreshing = false
+    }
+    
+    // 从持久化存储加载缓存
+    private func loadCachedProfilesFromStorage() {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        let cacheKey = "matches_cache_\(currentUser.id)"
+        let timeKey = "matches_cache_time_\(currentUser.id)"
+        
+        // 从 UserDefaults 加载缓存
+        if let data = UserDefaults.standard.data(forKey: cacheKey),
+           let timestamp = UserDefaults.standard.object(forKey: timeKey) as? Date,
+           Date().timeIntervalSince(timestamp) < 300 { // 5分钟内有效
+            
+            do {
+                let decoder = JSONDecoder()
+                let cachedProfilesData = try decoder.decode([BrewNetProfile].self, from: data)
+                cachedProfiles = cachedProfilesData
+                lastLoadTime = timestamp
+                print("✅ Loaded \(cachedProfiles.count) profiles from persistent cache")
+            } catch {
+                print("⚠️ Failed to decode cached profiles: \(error)")
+            }
+        }
+    }
+    
+    // 保存缓存到持久化存储
+    private func saveCachedProfilesToStorage() {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        let cacheKey = "matches_cache_\(currentUser.id)"
+        let timeKey = "matches_cache_time_\(currentUser.id)"
+        
+        do {
+            let encoder = JSONEncoder()
+            let data = try encoder.encode(cachedProfiles)
+            UserDefaults.standard.set(data, forKey: cacheKey)
+            UserDefaults.standard.set(Date(), forKey: timeKey)
+            print("✅ Saved \(cachedProfiles.count) profiles to persistent cache")
+        } catch {
+            print("⚠️ Failed to save cached profiles: \(error)")
         }
     }
     
@@ -347,11 +424,20 @@ struct BrewNetMatchesView: View {
             await MainActor.run {
                 if isInitial {
                     profiles = brewNetProfiles
+                    // 更新缓存
+                    cachedProfiles = brewNetProfiles
+                    lastLoadTime = Date()
                     isLoading = false
+                    // 保存到持久化存储
+                    saveCachedProfilesToStorage()
                     print("✅ Initially loaded \(brewNetProfiles.count) profiles from Supabase")
                 } else {
                     profiles.append(contentsOf: brewNetProfiles)
+                    // 更新缓存
+                    cachedProfiles.append(contentsOf: brewNetProfiles)
                     isLoadingMore = false
+                    // 保存到持久化存储
+                    saveCachedProfilesToStorage()
                     print("✅ Loaded \(brewNetProfiles.count) more profiles (total: \(profiles.count))")
                 }
                 
