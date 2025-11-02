@@ -67,7 +67,8 @@ class AuthManager: ObservableObject {
                     let appUser = supabaseUser.toAppUser()
                     
                     // Check if user has profile
-                    let hasProfile = try await supabaseService?.getProfile(userId: supabaseUser.id) != nil
+                    // 使用 try? 而不是 try 因为 profile 可能不存在（这是正常的）
+                    let hasProfile = (try? await supabaseService?.getProfile(userId: supabaseUser.id)) != nil
                     let finalAppUser = AppUser(
                         id: appUser.id,
                         email: appUser.email,
@@ -241,7 +242,8 @@ class AuthManager: ObservableObject {
                 let appUser = supabaseUser.toAppUser()
                 
                 // 额外检查：如果用户有 profile 数据，确保 profileSetupCompleted 为 true
-                let hasProfile = try await supabaseService?.getProfile(userId: supabaseUser.id) != nil
+                // 使用 try? 而不是 try 因为 profile 可能不存在（这是正常的）
+                let hasProfile = (try? await supabaseService?.getProfile(userId: supabaseUser.id)) != nil
                 let finalAppUser = AppUser(
                     id: appUser.id,
                     email: appUser.email,

@@ -349,6 +349,63 @@ class SupabaseService: ObservableObject {
     }
     
     
+    // MARK: - Storage Operations
+    
+    /// 上传用户头像到 Supabase Storage
+    func uploadProfileImage(userId: String, imageData: Data, fileExtension: String = "jpg") async throws -> String {
+        print("📤 Uploading profile image for user: \(userId)")
+        
+        let fileName = "avatar.\(fileExtension)"
+        let filePath = "\(userId)/\(fileName)"
+        
+        do {
+            // 上传图片到 storage bucket
+            try await client.storage
+                .from("avatars")
+                .upload(
+                    path: filePath,
+                    file: imageData,
+                    options: FileOptions(
+                        cacheControl: "3600",
+                        contentType: "image/\(fileExtension == "jpg" ? "jpeg" : fileExtension)"
+                    )
+                )
+            
+            print("✅ Profile image uploaded successfully")
+            
+            // 获取公共 URL
+            let publicURL = try client.storage
+                .from("avatars")
+                .getPublicURL(path: filePath)
+            
+            print("🔗 Public URL: \(publicURL)")
+            return publicURL.absoluteString
+            
+        } catch {
+            print("❌ Failed to upload profile image: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    /// 删除用户头像
+    func deleteProfileImage(userId: String) async throws {
+        print("🗑️ Deleting profile image for user: \(userId)")
+        
+        let fileName = "avatar.jpg" // 需要匹配实际文件名
+        let filePath = "\(userId)/\(fileName)"
+        
+        do {
+            try await client.storage
+                .from("avatars")
+                .remove(paths: [filePath])
+            
+            print("✅ Profile image deleted successfully")
+        } catch {
+            print("❌ Failed to delete profile image: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
     // MARK: - Profile Operations
     
     /// 创建用户资料
@@ -436,7 +493,15 @@ class SupabaseService: ObservableObject {
                 .eq("user_id", value: userId)
                 .execute()
             
+            print("📊 Response status: \(response.response.statusCode)")
             let data = response.data
+            print("📦 Response data size: \(data.count) bytes")
+            
+            // 打印原始数据以便调试
+            if let jsonString = String(data: data, encoding: .utf8) {
+                print("📄 Response JSON: \(jsonString)")
+            }
+            
             let profiles = try JSONDecoder().decode([SupabaseProfile].self, from: data)
             
             if profiles.isEmpty {
@@ -455,36 +520,25 @@ class SupabaseService: ObservableObject {
             
         } catch {
             print("❌ Failed to fetch profile: \(error.localizedDescription)")
+            print("🔍 错误类型: \(type(of: error))")
             
-            // 如果是 JSON 解析错误，可能是数据结构问题
-            if error.localizedDescription.contains("Cannot coerce") || 
-               error.localizedDescription.contains("single JSON object") {
-                print("🔧 JSON coercion error detected, trying alternative approach...")
-                
-                // 尝试使用 .limit(1) 方法
-                do {
-                    let response = try await client
-                        .from(SupabaseTable.profiles.rawValue)
-                        .select()
-                        .eq("user_id", value: userId)
-                        .limit(1)
-                        .execute()
-                    
-                    let data = response.data
-                    let profiles = try JSONDecoder().decode([SupabaseProfile].self, from: data)
-                    
-                    if profiles.isEmpty {
-                        print("ℹ️ No profile found for user: \(userId)")
-                        return nil
-                    } else {
-                        let profile = profiles.first!
-                        print("✅ Profile fetched successfully with limit(1): \(profile.id)")
-                        return profile
-                    }
-                    
-                } catch {
-                    print("❌ Alternative approach also failed: \(error.localizedDescription)")
-                    throw ProfileError.fetchFailed(error.localizedDescription)
+            if let decodingError = error as? DecodingError {
+                print("🔍 DecodingError 详情:")
+                switch decodingError {
+                case .dataCorrupted(let context):
+                    print("   - 数据损坏: \(context.debugDescription)")
+                    print("   - 原因: \(context.underlyingError?.localizedDescription ?? "unknown")")
+                case .keyNotFound(let key, let context):
+                    print("   - 缺少键: \(key.stringValue)")
+                    print("   - 上下文: \(context.debugDescription)")
+                case .typeMismatch(let type, let context):
+                    print("   - 类型不匹配: \(type)")
+                    print("   - 上下文: \(context.debugDescription)")
+                case .valueNotFound(let type, let context):
+                    print("   - 值不存在: \(type)")
+                    print("   - 上下文: \(context.debugDescription)")
+                @unknown default:
+                    print("   - 未知错误")
                 }
             }
             
