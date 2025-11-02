@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct ChatInterfaceView: View {
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
     @StateObject private var aiService = GeminiAIService.shared
     @State private var chatSessions: [ChatSession] = []
     @State private var selectedSession: ChatSession?
@@ -8,6 +10,7 @@ struct ChatInterfaceView: View {
     @State private var showingAISuggestions = false
     @State private var currentAISuggestions: [AISuggestion] = []
     @State private var isLoadingSuggestions = false
+    @State private var isLoadingMatches = true
     
     var body: some View {
         VStack(spacing: 0) {
@@ -30,6 +33,9 @@ struct ChatInterfaceView: View {
         .onAppear {
             loadChatSessions()
         }
+        .refreshable {
+            await loadChatSessionsFromDatabase()
+        }
         .sheet(isPresented: $showingAISuggestions) {
             if let session = selectedSession {
                 AISuggestionsView(
@@ -50,7 +56,10 @@ struct ChatInterfaceView: View {
     
     private var chatListView: some View {
         VStack {
-            if chatSessions.isEmpty {
+            if isLoadingMatches {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if chatSessions.isEmpty {
                 emptyStateView
             } else {
                 List(chatSessions) { session in
@@ -295,13 +304,93 @@ struct ChatInterfaceView: View {
     }
     
     private func loadChatSessions() {
-        // Simulate loading chat sessions
-        chatSessions = sampleChatUsers.map { user in
-            ChatSession(
-                user: user,
-                messages: generateSampleMessages(for: user),
-                aiSuggestions: sampleAISuggestions
-            )
+        Task {
+            await loadChatSessionsFromDatabase()
+        }
+    }
+    
+    @MainActor
+    private func loadChatSessionsFromDatabase() async {
+        guard let currentUser = authManager.currentUser else {
+            isLoadingMatches = false
+            chatSessions = []
+            return
+        }
+        
+        isLoadingMatches = true
+        
+        do {
+            // 从 Supabase 获取活跃的匹配
+            let matches = try await supabaseService.getActiveMatches(userId: currentUser.id)
+            
+            var sessions: [ChatSession] = []
+            
+            for match in matches {
+                // 确定对方用户ID（当前用户可能是 user_id 也可能是 matched_user_id）
+                let matchedUserId: String
+                let matchedUserName: String
+                
+                if match.userId == currentUser.id {
+                    matchedUserId = match.matchedUserId
+                    matchedUserName = match.matchedUserName
+                } else {
+                    matchedUserId = match.userId
+                    // 如果当前用户是 matched_user_id，需要获取对方的姓名
+                    if let profile = try? await supabaseService.getProfile(userId: match.userId) {
+                        matchedUserName = profile.coreIdentity.name
+                    } else {
+                        matchedUserName = "Unknown User"
+                    }
+                }
+                
+                var matchedUserProfile: BrewNetProfile? = nil
+                if let profile = try? await supabaseService.getProfile(userId: matchedUserId) {
+                    matchedUserProfile = profile.toBrewNetProfile()
+                }
+                
+                // 解析匹配时间
+                let dateFormatter = ISO8601DateFormatter()
+                let matchDate = dateFormatter.date(from: match.createdAt)
+                
+                // 创建 ChatUser（使用系统图标作为 avatar 的占位符，实际应使用图片 URL）
+                let avatarIcon: String
+                if let profileImage = matchedUserProfile?.coreIdentity.profileImage, !profileImage.isEmpty {
+                    // 如果有图片 URL，暂时仍使用系统图标（可以后续实现图片加载）
+                    avatarIcon = "person.circle.fill"
+                } else {
+                    avatarIcon = "person.circle.fill"
+                }
+                
+                let chatUser = ChatUser(
+                    name: matchedUserName,
+                    avatar: avatarIcon,
+                    isOnline: false, // 可以根据需要实现在线状态检查
+                    lastSeen: matchDate ?? Date(),
+                    interests: matchedUserProfile?.personalitySocial.hobbies ?? [],
+                    bio: matchedUserProfile?.coreIdentity.bio ?? "",
+                    isMatched: true,
+                    matchDate: matchDate,
+                    matchType: .mutual // invitation_based 对应 mutual
+                )
+                
+                // 创建 ChatSession（暂时使用空消息列表，后续可以从 messages 表加载）
+                let session = ChatSession(
+                    user: chatUser,
+                    messages: [], // 可以从数据库加载历史消息
+                    aiSuggestions: sampleAISuggestions
+                )
+                
+                sessions.append(session)
+            }
+            
+            chatSessions = sessions
+            isLoadingMatches = false
+            print("✅ Loaded \(sessions.count) matched users for chat")
+            
+        } catch {
+            print("❌ Failed to load matches: \(error.localizedDescription)")
+            isLoadingMatches = false
+            chatSessions = []
         }
     }
     

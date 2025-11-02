@@ -289,27 +289,90 @@ struct BrewNetMatchesView: View {
     }
     
     private func likeProfile() {
-        if currentIndex < profiles.count {
-            let profile = profiles[currentIndex]
-            likedProfiles.append(profile)
-            
-            // TODO: Send like action to backend
-            print("Liked profile: \(profile.id)")
-            
-            // Simulate match (random chance)
-            if Bool.random() {
-                matchedProfile = profile
-                showingMatchAlert = true
+        guard currentIndex < profiles.count else { return }
+        guard let currentUser = authManager.currentUser else {
+            print("❌ No current user found")
+            return
+        }
+        
+        let profile = profiles[currentIndex]
+        likedProfiles.append(profile)
+        
+        // 发送邀请到 Supabase
+        Task {
+            do {
+                // 获取当前用户的 profile 信息用于 senderProfile
+                var senderProfile: InvitationProfile? = nil
+                if let currentUserProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                    let brewNetProfile = currentUserProfile.toBrewNetProfile()
+                    senderProfile = brewNetProfile.toInvitationProfile()
+                }
                 
-                // Add to matched profiles if it's a match
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("UserMatched"),
-                    object: nil,
-                    userInfo: ["profile": profile]
+                // 发送邀请
+                let invitation = try await supabaseService.sendInvitation(
+                    senderId: currentUser.id,
+                    receiverId: profile.userId,
+                    reasonForInterest: nil, // 可以后续添加理由
+                    senderProfile: senderProfile
                 )
+                
+                print("✅ Invitation sent successfully: \(invitation.id)")
+                
+                // 检查对方是否也给我发了邀请（双向邀请）
+                let receivedInvitations = try? await supabaseService.getPendingInvitations(userId: currentUser.id)
+                let existingInvitationFromThem = receivedInvitations?.first { $0.senderId == profile.userId }
+                
+                if let theirInvitation = existingInvitationFromThem {
+                    // 双方互相发送了邀请，自动创建匹配
+                    print("💚 Mutual invitation detected! Auto-creating match...")
+                    
+                    // 先接受对方发给我的邀请（这会触发数据库触发器创建匹配）
+                    do {
+                        _ = try await supabaseService.acceptInvitation(
+                            invitationId: theirInvitation.id,
+                            userId: currentUser.id
+                        )
+                        print("✅ Accepted their invitation - match created via trigger")
+                    } catch {
+                        print("⚠️ Failed to accept their invitation: \(error.localizedDescription)")
+                    }
+                    
+                    // 然后接受我刚发送的邀请（确保数据库记录一致）
+                    do {
+                        _ = try await supabaseService.acceptInvitation(
+                            invitationId: invitation.id,
+                            userId: currentUser.id
+                        )
+                        print("✅ Accepted my invitation")
+                    } catch {
+                        // 如果失败，可能匹配已经通过触发器创建了，不影响
+                        print("⚠️ Failed to accept my invitation (match may already exist): \(error.localizedDescription)")
+                    }
+                    
+                    // 显示匹配成功提示
+                    await MainActor.run {
+                        matchedProfile = profile
+                        showingMatchAlert = true
+                        
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("UserMatched"),
+                            object: nil,
+                            userInfo: ["profile": profile]
+                        )
+                    }
+                }
+                
+                await MainActor.run {
+                    moveToNextProfile()
+                }
+                
+            } catch {
+                print("❌ Failed to send invitation: \(error.localizedDescription)")
+                await MainActor.run {
+                    errorMessage = "Failed to send invitation. Please try again."
+                    moveToNextProfile()
+                }
             }
-            
-            moveToNextProfile()
         }
     }
     

@@ -1260,6 +1260,46 @@ class SupabaseService: ObservableObject {
         return invitation
     }
     
+    /// 检查是否是双向邀请（两个用户互相发送了邀请）
+    func checkMutualInvitation(userId1: String, userId2: String) async throws -> Bool {
+        print("🔍 Checking mutual invitation between \(userId1) and \(userId2)")
+        
+        // 检查 userId1 -> userId2 的邀请
+        let response1 = try await client
+            .from(SupabaseTable.invitations.rawValue)
+            .select("id")
+            .eq("sender_id", value: userId1)
+            .eq("receiver_id", value: userId2)
+            .eq("status", value: InvitationStatus.pending.rawValue)
+            .limit(1)
+            .execute()
+        
+        let data1 = response1.data
+        guard let jsonArray1 = try? JSONSerialization.jsonObject(with: data1) as? [[String: Any]],
+              !jsonArray1.isEmpty else {
+            return false
+        }
+        
+        // 检查 userId2 -> userId1 的邀请
+        let response2 = try await client
+            .from(SupabaseTable.invitations.rawValue)
+            .select("id")
+            .eq("sender_id", value: userId2)
+            .eq("receiver_id", value: userId1)
+            .eq("status", value: InvitationStatus.pending.rawValue)
+            .limit(1)
+            .execute()
+        
+        let data2 = response2.data
+        guard let jsonArray2 = try? JSONSerialization.jsonObject(with: data2) as? [[String: Any]],
+              !jsonArray2.isEmpty else {
+            return false
+        }
+        
+        print("✅ Mutual invitation found!")
+        return true
+    }
+    
     // MARK: - Match Operations
     
     /// 创建匹配（通常由系统自动创建，当邀请被接受时）
