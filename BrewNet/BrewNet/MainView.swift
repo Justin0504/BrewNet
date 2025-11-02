@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MainView: View {
     @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var databaseManager: DatabaseManager
     @EnvironmentObject var supabaseService: SupabaseService
     @State private var selectedTab = 0
     
@@ -25,6 +26,14 @@ struct MainView: View {
                 }
                 .tag(1)
             
+            // Requests
+            RequestsView()
+                .tabItem {
+                    Image(systemName: "person.badge.plus.fill")
+                    Text("Requests")
+                }
+                .tag(2)
+            
             // Chat
             NavigationStack {
                 ChatView()
@@ -33,7 +42,7 @@ struct MainView: View {
                     Image(systemName: "message.fill")
                     Text("Chat")
                 }
-                .tag(2)
+                .tag(3)
             
             // Profile
             NavigationStack {
@@ -43,7 +52,7 @@ struct MainView: View {
                     Image(systemName: "person.fill")
                     Text("Profile")
                 }
-                .tag(3)
+                .tag(4)
         }
         .accentColor(Color(red: 0.4, green: 0.2, blue: 0.1)) // Dark brown theme color
     }
@@ -67,6 +76,20 @@ struct ChatView: View {
 struct ExploreView: View {
     var body: some View {
         ExploreMainView()
+    }
+}
+
+// MARK: - Requests View
+struct RequestsView: View {
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var databaseManager: DatabaseManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    var body: some View {
+        ConnectionRequestsView()
+            .environmentObject(authManager)
+            .environmentObject(databaseManager)
+            .environmentObject(supabaseService)
     }
 }
 
