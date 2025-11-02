@@ -683,26 +683,27 @@ struct LeaveMessageView: View {
                             )
                             .frame(height: 150)
                         
-                        VStack(alignment: .leading, spacing: 0) {
-                            TextEditor(text: $messageText)
-                                .font(.system(size: 16))
-                                .padding(8)
-                                .frame(height: 140)
-                                .scrollContentBackground(.hidden)
-                                .focused($isTextFieldFocused)
-                                .onChange(of: messageText) { newValue in
-                                    if newValue.count > maxMessageLength {
-                                        messageText = String(newValue.prefix(maxMessageLength))
-                                    }
+                        TextEditor(text: $messageText)
+                            .font(.system(size: 16))
+                            .padding(8)
+                            .frame(height: 140)
+                            .scrollContentBackground(.hidden)
+                            .focused($isTextFieldFocused)
+                            .onChange(of: messageText) { newValue in
+                                if newValue.count > maxMessageLength {
+                                    messageText = String(newValue.prefix(maxMessageLength))
                                 }
-                            
-                            // Character counter
+                            }
+                        
+                        // Character counter overlay
+                        VStack {
+                            Spacer()
                             HStack {
                                 Spacer()
                                 Text("\(messageText.count)/\(maxMessageLength)")
                                     .font(.system(size: 12))
                                     .foregroundColor(messageText.count > maxMessageLength * 90 / 100 ? .orange : .gray)
-                                    .padding(.trailing, 12)
+                                    .padding(.trailing, 8)
                                     .padding(.bottom, 8)
                             }
                         }
