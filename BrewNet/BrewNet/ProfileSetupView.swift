@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 struct ProfileSetupView: View {
     @EnvironmentObject var authManager: AuthManager
@@ -530,6 +531,8 @@ struct ProfileSetupView: View {
 
 // MARK: - Step 1: Core Identity
 struct CoreIdentityStep: View {
+    @EnvironmentObject var supabaseService: SupabaseService
+    @EnvironmentObject var authManager: AuthManager
     @Binding var profileData: ProfileCreationData
     @State private var name = ""
     @State private var email = ""
@@ -539,9 +542,117 @@ struct CoreIdentityStep: View {
     @State private var pronouns = ""
     @State private var location = ""
     @State private var personalWebsite = ""
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var profileImageData: Data? = nil
+    @State private var profileImageURL: String? = nil
+    @State private var isUploadingImage = false
     
     var body: some View {
         VStack(spacing: 20) {
+            // Profile Image Upload
+            VStack(spacing: 12) {
+                Text("Profile Picture")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                HStack(spacing: 16) {
+                    // Profile Image Display
+                    if let profileImageData = profileImageData, let uiImage = UIImage(data: profileImageData) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 80, height: 80)
+                            .clipShape(Circle())
+                            .overlay(
+                                Circle()
+                                    .stroke(Color(red: 0.6, green: 0.4, blue: 0.2), lineWidth: 3)
+                            )
+                    } else if let existingImageURL = profileImageURL, !existingImageURL.isEmpty {
+                        AsyncImage(url: URL(string: existingImageURL)) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                            case .failure(_):
+                                Image(systemName: "person.circle.fill")
+                                    .resizable()
+                                    .foregroundColor(.gray)
+                            case .empty:
+                                ProgressView()
+                            @unknown default:
+                                Image(systemName: "person.circle.fill")
+                                    .resizable()
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                        .frame(width: 80, height: 80)
+                        .clipShape(Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(Color(red: 0.6, green: 0.4, blue: 0.2), lineWidth: 3)
+                        )
+                    } else {
+                        Image(systemName: "person.circle.fill")
+                            .resizable()
+                            .frame(width: 80, height: 80)
+                            .foregroundColor(Color(red: 0.8, green: 0.7, blue: 0.6))
+                            .overlay(
+                                Circle()
+                                    .stroke(Color(red: 0.6, green: 0.4, blue: 0.2), lineWidth: 3)
+                            )
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                            HStack {
+                                if isUploadingImage {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(0.8)
+                                } else {
+                                    Image(systemName: "camera.fill")
+                                        .font(.system(size: 16))
+                                }
+                                Text(isUploadingImage ? "Uploading..." : "Choose Photo")
+                                    .font(.system(size: 14, weight: .medium))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 10)
+                            .background(isUploadingImage ? Color.gray : Color(red: 0.6, green: 0.4, blue: 0.2))
+                            .cornerRadius(12)
+                        }
+                        .disabled(isUploadingImage)
+                        
+                        if (profileImageData != nil || (profileImageURL != nil && !profileImageURL!.isEmpty)) && !isUploadingImage {
+                            Button(action: {
+                                profileImageData = nil
+                                profileImageURL = nil
+                                selectedPhotoItem = nil
+                                updateProfileData()
+                            }) {
+                                HStack {
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 14))
+                                    Text("Remove")
+                                        .font(.system(size: 14))
+                                }
+                                .foregroundColor(.red)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 8)
+                                .background(Color.red.opacity(0.1))
+                                .cornerRadius(8)
+                            }
+                        }
+                    }
+                    
+                    Spacer()
+                }
+            }
+            .padding(.bottom, 8)
+            
             // Name
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -698,6 +809,50 @@ struct CoreIdentityStep: View {
                 pronouns = coreIdentity.pronouns ?? ""
                 location = coreIdentity.location ?? ""
                 personalWebsite = coreIdentity.personalWebsite ?? ""
+                
+                // Load existing profile image URL if available
+                profileImageURL = coreIdentity.profileImage
+            }
+        }
+        .onChange(of: selectedPhotoItem) { newItem in
+            Task {
+                if let data = try? await newItem?.loadTransferable(type: Data.self) {
+                    await MainActor.run {
+                        profileImageData = data
+                    }
+                    
+                    // Upload image to Supabase Storage
+                    if let userId = authManager.currentUser?.id {
+                        do {
+                            print("📤 Uploading profile image...")
+                            isUploadingImage = true
+                            
+                            // Detect file extension from data or use jpg as default
+                            let fileExtension = detectImageFormat(from: data) ?? "jpg"
+                            
+                            // Upload to Supabase Storage
+                            let publicURL = try await supabaseService.uploadProfileImage(
+                                userId: userId,
+                                imageData: data,
+                                fileExtension: fileExtension
+                            )
+                            
+                            await MainActor.run {
+                                profileImageURL = publicURL
+                                isUploadingImage = false
+                                updateProfileData()
+                                print("✅ Profile image uploaded successfully: \(publicURL)")
+                            }
+                        } catch {
+                            await MainActor.run {
+                                isUploadingImage = false
+                                print("❌ Failed to upload profile image: \(error.localizedDescription)")
+                                // Continue anyway, image data is still in profileImageData
+                                updateProfileData()
+                            }
+                        }
+                    }
+                }
             }
         }
         .onChange(of: name) { _ in updateProfileData() }
@@ -719,11 +874,14 @@ struct CoreIdentityStep: View {
             fullPhoneNumber = "\(selectedCountryCode.code)\(phoneNumber)"
         }
         
+        // Use existing URL if we have new image data, otherwise keep the URL
+        let imageURL = profileImageData != nil ? profileImageURL : profileImageURL
+        
         let coreIdentity = CoreIdentity(
             name: name,
             email: email,
             phoneNumber: fullPhoneNumber,
-            profileImage: nil,
+            profileImage: imageURL,
             bio: bio.isEmpty ? nil : bio,
             pronouns: pronouns.isEmpty ? nil : pronouns,
             location: location.isEmpty ? nil : location,
@@ -751,6 +909,36 @@ struct CoreIdentityStep: View {
         }
         // If no country code found, assume it's already a local number
         return (nil, phoneNumber)
+    }
+    
+    // Helper function to detect image format from data
+    private func detectImageFormat(from data: Data) -> String? {
+        guard data.count >= 12 else { return nil }
+        
+        // Check for JPEG
+        if data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+            return "jpg"
+        }
+        
+        // Check for PNG
+        if data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 {
+            return "png"
+        }
+        
+        // Check for GIF
+        if data[0] == 0x47 && data[1] == 0x49 && data[2] == 0x46 {
+            return "gif"
+        }
+        
+        // Check for WebP
+        if data.count >= 12 {
+            let webpHeader = String(data: data[0..<12], encoding: .ascii)
+            if webpHeader?.hasPrefix("RIFF") == true && String(data: data[8..<12], encoding: .ascii) == "WEBP" {
+                return "webp"
+            }
+        }
+        
+        return nil
     }
 }
 

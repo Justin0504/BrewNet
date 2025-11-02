@@ -51,6 +51,59 @@ WHERE email = '你的邮箱@example.com';
 4. 在 "Confirmation" 部分
 5. 点击 "Confirm user" 按钮
 
+## 🔑 密码管理
+
+### 重置用户密码
+
+**重要：** Supabase 无法查看用户原始密码（密码经过单向加密存储）。如果需要重置密码：
+
+#### 方法 1: 通过 Dashboard UI 重置
+
+1. 进入 **Authentication** > **Users**
+2. 找到目标用户
+3. 点击用户卡片或详情
+4. 在用户详情页找到密码部分
+5. 点击 "Send reset password email" 或 "Reset password"
+6. 用户会收到重置链接
+
+#### 方法 2: 通过 SQL 设置临时密码（开发调试）
+
+⚠️ **仅用于开发环境，生产环境不建议使用**
+
+在 SQL Editor 中执行（这会生成一个新的加密密码）：
+
+```sql
+-- 注意：这会生成一个随机密码，你需要记录下来
+-- 或者先设置一个已知的密码哈希
+UPDATE auth.users
+SET encrypted_password = crypt('你的新密码', gen_salt('bf'))
+WHERE email = '用户邮箱@example.com';
+```
+
+#### 方法 3: 用户自助重置（推荐）
+
+用户可以在登录页面点击 "忘记密码"，输入邮箱后系统会发送重置链接。
+
+### 查看用户认证信息
+
+在 SQL Editor 中查询：
+
+```sql
+-- 查看用户基本认证信息（不包含密码）
+SELECT 
+    id,
+    email,
+    email_confirmed_at,
+    phone_confirmed_at,
+    created_at,
+    last_sign_in_at,
+    raw_user_meta_data
+FROM auth.users
+WHERE email = '你的邮箱@example.com';
+```
+
+**注意：** `encrypted_password` 字段是加密的哈希值，无法反向解密出原始密码。
+
 ## 🔐 生产环境配置
 
 ### 启用邮箱验证（推荐）
