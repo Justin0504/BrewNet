@@ -17,6 +17,14 @@ struct MainView: View {
                 }
                 .tag(0)
             
+            // Explore
+            ExploreView()
+                .tabItem {
+                    Image(systemName: "safari.fill")
+                    Text("Explore")
+                }
+                .tag(1)
+            
             // Chat
             NavigationStack {
                 ChatView()
@@ -25,7 +33,7 @@ struct MainView: View {
                     Image(systemName: "message.fill")
                     Text("Chat")
                 }
-                .tag(1)
+                .tag(2)
             
             // Profile
             NavigationStack {
@@ -34,14 +42,6 @@ struct MainView: View {
                 .tabItem {
                     Image(systemName: "person.fill")
                     Text("Profile")
-                }
-                .tag(2)
-            
-            // Explore
-            ExploreView()
-                .tabItem {
-                    Image(systemName: "safari.fill")
-                    Text("Explore")
                 }
                 .tag(3)
         }
