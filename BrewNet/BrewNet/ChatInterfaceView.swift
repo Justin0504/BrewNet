@@ -374,6 +374,7 @@ struct ChatInterfaceView: View {
             let matches = try await supabaseService.getActiveMatches(userId: currentUser.id)
             
             var sessions: [ChatSession] = []
+            var processedUserIds = Set<String>() // 用于去重，确保每个匹配用户只显示一次
             
             for match in matches {
                 // 确定对方用户ID（当前用户可能是 user_id 也可能是 matched_user_id）
@@ -389,9 +390,22 @@ struct ChatInterfaceView: View {
                     if let profile = try? await supabaseService.getProfile(userId: match.userId) {
                         matchedUserName = profile.coreIdentity.name
                     } else {
-                        matchedUserName = "Unknown User"
+                        matchedUserName = match.matchedUserName
                     }
                 }
+                
+                // 过滤掉自己：确保匹配的用户不是当前用户
+                if matchedUserId == currentUser.id {
+                    print("⚠️ Skipping self match: \(matchedUserId)")
+                    continue
+                }
+                
+                // 去重：如果这个用户已经在列表中，跳过
+                if processedUserIds.contains(matchedUserId) {
+                    print("⚠️ Skipping duplicate match for user: \(matchedUserId)")
+                    continue
+                }
+                processedUserIds.insert(matchedUserId)
                 
                 var matchedUserProfile: BrewNetProfile? = nil
                 if let profile = try? await supabaseService.getProfile(userId: matchedUserId) {
@@ -431,6 +445,13 @@ struct ChatInterfaceView: View {
                 )
                 
                 sessions.append(session)
+            }
+            
+            // 按匹配时间排序，最新的在前面
+            sessions.sort { session1, session2 in
+                let date1 = session1.user.matchDate ?? Date.distantPast
+                let date2 = session2.user.matchDate ?? Date.distantPast
+                return date1 > date2
             }
             
             chatSessions = sessions

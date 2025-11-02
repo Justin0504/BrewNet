@@ -29,7 +29,7 @@ struct ProfileDisplayView: View {
                 .padding(.top, 20)
                 
                 // Action Buttons Section (在 Profile Header 和 Network Preferences 之间)
-                HStack(spacing: 12) {
+                VStack(spacing: 12) {
                     // 查看 Match 按钮
                     Button(action: {
                         loadMatches()
@@ -60,13 +60,15 @@ struct ProfileDisplayView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 14)
-                        .background(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        .frame(maxWidth: .infinity, minHeight: 60)
+                        .background(Color(red: 0.75, green: 0.65, blue: 0.5)) // 浅棕色
                         .cornerRadius(12)
                         .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
                     }
                     .disabled(isLoadingMatches)
+                    .buttonStyle(PlainButtonStyle())
                     
-                    // 查看发送的 Invitation 按钮
+                    // 查看发送的 Invitation 按钮 - 单独占一行
                     Button(action: {
                         loadSentInvitations()
                         showingSentInvitations = true
@@ -82,7 +84,7 @@ struct ProfileDisplayView: View {
                                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                         .scaleEffect(0.7)
                                 } else {
-                                    Text("Sent Invitations")
+                                    Text("Sent")
                                         .font(.system(size: 16, weight: .semibold))
                                         .foregroundColor(.white)
                                     
@@ -96,11 +98,13 @@ struct ProfileDisplayView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 14)
-                        .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .frame(maxWidth: .infinity, minHeight: 60)
+                        .background(Color(red: 0.75, green: 0.65, blue: 0.5)) // 浅棕色
                         .cornerRadius(12)
                         .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
                     }
                     .disabled(isLoadingInvitations)
+                    .buttonStyle(PlainButtonStyle())
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 20)
@@ -147,10 +151,53 @@ struct ProfileDisplayView: View {
         Task {
             do {
                 let fetchedMatches = try await supabaseService.getActiveMatches(userId: currentUser.id)
+                
+                // 过滤掉自己（不应该出现在匹配列表中）
+                let filteredMatches = fetchedMatches.filter { match in
+                    // 确定对方用户ID
+                    let otherUserId: String
+                    if match.userId == currentUser.id {
+                        otherUserId = match.matchedUserId
+                    } else {
+                        otherUserId = match.userId
+                    }
+                    
+                    // 确保对方用户不是当前用户（防御性检查）
+                    let isValid = otherUserId != currentUser.id && !otherUserId.isEmpty
+                    
+                    if !isValid {
+                        print("⚠️ Filtering out invalid match: user_id=\(match.userId), matched_user_id=\(match.matchedUserId), currentUser=\(currentUser.id)")
+                    }
+                    
+                    return isValid
+                }
+                
+                // 去重：确保每个匹配用户只显示一次
+                // 因为数据库中可能有两条记录（user_id=A,matched_user_id=B 和 user_id=B,matched_user_id=A）
+                var seenUserIds = Set<String>()
+                let uniqueMatches = filteredMatches.filter { match in
+                    // 确定对方用户ID
+                    let otherUserId: String
+                    if match.userId == currentUser.id {
+                        otherUserId = match.matchedUserId
+                    } else {
+                        otherUserId = match.userId
+                    }
+                    
+                    // 如果这个用户已经处理过，跳过
+                    if seenUserIds.contains(otherUserId) {
+                        print("⚠️ Skipping duplicate match for user: \(otherUserId)")
+                        return false
+                    }
+                    
+                    seenUserIds.insert(otherUserId)
+                    return true
+                }
+                
                 await MainActor.run {
-                    matches = fetchedMatches
+                    matches = uniqueMatches
                     isLoadingMatches = false
-                    print("✅ Loaded \(fetchedMatches.count) matches")
+                    print("✅ Loaded \(uniqueMatches.count) unique matches (from \(fetchedMatches.count) total, after filtering \(filteredMatches.count))")
                 }
             } catch {
                 print("❌ Failed to load matches: \(error.localizedDescription)")
@@ -1061,7 +1108,40 @@ struct MatchesListView: View {
 struct MatchRowView: View {
     let match: SupabaseMatch
     @EnvironmentObject var supabaseService: SupabaseService
+    @EnvironmentObject var authManager: AuthManager
     @State private var matchedUserProfile: BrewNetProfile?
+    
+    // 确定应该显示的用户ID和名称
+    private var displayUserId: String {
+        guard let currentUser = authManager.currentUser else {
+            return match.matchedUserId
+        }
+        // 如果当前用户是 user_id，则显示 matched_user_id
+        // 如果当前用户是 matched_user_id，则显示 user_id
+        if match.userId == currentUser.id {
+            return match.matchedUserId
+        } else {
+            return match.userId
+        }
+    }
+    
+    private var displayUserName: String {
+        if let profile = matchedUserProfile {
+            return profile.coreIdentity.name
+        }
+        // 如果还没加载到 profile，使用匹配记录中的名称
+        guard let currentUser = authManager.currentUser else {
+            return match.matchedUserName
+        }
+        // 如果当前用户是 user_id，matched_user_name 就是对方的名字
+        if match.userId == currentUser.id {
+            return match.matchedUserName
+        } else {
+            // 如果当前用户是 matched_user_id，matched_user_name 是当前用户的名字
+            // 需要返回 user_id 对应的用户名，但我们暂时返回一个占位符
+            return "Loading..."
+        }
+    }
     
     var body: some View {
         HStack(spacing: 12) {
@@ -1072,7 +1152,7 @@ struct MatchRowView: View {
             
             // User Info
             VStack(alignment: .leading, spacing: 4) {
-                Text(matchedUserProfile?.coreIdentity.name ?? match.matchedUserName)
+                Text(displayUserName)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.black)
                 
@@ -1102,7 +1182,8 @@ struct MatchRowView: View {
     
     private func loadMatchedUserProfile() {
         Task {
-            if let profile = try? await supabaseService.getProfile(userId: match.matchedUserId) {
+            // 加载应该显示的用户信息
+            if let profile = try? await supabaseService.getProfile(userId: displayUserId) {
                 await MainActor.run {
                     matchedUserProfile = profile.toBrewNetProfile()
                 }
