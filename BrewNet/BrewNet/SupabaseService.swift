@@ -640,27 +640,137 @@ class SupabaseService: ObservableObject {
         }
     }
     
-    /// 获取推荐用户列表
-    func getRecommendedProfiles(userId: String, limit: Int = 20) async throws -> [SupabaseProfile] {
-        print("🔍 Fetching recommended profiles for user: \(userId)")
+    /// 获取推荐用户列表（带分页和统计信息）
+    func getRecommendedProfiles(userId: String, limit: Int = 20, offset: Int = 0) async throws -> ([SupabaseProfile], totalInBatch: Int, filteredCount: Int) {
+        print("🔍 Fetching recommended profiles for user: \(userId), limit: \(limit), offset: \(offset)")
         
         do {
-            let response = try await client
+            // 构建查询（Supabase PostgREST 使用 range header 进行分页）
+            var query = client
                 .from(SupabaseTable.profiles.rawValue)
                 .select()
                 .neq("user_id", value: userId)
-                .limit(limit)
-                .execute()
+                .order("created_at", ascending: false)
+            
+            // 使用 range 进行分页（Supabase 使用 range header: "range: 0-9" 格式）
+            // offset 到 offset + limit - 1 是包含两端的位置
+            query = query.range(from: offset, to: offset + limit - 1)
+            
+            let response = try await query.execute()
             
             let data = response.data
-            let profiles = try JSONDecoder().decode([SupabaseProfile].self, from: data)
-            print("✅ Fetched \(profiles.count) recommended profiles")
-            return profiles
+            
+            // 打印原始响应数据用于调试
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("📋 Raw response data (first 500 chars): \(String(responseString.prefix(500)))")
+            }
+            
+            // 尝试解码
+            do {
+                let profiles = try JSONDecoder().decode([SupabaseProfile].self, from: data)
+                print("✅ Fetched \(profiles.count) recommended profiles (offset: \(offset))")
+                return (profiles, profiles.count, 0)
+            } catch let decodingError as DecodingError {
+                // 详细解析解码错误
+                print("❌ Decoding error details:")
+                switch decodingError {
+                case .keyNotFound(let key, let context):
+                    print("  - Missing key: \(key.stringValue)")
+                    print("  - Context: \(context.debugDescription)")
+                    print("  - Path: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+                case .valueNotFound(let type, let context):
+                    print("  - Missing value for type: \(type)")
+                    print("  - Context: \(context.debugDescription)")
+                    print("  - Path: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+                case .typeMismatch(let type, let context):
+                    print("  - Type mismatch for type: \(type)")
+                    print("  - Context: \(context.debugDescription)")
+                    print("  - Path: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+                case .dataCorrupted(let context):
+                    print("  - Data corrupted")
+                    print("  - Context: \(context.debugDescription)")
+                @unknown default:
+                    print("  - Unknown decoding error: \(decodingError)")
+                }
+                
+                // 尝试解析为 JSON 数组，检查每条记录
+                if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                    print("📊 Found \(jsonArray.count) records in response")
+                    var validProfiles: [SupabaseProfile] = []
+                    
+                    for (index, record) in jsonArray.enumerated() {
+                        print("  Record \(index + 1):")
+                        print("    - Has core_identity: \(record["core_identity"] != nil)")
+                        print("    - Has professional_background: \(record["professional_background"] != nil)")
+                        print("    - Has networking_intention: \(record["networking_intention"] != nil)")
+                        print("    - Has networking_preferences: \(record["networking_preferences"] != nil)")
+                        print("    - Has personality_social: \(record["personality_social"] != nil)")
+                        print("    - Has privacy_trust: \(record["privacy_trust"] != nil)")
+                        
+                        // 检查是否为 null
+                        var hasNullFields = false
+                        if record["core_identity"] == nil || record["core_identity"] as? NSNull != nil {
+                            print("    ⚠️ core_identity is null or missing!")
+                            hasNullFields = true
+                        }
+                        if record["professional_background"] == nil || record["professional_background"] as? NSNull != nil {
+                            print("    ⚠️ professional_background is null or missing!")
+                            hasNullFields = true
+                        }
+                        if record["networking_intention"] == nil || record["networking_intention"] as? NSNull != nil {
+                            print("    ⚠️ networking_intention is null or missing!")
+                            hasNullFields = true
+                        }
+                        if record["networking_preferences"] == nil || record["networking_preferences"] as? NSNull != nil {
+                            print("    ⚠️ networking_preferences is null or missing!")
+                            hasNullFields = true
+                        }
+                        if record["personality_social"] == nil || record["personality_social"] as? NSNull != nil {
+                            print("    ⚠️ personality_social is null or missing!")
+                            hasNullFields = true
+                        }
+                        if record["privacy_trust"] == nil || record["privacy_trust"] as? NSNull != nil {
+                            print("    ⚠️ privacy_trust is null or missing!")
+                            hasNullFields = true
+                        }
+                        
+                        // 尝试解码单个记录
+                        if !hasNullFields {
+                            do {
+                                let recordData = try JSONSerialization.data(withJSONObject: record)
+                                let profile = try JSONDecoder().decode(SupabaseProfile.self, from: recordData)
+                                validProfiles.append(profile)
+                                print("    ✅ Record \(index + 1) decoded successfully")
+                            } catch {
+                                print("    ❌ Record \(index + 1) failed to decode: \(error.localizedDescription)")
+                            }
+                        } else {
+                            print("    ❌ Record \(index + 1) skipped due to null fields")
+                        }
+                    }
+                    
+                    let filteredCount = jsonArray.count - validProfiles.count
+                    if !validProfiles.isEmpty {
+                        print("✅ Successfully decoded \(validProfiles.count) out of \(jsonArray.count) profiles (filtered: \(filteredCount))")
+                        return (validProfiles, jsonArray.count, filteredCount)
+                    } else {
+                        throw ProfileError.fetchFailed("All profiles failed to decode. Check database records for missing or null JSONB fields. Error: \(decodingError.localizedDescription)")
+                    }
+                }
+                
+                throw ProfileError.fetchFailed("Decoding failed: \(decodingError.localizedDescription). Check database records for missing or null JSONB fields.")
+            }
             
         } catch {
             print("❌ Failed to fetch recommended profiles: \(error.localizedDescription)")
             throw ProfileError.fetchFailed(error.localizedDescription)
         }
+    }
+    
+    /// 获取推荐用户列表（向后兼容的旧方法）
+    func getRecommendedProfiles(userId: String, limit: Int = 20) async throws -> [SupabaseProfile] {
+        let (profiles, _, _) = try await getRecommendedProfiles(userId: userId, limit: limit, offset: 0)
+        return profiles
     }
     
     /// 搜索用户资料
