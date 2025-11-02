@@ -44,7 +44,7 @@ struct MainView: View {
 // MARK: - Matches View
 struct MatchesView: View {
     var body: some View {
-        TinderMatchesView()
+        BrewNetMatchesView()
     }
 }
 

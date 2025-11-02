@@ -347,7 +347,7 @@ enum SubIntentionType: String, CaseIterable, Codable {
     case industryTransition = "Industry Transition / Guidance"
     case industryInsight = "Industry Insight Discussion"
     case roleBasedExperience = "Role-Based Experience Swap"
-    case cofounderMatch = "Co-founder / Startup Partner / Project Member Match"
+    case cofounderMatch = "Startup Partner / Project Member Match"
     case joinStartup = "Join an Existing Startup / Project"
     case ideaValidation = "Idea Validation & Feedback"
     case casualCoffee = "Casual Coffee Chat / Make Friends"
@@ -625,6 +625,64 @@ extension VisibilitySettings {
             interests: .public_,
             timeslot: .private_
         )
+    }
+}
+
+// MARK: - AvailableTimeslot Formatting
+extension AvailableTimeslot {
+    func formattedSummary() -> String {
+        var availableSlots: [(day: String, periods: [String])] = []
+        
+        let days = [
+            ("Mon", monday),
+            ("Tue", tuesday),
+            ("Wed", wednesday),
+            ("Thu", thursday),
+            ("Fri", friday),
+            ("Sat", saturday),
+            ("Sun", sunday)
+        ]
+        
+        for (dayName, daySlots) in days {
+            var periods: [String] = []
+            if daySlots.morning { periods.append("AM") }
+            if daySlots.noon { periods.append("Noon") }
+            if daySlots.afternoon { periods.append("PM") }
+            if daySlots.evening { periods.append("Evening") }
+            if daySlots.night { periods.append("Night") }
+            
+            if !periods.isEmpty {
+                availableSlots.append((day: dayName, periods: periods))
+            }
+        }
+        
+        if availableSlots.isEmpty {
+            return "No availability set"
+        }
+        
+        // Limit to first 3 days for summary
+        let displaySlots = Array(availableSlots.prefix(3))
+        let summary = displaySlots.map { "\($0.day) \($0.periods.joined(separator: ", "))" }.joined(separator: " | ")
+        
+        if availableSlots.count > 3 {
+            return summary + " ..."
+        }
+        
+        return summary
+    }
+}
+
+// MARK: - Visibility Check Helper
+extension VisibilityLevel {
+    func isVisible(isConnection: Bool = false) -> Bool {
+        switch self {
+        case .public_:
+            return true
+        case .connectionsOnly:
+            return isConnection
+        case .private_:
+            return false
+        }
     }
 }
 
