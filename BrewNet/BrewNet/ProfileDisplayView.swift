@@ -82,7 +82,7 @@ struct ProfileDisplayView: View {
                                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                         .scaleEffect(0.7)
                                 } else {
-                                    Text("Sent Invitations")
+                                    Text("Invitations")
                                         .font(.system(size: 16, weight: .semibold))
                                         .foregroundColor(.white)
                                     
