@@ -1092,6 +1092,395 @@ class SupabaseService: ObservableObject {
             }
         }
     }
+    
+    // MARK: - Invitation Operations
+    
+    /// 发送邀请
+    func sendInvitation(senderId: String, receiverId: String, reasonForInterest: String?, senderProfile: InvitationProfile?) async throws -> SupabaseInvitation {
+        print("📨 Sending invitation from \(senderId) to \(receiverId)")
+        
+        // 创建可编码的邀请结构体
+        struct InvitationInsert: Codable {
+            let senderId: String
+            let receiverId: String
+            let status: String
+            let reasonForInterest: String?
+            let senderProfile: InvitationProfile?
+            
+            enum CodingKeys: String, CodingKey {
+                case senderId = "sender_id"
+                case receiverId = "receiver_id"
+                case status
+                case reasonForInterest = "reason_for_interest"
+                case senderProfile = "sender_profile"
+            }
+        }
+        
+        let invitationInsert = InvitationInsert(
+            senderId: senderId,
+            receiverId: receiverId,
+            status: InvitationStatus.pending.rawValue,
+            reasonForInterest: reasonForInterest,
+            senderProfile: senderProfile
+        )
+        
+        let response = try await client
+            .from(SupabaseTable.invitations.rawValue)
+            .insert(invitationInsert)
+            .select()
+            .single()
+            .execute()
+        
+        let data = response.data
+        let createdInvitation = try JSONDecoder().decode(SupabaseInvitation.self, from: data)
+        print("✅ Invitation sent successfully: \(createdInvitation.id)")
+        return createdInvitation
+    }
+    
+    /// 获取用户发送的所有邀请
+    func getSentInvitations(userId: String) async throws -> [SupabaseInvitation] {
+        print("🔍 Fetching sent invitations for user: \(userId)")
+        
+        let response = try await client
+            .from(SupabaseTable.invitations.rawValue)
+            .select()
+            .eq("sender_id", value: userId)
+            .order("created_at", ascending: false)
+            .execute()
+        
+        let data = response.data
+        let invitations = try JSONDecoder().decode([SupabaseInvitation].self, from: data)
+        print("✅ Found \(invitations.count) sent invitations")
+        return invitations
+    }
+    
+    /// 获取用户收到的所有邀请
+    func getReceivedInvitations(userId: String) async throws -> [SupabaseInvitation] {
+        print("🔍 Fetching received invitations for user: \(userId)")
+        
+        let response = try await client
+            .from(SupabaseTable.invitations.rawValue)
+            .select()
+            .eq("receiver_id", value: userId)
+            .order("created_at", ascending: false)
+            .execute()
+        
+        let data = response.data
+        let invitations = try JSONDecoder().decode([SupabaseInvitation].self, from: data)
+        print("✅ Found \(invitations.count) received invitations")
+        return invitations
+    }
+    
+    /// 获取待处理的邀请（收到的待处理邀请）
+    func getPendingInvitations(userId: String) async throws -> [SupabaseInvitation] {
+        print("🔍 Fetching pending invitations for user: \(userId)")
+        
+        let response = try await client
+            .from(SupabaseTable.invitations.rawValue)
+            .select()
+            .eq("receiver_id", value: userId)
+            .eq("status", value: InvitationStatus.pending.rawValue)
+            .order("created_at", ascending: false)
+            .execute()
+        
+        let data = response.data
+        let invitations = try JSONDecoder().decode([SupabaseInvitation].self, from: data)
+        print("✅ Found \(invitations.count) pending invitations")
+        return invitations
+    }
+    
+    /// 接受邀请
+    func acceptInvitation(invitationId: String, userId: String) async throws -> SupabaseInvitation {
+        print("✅ Accepting invitation: \(invitationId)")
+        
+        let response = try await client
+            .from(SupabaseTable.invitations.rawValue)
+            .update(["status": InvitationStatus.accepted.rawValue])
+            .eq("id", value: invitationId)
+            .eq("receiver_id", value: userId)
+            .select()
+            .single()
+            .execute()
+        
+        let data = response.data
+        let updatedInvitation = try JSONDecoder().decode(SupabaseInvitation.self, from: data)
+        print("✅ Invitation accepted successfully")
+        
+        // 触发器会自动创建匹配记录，这里不需要手动创建
+        return updatedInvitation
+    }
+    
+    /// 拒绝邀请
+    func rejectInvitation(invitationId: String, userId: String) async throws -> SupabaseInvitation {
+        print("❌ Rejecting invitation: \(invitationId)")
+        
+        let response = try await client
+            .from(SupabaseTable.invitations.rawValue)
+            .update(["status": InvitationStatus.rejected.rawValue])
+            .eq("id", value: invitationId)
+            .eq("receiver_id", value: userId)
+            .select()
+            .single()
+            .execute()
+        
+        let data = response.data
+        let updatedInvitation = try JSONDecoder().decode(SupabaseInvitation.self, from: data)
+        print("✅ Invitation rejected successfully")
+        return updatedInvitation
+    }
+    
+    /// 取消邀请（发送者取消）
+    func cancelInvitation(invitationId: String, userId: String) async throws {
+        print("🚫 Cancelling invitation: \(invitationId)")
+        
+        try await client
+            .from(SupabaseTable.invitations.rawValue)
+            .update(["status": InvitationStatus.cancelled.rawValue])
+            .eq("id", value: invitationId)
+            .eq("sender_id", value: userId)
+            .execute()
+        
+        print("✅ Invitation cancelled successfully")
+    }
+    
+    /// 获取单个邀请
+    func getInvitation(id: String) async throws -> SupabaseInvitation? {
+        print("🔍 Fetching invitation: \(id)")
+        
+        let response = try await client
+            .from(SupabaseTable.invitations.rawValue)
+            .select()
+            .eq("id", value: id)
+            .single()
+            .execute()
+        
+        let data = response.data
+        let invitation = try JSONDecoder().decode(SupabaseInvitation.self, from: data)
+        print("✅ Invitation fetched successfully")
+        return invitation
+    }
+    
+    // MARK: - Match Operations
+    
+    /// 创建匹配（通常由系统自动创建，当邀请被接受时）
+    func createMatch(userId: String, matchedUserId: String, matchedUserName: String, matchType: SupabaseMatchType = .invitationBased) async throws -> SupabaseMatch {
+        print("💚 Creating match between \(userId) and \(matchedUserId)")
+        
+        // 检查是否已存在活跃的匹配
+        let existingMatches = try await getMatches(userId: userId)
+        if existingMatches.contains(where: { $0.matchedUserId == matchedUserId && $0.isActive }) {
+            throw MatchError.alreadyExists("Match already exists between these users")
+        }
+        
+        // 创建可编码的匹配结构体
+        struct MatchInsert: Codable {
+            let userId: String
+            let matchedUserId: String
+            let matchedUserName: String
+            let matchType: String
+            let isActive: Bool
+            
+            enum CodingKeys: String, CodingKey {
+                case userId = "user_id"
+                case matchedUserId = "matched_user_id"
+                case matchedUserName = "matched_user_name"
+                case matchType = "match_type"
+                case isActive = "is_active"
+            }
+        }
+        
+        let matchInsert = MatchInsert(
+            userId: userId,
+            matchedUserId: matchedUserId,
+            matchedUserName: matchedUserName,
+            matchType: matchType.rawValue,
+            isActive: true
+        )
+        
+        let response = try await client
+            .from(SupabaseTable.matches.rawValue)
+            .insert(matchInsert)
+            .select()
+            .single()
+            .execute()
+        
+        let data = response.data
+        let createdMatch = try JSONDecoder().decode(SupabaseMatch.self, from: data)
+        print("✅ Match created successfully: \(createdMatch.id)")
+        return createdMatch
+    }
+    
+    /// 获取用户的所有匹配
+    func getMatches(userId: String, activeOnly: Bool = true) async throws -> [SupabaseMatch] {
+        print("🔍 Fetching matches for user: \(userId), activeOnly: \(activeOnly)")
+        
+        // 使用两个查询分别获取作为 user_id 和 matched_user_id 的匹配，然后合并
+        var matches: [SupabaseMatch] = []
+        
+        // 获取作为 user_id 的匹配
+        // 注意：必须在 order 之前调用所有 eq 过滤
+        var query1 = client
+            .from(SupabaseTable.matches.rawValue)
+            .select()
+            .eq("user_id", value: userId)
+        
+        if activeOnly {
+            query1 = query1.eq("is_active", value: true)
+        }
+        
+        let response1 = try await query1.order("created_at", ascending: false).execute()
+        let data1 = response1.data
+        let matches1 = try JSONDecoder().decode([SupabaseMatch].self, from: data1)
+        matches.append(contentsOf: matches1)
+        
+        // 获取作为 matched_user_id 的匹配
+        var query2 = client
+            .from(SupabaseTable.matches.rawValue)
+            .select()
+            .eq("matched_user_id", value: userId)
+        
+        if activeOnly {
+            query2 = query2.eq("is_active", value: true)
+        }
+        
+        let response2 = try await query2.order("created_at", ascending: false).execute()
+        let data2 = response2.data
+        let matches2 = try JSONDecoder().decode([SupabaseMatch].self, from: data2)
+        matches.append(contentsOf: matches2)
+        
+        // 去重并按创建时间排序
+        let uniqueMatches = Array(Set(matches.map { $0.id })).compactMap { matchId in
+            matches.first { $0.id == matchId }
+        }
+        let sortedMatches = uniqueMatches.sorted { match1, match2 in
+            match1.createdAt > match2.createdAt
+        }
+        
+        print("✅ Found \(sortedMatches.count) matches")
+        return sortedMatches
+    }
+    
+    /// 获取活跃匹配
+    func getActiveMatches(userId: String) async throws -> [SupabaseMatch] {
+        return try await getMatches(userId: userId, activeOnly: true)
+    }
+    
+    /// 获取匹配统计
+    func getMatchStats(userId: String) async throws -> (total: Int, active: Int, thisWeek: Int, thisMonth: Int) {
+        print("📊 Fetching match stats for user: \(userId)")
+        
+        let allMatches = try await getMatches(userId: userId, activeOnly: false)
+        let activeMatches = allMatches.filter { $0.isActive }
+        
+        let calendar = Calendar.current
+        let now = Date()
+        let weekAgo = calendar.date(byAdding: .day, value: -7, to: now)!
+        let monthAgo = calendar.date(byAdding: .month, value: -1, to: now)!
+        
+        let dateFormatter = ISO8601DateFormatter()
+        
+        let thisWeekMatches = allMatches.filter { match in
+            if let createdAt = dateFormatter.date(from: match.createdAt) {
+                return createdAt >= weekAgo
+            }
+            return false
+        }
+        
+        let thisMonthMatches = allMatches.filter { match in
+            if let createdAt = dateFormatter.date(from: match.createdAt) {
+                return createdAt >= monthAgo
+            }
+            return false
+        }
+        
+        let stats = (total: allMatches.count, active: activeMatches.count, thisWeek: thisWeekMatches.count, thisMonth: thisMonthMatches.count)
+        print("✅ Match stats: total=\(stats.total), active=\(stats.active), thisWeek=\(stats.thisWeek), thisMonth=\(stats.thisMonth)")
+        return stats
+    }
+    
+    /// 取消匹配（设置为非活跃状态）
+    func deactivateMatch(matchId: String, userId: String) async throws -> SupabaseMatch {
+        print("🚫 Deactivating match: \(matchId)")
+        
+        // 先检查匹配是否存在且属于该用户
+        guard let match = try await getMatch(id: matchId) else {
+            throw MatchError.notFound("Match not found")
+        }
+        
+        guard match.userId == userId || match.matchedUserId == userId else {
+            throw MatchError.updateFailed("User does not have permission to deactivate this match")
+        }
+        
+        let response = try await client
+            .from(SupabaseTable.matches.rawValue)
+            .update(["is_active": false])
+            .eq("id", value: matchId)
+            .select()
+            .single()
+            .execute()
+        
+        let data = response.data
+        let updatedMatch = try JSONDecoder().decode(SupabaseMatch.self, from: data)
+        print("✅ Match deactivated successfully")
+        return updatedMatch
+    }
+    
+    /// 检查两个用户是否已匹配
+    func checkMatchExists(userId1: String, userId2: String) async throws -> Bool {
+        print("🔍 Checking if match exists between \(userId1) and \(userId2)")
+        
+        // 检查两个方向的匹配
+        let response1 = try await client
+            .from(SupabaseTable.matches.rawValue)
+            .select("id")
+            .eq("user_id", value: userId1)
+            .eq("matched_user_id", value: userId2)
+            .eq("is_active", value: true)
+            .limit(1)
+            .execute()
+        
+        let data1 = response1.data
+        if let jsonArray = try? JSONSerialization.jsonObject(with: data1) as? [[String: Any]], !jsonArray.isEmpty {
+            print("✅ Match exists: true")
+            return true
+        }
+        
+        // 检查反向匹配
+        let response2 = try await client
+            .from(SupabaseTable.matches.rawValue)
+            .select("id")
+            .eq("user_id", value: userId2)
+            .eq("matched_user_id", value: userId1)
+            .eq("is_active", value: true)
+            .limit(1)
+            .execute()
+        
+        let data2 = response2.data
+        if let jsonArray = try? JSONSerialization.jsonObject(with: data2) as? [[String: Any]], !jsonArray.isEmpty {
+            print("✅ Match exists: true")
+            return true
+        }
+        
+        print("✅ Match exists: false")
+        return false
+    }
+    
+    /// 获取单个匹配
+    func getMatch(id: String) async throws -> SupabaseMatch? {
+        print("🔍 Fetching match: \(id)")
+        
+        let response = try await client
+            .from(SupabaseTable.matches.rawValue)
+            .select()
+            .eq("id", value: id)
+            .single()
+            .execute()
+        
+        let data = response.data
+        let match = try JSONDecoder().decode(SupabaseMatch.self, from: data)
+        print("✅ Match fetched successfully")
+        return match
+    }
 }
 
 // MARK: - Profile Error Types
@@ -1123,6 +1512,57 @@ enum ProfileError: LocalizedError {
             return "Network error: \(message)"
         case .unknownError(let message):
             return "Unknown error: \(message)"
+        }
+    }
+}
+
+// MARK: - Match Error Types
+enum MatchError: LocalizedError {
+    case creationFailed(String)
+    case fetchFailed(String)
+    case updateFailed(String)
+    case alreadyExists(String)
+    case notFound(String)
+    
+    var errorDescription: String? {
+        switch self {
+        case .creationFailed(let message):
+            return "Failed to create match: \(message)"
+        case .fetchFailed(let message):
+            return "Failed to fetch match: \(message)"
+        case .updateFailed(let message):
+            return "Failed to update match: \(message)"
+        case .alreadyExists(let message):
+            return "Match already exists: \(message)"
+        case .notFound(let message):
+            return "Match not found: \(message)"
+        }
+    }
+}
+
+// MARK: - Invitation Error Types
+enum InvitationError: LocalizedError {
+    case creationFailed(String)
+    case fetchFailed(String)
+    case updateFailed(String)
+    case alreadyExists(String)
+    case notFound(String)
+    case invalidStatus(String)
+    
+    var errorDescription: String? {
+        switch self {
+        case .creationFailed(let message):
+            return "Failed to create invitation: \(message)"
+        case .fetchFailed(let message):
+            return "Failed to fetch invitation: \(message)"
+        case .updateFailed(let message):
+            return "Failed to update invitation: \(message)"
+        case .alreadyExists(let message):
+            return "Invitation already exists: \(message)"
+        case .notFound(let message):
+            return "Invitation not found: \(message)"
+        case .invalidStatus(let message):
+            return "Invalid invitation status: \(message)"
         }
     }
 }

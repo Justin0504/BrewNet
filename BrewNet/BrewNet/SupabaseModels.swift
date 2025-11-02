@@ -94,15 +94,68 @@ struct SupabaseProfile: Codable, Identifiable {
     }
 }
 
+// MARK: - Supabase Invitation Model
+struct SupabaseInvitation: Codable, Identifiable {
+    let id: String
+    let senderId: String
+    let receiverId: String
+    let status: InvitationStatus
+    let reasonForInterest: String?
+    let senderProfile: InvitationProfile?
+    let createdAt: String
+    let updatedAt: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case senderId = "sender_id"
+        case receiverId = "receiver_id"
+        case status
+        case reasonForInterest = "reason_for_interest"
+        case senderProfile = "sender_profile"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+// MARK: - Invitation Status
+enum InvitationStatus: String, Codable, CaseIterable {
+    case pending = "pending"
+    case accepted = "accepted"
+    case rejected = "rejected"
+    case cancelled = "cancelled"
+}
+
+// MARK: - Invitation Profile
+struct InvitationProfile: Codable {
+    let name: String
+    let jobTitle: String?
+    let company: String?
+    let location: String?
+    let bio: String?
+    let profileImage: String?
+    let expertise: [String]?
+    
+    enum CodingKeys: String, CodingKey {
+        case name
+        case jobTitle = "job_title"
+        case company
+        case location
+        case bio
+        case profileImage = "profile_image"
+        case expertise
+    }
+}
+
 // MARK: - Supabase Match Model
 struct SupabaseMatch: Codable, Identifiable {
     let id: String
     let userId: String
     let matchedUserId: String
     let matchedUserName: String
-    let matchType: String
+    let matchType: SupabaseMatchType
     let isActive: Bool
     let createdAt: String
+    let updatedAt: String?
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -112,7 +165,15 @@ struct SupabaseMatch: Codable, Identifiable {
         case matchType = "match_type"
         case isActive = "is_active"
         case createdAt = "created_at"
+        case updatedAt = "updated_at"
     }
+}
+
+// MARK: - Supabase Match Type
+enum SupabaseMatchType: String, Codable, CaseIterable {
+    case mutual = "mutual"
+    case invitationBased = "invitation_based"
+    case recommended = "recommended"
 }
 
 // MARK: - Supabase Coffee Chat Model

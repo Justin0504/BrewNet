@@ -14,8 +14,7 @@ struct MainView: View {
                 MatchesView()
             }
                 .tabItem {
-                    Image(systemName: "heart.fill")
-                    Text("Matches")
+                    Image(systemName: "cup.and.saucer.fill")
                 }
                 .tag(0)
             
@@ -23,7 +22,6 @@ struct MainView: View {
             ExploreView()
                 .tabItem {
                     Image(systemName: "safari.fill")
-                    Text("Explore")
                 }
                 .tag(1)
             
@@ -31,7 +29,6 @@ struct MainView: View {
             RequestsView()
                 .tabItem {
                     Image(systemName: "person.badge.plus.fill")
-                    Text("Requests")
                 }
                 .tag(2)
             
@@ -41,7 +38,6 @@ struct MainView: View {
             }
                 .tabItem {
                     Image(systemName: "message.fill")
-                    Text("Chat")
                 }
                 .tag(3)
             
@@ -51,7 +47,6 @@ struct MainView: View {
             }
                 .tabItem {
                     Image(systemName: "person.fill")
-                    Text("Profile")
                 }
                 .tag(4)
         }
