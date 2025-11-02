@@ -21,6 +21,8 @@ struct ExploreMainView: View {
     @EnvironmentObject var supabaseService: SupabaseService
     @State private var userProfile: BrewNetProfile?
     @State private var isLoadingProfile = true
+    @State private var userCounts: [String: Int] = [:] // Maps intention rawValue to user count
+    @State private var totalUserCount: Int = 0 // Total users in database
     
     var body: some View {
         NavigationView {
@@ -45,15 +47,6 @@ struct ExploreMainView: View {
                 } else {
                     ScrollView {
                         VStack(spacing: 24) {
-                            // Welcome Section
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Welcome to Explore")
-                                    .font(.system(size: 24, weight: .bold))
-                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                                    .padding(.horizontal, 20)
-                            }
-                            .padding(.top, 16)
-                            
                             // Category Cards
                             let sortedCategories = getSortedCategories()
                             
@@ -63,7 +56,8 @@ struct ExploreMainView: View {
                                     ExploreCategoryCard(
                                         category: firstCategory,
                                         isFullWidth: true,
-                                        colorIndex: 0
+                                        colorIndex: 0,
+                                        userCount: getUserCount(for: firstCategory)
                                     )
                                     .padding(.horizontal, 20)
                                 }
@@ -88,13 +82,15 @@ struct ExploreMainView: View {
                                                     ExploreCategoryCard(
                                                         category: intention,
                                                         isFullWidth: false,
-                                                        colorIndex: colorIndex
+                                                        colorIndex: colorIndex,
+                                                        userCount: getUserCount(for: intention)
                                                     )
                                                 case .custom(let name):
                                                     ExploreCategoryCard(
                                                         categoryName: name,
                                                         isFullWidth: false,
-                                                        colorIndex: colorIndex
+                                                        colorIndex: colorIndex,
+                                                        userCount: totalUserCount // Out of Orbit shows total user count
                                                     )
                                                 }
                                             }
@@ -114,6 +110,28 @@ struct ExploreMainView: View {
         }
         .onAppear {
             loadUserProfile()
+            loadUserCounts()
+        }
+    }
+    
+    // MARK: - Helper Methods
+    private func getUserCount(for category: NetworkingIntentionType) -> Int {
+        return userCounts[category.rawValue] ?? 0
+    }
+    
+    // MARK: - Load User Counts
+    private func loadUserCounts() {
+        Task {
+            do {
+                let counts = try await supabaseService.getUserCountsByAllIntentions()
+                let totalCount = try await supabaseService.getTotalUserCount()
+                await MainActor.run {
+                    self.userCounts = counts
+                    self.totalUserCount = totalCount
+                }
+            } catch {
+                print("❌ Failed to load user counts: \(error)")
+            }
         }
     }
     
@@ -178,23 +196,25 @@ struct ExploreCategoryCard: View {
     let categoryName: String?
     let isFullWidth: Bool
     let colorIndex: Int
+    let userCount: Int?
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var supabaseService: SupabaseService
-    @State private var userCount: Int = Int.random(in: 100...2500)
     @State private var showCategoryDetail = false
     
-    init(category: NetworkingIntentionType, isFullWidth: Bool, colorIndex: Int = 0) {
+    init(category: NetworkingIntentionType, isFullWidth: Bool, colorIndex: Int = 0, userCount: Int?) {
         self.category = category
         self.categoryName = nil
         self.isFullWidth = isFullWidth
         self.colorIndex = colorIndex
+        self.userCount = userCount
     }
     
-    init(categoryName: String, isFullWidth: Bool, colorIndex: Int = 0) {
+    init(categoryName: String, isFullWidth: Bool, colorIndex: Int = 0, userCount: Int?) {
         self.category = nil
         self.categoryName = categoryName
         self.isFullWidth = isFullWidth
         self.colorIndex = colorIndex
+        self.userCount = userCount
     }
     
     var body: some View {
@@ -323,7 +343,11 @@ struct ExploreCategoryCard: View {
         }
     }
     
-    private func formatUserCount(_ count: Int) -> String {
+    private func formatUserCount(_ count: Int?) -> String {
+        guard let count = count else {
+            return "0"
+        }
+        
         if count >= 1000 {
             let thousands = Double(count) / 1000.0
             if thousands >= 10 {
