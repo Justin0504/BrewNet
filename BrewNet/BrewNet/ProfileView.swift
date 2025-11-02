@@ -32,7 +32,14 @@ struct ProfileView: View {
                 }
             } else if let profile = userProfile {
                 // Show profile display
-                ProfileDisplayView(profile: profile)
+                ProfileDisplayView(profile: profile) {
+                    showingEditProfile = true
+                }
+                .environmentObject(supabaseService)
+                .environmentObject(authManager)
+                .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ProfileUpdated"))) { _ in
+                    loadUserProfile()
+                }
             } else {
                 // Show setup prompt
                 VStack(spacing: 24) {

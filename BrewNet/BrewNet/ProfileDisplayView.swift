@@ -1,25 +1,37 @@
 import SwiftUI
+import PhotosUI
 
 struct ProfileDisplayView: View {
-    let profile: BrewNetProfile
+    @State var profile: BrewNetProfile
+    var onEditProfile: (() -> Void)?
     
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
-                // Profile Header - 只显示头像和姓名
-                ProfileHeaderView(profile: profile)
+            VStack(spacing: 0) {
+                // Profile Header with new layout
+                ProfileHeaderView(
+                    profile: profile,
+                    onEditProfile: onEditProfile,
+                    onProfileUpdated: { updatedProfile in
+                        profile = updatedProfile
+                    }
+                )
+                .padding(.horizontal, 16)
+                .padding(.top, 20)
                 
-                // Networking Preferences Section - 保留这个部分
+                // Networking Preferences Section
                 ProfileSectionView(
                     title: "Network Preferences",
                     icon: "clock.fill"
                 ) {
                     NetworkingPreferencesDisplayView(preferences: profile.networkingPreferences)
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 24)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 20)
+            .padding(.bottom, 20)
         }
+        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
         .navigationTitle("My Profile")
         .navigationBarTitleDisplayMode(.large)
     }
@@ -28,37 +40,299 @@ struct ProfileDisplayView: View {
 // MARK: - Profile Header
 struct ProfileHeaderView: View {
     let profile: BrewNetProfile
+    var onEditProfile: (() -> Void)?
+    var onProfileUpdated: ((BrewNetProfile) -> Void)?
+    
+    @EnvironmentObject var supabaseService: SupabaseService
+    @EnvironmentObject var authManager: AuthManager
+    
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var isUploadingImage = false
+    
+    // 计算资料完成度百分比
+    private var profileCompletionPercentage: Int {
+        var completedFields = 0
+        var totalFields = 0
+        
+        // Core Identity
+        totalFields += 4
+        if !profile.coreIdentity.name.isEmpty { completedFields += 1 }
+        if !profile.coreIdentity.email.isEmpty { completedFields += 1 }
+        if profile.coreIdentity.profileImage != nil { completedFields += 1 }
+        if profile.coreIdentity.bio != nil && !profile.coreIdentity.bio!.isEmpty { completedFields += 1 }
+        
+        // Professional Background
+        totalFields += 2
+        if profile.professionalBackground.currentCompany != nil { completedFields += 1 }
+        if profile.professionalBackground.jobTitle != nil { completedFields += 1 }
+        
+        // Education
+        totalFields += 1
+        if profile.professionalBackground.education != nil && !profile.professionalBackground.education!.isEmpty { completedFields += 1 }
+        
+        guard totalFields > 0 else { return 0 }
+        return Int((Double(completedFields) / Double(totalFields)) * 100)
+    }
     
     var body: some View {
-        VStack(spacing: 16) {
-            // Profile Image
-            AsyncImage(url: URL(string: profile.coreIdentity.profileImage ?? "")) { image in
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } placeholder: {
-                Image(systemName: "person.circle.fill")
-                    .font(.system(size: 80))
-                    .foregroundColor(.gray)
+        VStack(spacing: 12) {
+            // Top Row: Avatar + Progress Circle on left, Name + Age + Icons on right
+            HStack(alignment: .top, spacing: 16) {
+                // Left: Profile Image with Progress Circle
+                ZStack {
+                    // Progress Circle (outer, red)
+                    Circle()
+                        .stroke(Color.red.opacity(0.3), lineWidth: 4)
+                        .frame(width: 100, height: 100)
+                    
+                    // Progress Circle (filled portion, red)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(profileCompletionPercentage) / 100)
+                        .stroke(Color.red, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        .frame(width: 100, height: 100)
+                        .rotationEffect(.degrees(-90))
+                    
+                    // Profile Image (inner)
+                    AsyncImage(url: URL(string: profile.coreIdentity.profileImage ?? "")) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Image(systemName: "person.circle.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(.gray)
+                    }
+                    .frame(width: 84, height: 84)
+                    .clipShape(Circle())
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white, lineWidth: 2)
+                    )
+                    
+                    // Percentage badge at bottom
+                    VStack {
+                        Spacer()
+                        Text("\(profileCompletionPercentage)%")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(Color.white)
+                            .cornerRadius(8)
+                            .offset(y: 5)
+                    }
+                    .frame(width: 100, height: 100)
+                }
+                
+                // Right: Name, Age, Icons, and Company/Title button
+                VStack(alignment: .leading, spacing: 8) {
+                    // Name and Age (横向并列)
+                    HStack(spacing: 4) {
+                        Text(profile.coreIdentity.name)
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundColor(.black)
+                        
+                        // Age would need to be calculated from birthdate if available
+                        // For now, we'll skip it if not available
+                    }
+                    
+                    // Icons row (横向并列)
+                    HStack(spacing: 12) {
+                        // Camera icon (blue) - 可点击更换头像
+                        PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                            ZStack {
+                                if isUploadingImage {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                                        .scaleEffect(0.8)
+                                } else {
+                                    Image(systemName: "camera.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                            .frame(width: 24, height: 24)
+                            .background(Color.blue.opacity(0.1))
+                            .clipShape(Circle())
+                        }
+                        
+                        // Verification icon (grey)
+                        Image(systemName: "person.badge.shield.checkmark.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                            .frame(width: 24, height: 24)
+                            .background(Color.gray.opacity(0.1))
+                            .clipShape(Circle())
+                    }
+                    
+                    // Company/School and Title button (在图标下面，白色背景，可点击编辑)
+                    Button(action: {
+                        onEditProfile?()
+                    }) {
+                        HStack {
+                            Image(systemName: "pencil")
+                                .foregroundColor(BrewTheme.primaryBrown)
+                                .font(.system(size: 14))
+                            
+                            // 优先显示公司，如果没有则显示学校
+                            if let company = profile.professionalBackground.currentCompany, !company.isEmpty {
+                                Text(company)
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.black)
+                                
+                                // 如果有 title，显示在后面
+                                if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
+                                    Text(" · \(jobTitle)")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.gray)
+                                }
+                            } else if let education = profile.professionalBackground.education, !education.isEmpty {
+                                // 如果没有公司，显示学校
+                                Text(education)
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.black)
+                                
+                                // 如果有 title，显示在后面
+                                if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
+                                    Text(" · \(jobTitle)")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.gray)
+                                }
+                            } else {
+                                // 如果都没有，显示占位符
+                                Text("完成个人资料")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.gray)
+                            }
+                            
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(Color.white)
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                
+                Spacer()
             }
-            .frame(width: 120, height: 120)
-            .clipShape(Circle())
-            .overlay(
-                Circle()
-                    .stroke(Color(red: 0.6, green: 0.4, blue: 0.2), lineWidth: 3)
-            )
-            
-            // Name only
-            Text(profile.coreIdentity.name)
-                .font(.system(size: 24, weight: .bold))
-                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
         }
-        .padding(.vertical, 20)
-        .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color.gray.opacity(0.05))
-        )
+        .padding(20)
+        .background(Color.white)
+        .onChange(of: selectedPhotoItem) { newItem in
+            Task {
+                guard let newItem = newItem else { return }
+                
+                if let data = try? await newItem.loadTransferable(type: Data.self) {
+                    await MainActor.run {
+                        isUploadingImage = true
+                    }
+                    
+                    // Upload image to Supabase Storage
+                    if let userId = authManager.currentUser?.id {
+                        do {
+                            print("📤 Uploading profile image...")
+                            
+                            // Detect file extension from data or use jpg as default
+                            let fileExtension = detectImageFormat(from: data) ?? "jpg"
+                            
+                            // Upload to Supabase Storage
+                            let publicURL = try await supabaseService.uploadProfileImage(
+                                userId: userId,
+                                imageData: data,
+                                fileExtension: fileExtension
+                            )
+                            
+                            // Update profile with new image URL
+                            let updatedCoreIdentity = CoreIdentity(
+                                name: profile.coreIdentity.name,
+                                email: profile.coreIdentity.email,
+                                phoneNumber: profile.coreIdentity.phoneNumber,
+                                profileImage: publicURL,
+                                bio: profile.coreIdentity.bio,
+                                pronouns: profile.coreIdentity.pronouns,
+                                location: profile.coreIdentity.location,
+                                personalWebsite: profile.coreIdentity.personalWebsite,
+                                githubUrl: profile.coreIdentity.githubUrl,
+                                linkedinUrl: profile.coreIdentity.linkedinUrl,
+                                timeZone: profile.coreIdentity.timeZone,
+                                availableTimeslot: profile.coreIdentity.availableTimeslot
+                            )
+                            
+                            // Create updated profile
+                            let updatedProfile = BrewNetProfile(
+                                id: profile.id,
+                                userId: profile.userId,
+                                createdAt: profile.createdAt,
+                                updatedAt: ISO8601DateFormatter().string(from: Date()),
+                                coreIdentity: updatedCoreIdentity,
+                                professionalBackground: profile.professionalBackground,
+                                networkingIntention: profile.networkingIntention,
+                                networkingPreferences: profile.networkingPreferences,
+                                personalitySocial: profile.personalitySocial,
+                                privacyTrust: profile.privacyTrust
+                            )
+                            
+                            // Update in Supabase
+                            let supabaseProfile = SupabaseProfile(
+                                id: profile.id,
+                                userId: profile.userId,
+                                coreIdentity: updatedCoreIdentity,
+                                professionalBackground: profile.professionalBackground,
+                                networkingIntention: profile.networkingIntention,
+                                networkingPreferences: profile.networkingPreferences,
+                                personalitySocial: profile.personalitySocial,
+                                privacyTrust: profile.privacyTrust,
+                                createdAt: profile.createdAt,
+                                updatedAt: ISO8601DateFormatter().string(from: Date())
+                            )
+                            
+                            _ = try await supabaseService.updateProfile(profileId: profile.id, profile: supabaseProfile)
+                            
+                            await MainActor.run {
+                                isUploadingImage = false
+                                onProfileUpdated?(updatedProfile)
+                                print("✅ Profile image uploaded and updated successfully: \(publicURL)")
+                                // Post notification to refresh profile
+                                NotificationCenter.default.post(name: NSNotification.Name("ProfileUpdated"), object: nil)
+                            }
+                        } catch {
+                            await MainActor.run {
+                                isUploadingImage = false
+                                print("❌ Failed to upload profile image: \(error.localizedDescription)")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Helper function to detect image format from data
+    private func detectImageFormat(from data: Data) -> String? {
+        guard data.count >= 12 else { return nil }
+        
+        // Check for JPEG
+        if data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+            return "jpg"
+        }
+        
+        // Check for PNG
+        if data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 {
+            return "png"
+        }
+        
+        // Check for GIF
+        if String(data: data.prefix(6), encoding: .ascii) == "GIF89a" || String(data: data.prefix(6), encoding: .ascii) == "GIF87a" {
+            return "gif"
+        }
+        
+        return nil
     }
 }
 
@@ -585,7 +859,9 @@ struct VisibilityRow: View {
 struct ProfileDisplayView_Previews: PreviewProvider {
     static var previews: some View {
         NavigationView {
-            ProfileDisplayView(profile: BrewNetProfile.createDefault(userId: "preview"))
+            ProfileDisplayView(profile: BrewNetProfile.createDefault(userId: "preview")) {
+                // Preview doesn't need action
+            }
         }
     }
 }
