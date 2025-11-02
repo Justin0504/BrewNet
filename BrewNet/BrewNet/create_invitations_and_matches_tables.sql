@@ -48,6 +48,25 @@ CREATE TABLE IF NOT EXISTS matches (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- 如果 matches 表已存在但没有 updated_at 列，添加它
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 
+        FROM information_schema.columns 
+        WHERE table_name = 'matches' 
+        AND column_name = 'updated_at'
+    ) THEN
+        ALTER TABLE matches 
+        ADD COLUMN updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+        
+        -- 更新现有记录的 updated_at 为 created_at（如果没有的话）
+        UPDATE matches 
+        SET updated_at = created_at 
+        WHERE updated_at IS NULL;
+    END IF;
+END $$;
+
 -- 创建索引以优化查询性能
 CREATE INDEX IF NOT EXISTS idx_matches_user_id ON matches(user_id);
 CREATE INDEX IF NOT EXISTS idx_matches_matched_user_id ON matches(matched_user_id);

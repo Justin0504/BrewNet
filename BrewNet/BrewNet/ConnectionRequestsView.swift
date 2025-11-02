@@ -197,11 +197,22 @@ struct ConnectionRequestsView: View {
                         matchType: "invitation_based"
                     )
                     
+                    // 发送通知：邀请已接受
                     NotificationCenter.default.post(
                         name: NSNotification.Name("ConnectionRequestAccepted"),
                         object: nil,
                         userInfo: ["request": request]
                     )
+                    
+                    // 发送通知：导航到 Chat 界面
+                    // 延迟一点时间确保匹配记录已创建
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("NavigateToChat"),
+                            object: nil,
+                            userInfo: ["matchedUserId": request.requesterId]
+                        )
+                    }
                 }
             } catch {
                 print("❌ Failed to accept invitation: \(error.localizedDescription)")

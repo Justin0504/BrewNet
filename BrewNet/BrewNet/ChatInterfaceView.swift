@@ -36,6 +36,56 @@ struct ChatInterfaceView: View {
         .refreshable {
             await loadChatSessionsFromDatabase()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToChat"))) { notification in
+            // 当收到导航到 Chat 的通知时，刷新匹配列表并自动选择匹配的用户
+            Task {
+                // 重新加载匹配列表
+                await loadChatSessionsFromDatabase()
+                
+                // 如果有 matchedUserId，自动打开与该用户的聊天
+                if let userInfo = notification.userInfo,
+                   let matchedUserId = userInfo["matchedUserId"] as? String {
+                    
+                    // 等待数据加载完成后再选择会话
+                    await MainActor.run {
+                        // 由于我们按时间排序，新匹配的会话应该在第一位
+                        // 或者通过用户名匹配（match.matchedUserName 应该对应 ChatUser.name）
+                        if let matchedSession = chatSessions.first {
+                            // 选择最新的匹配（第一个）
+                            selectedSession = matchedSession
+                            loadAISuggestions(for: matchedSession.user)
+                            print("✅ Auto-selected chat session with \(matchedSession.user.name)")
+                        } else {
+                            // 如果仍然没找到，可能数据还没加载完，延迟再试一次
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                Task {
+                                    await loadChatSessionsFromDatabase()
+                                    await MainActor.run {
+                                        if !chatSessions.isEmpty {
+                                            selectedSession = chatSessions.first
+                                            if let firstSession = chatSessions.first {
+                                                loadAISuggestions(for: firstSession.user)
+                                                print("✅ Auto-selected first chat session after reload: \(firstSession.user.name)")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // 如果没有 matchedUserId，只是刷新列表
+                    await MainActor.run {
+                        if !chatSessions.isEmpty && selectedSession == nil {
+                            selectedSession = chatSessions.first
+                            if let firstSession = chatSessions.first {
+                                loadAISuggestions(for: firstSession.user)
+                            }
+                        }
+                    }
+                }
+            }
+        }
         .sheet(isPresented: $showingAISuggestions) {
             if let session = selectedSession {
                 AISuggestionsView(

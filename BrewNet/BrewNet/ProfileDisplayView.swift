@@ -5,6 +5,15 @@ struct ProfileDisplayView: View {
     @State var profile: BrewNetProfile
     var onEditProfile: (() -> Void)?
     
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    @State private var showingMatches = false
+    @State private var showingSentInvitations = false
+    @State private var matches: [SupabaseMatch] = []
+    @State private var sentInvitations: [SupabaseInvitation] = []
+    @State private var isLoadingMatches = false
+    @State private var isLoadingInvitations = false
+    
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
@@ -16,6 +25,83 @@ struct ProfileDisplayView: View {
                         profile = updatedProfile
                     }
                 )
+                .padding(.horizontal, 16)
+                .padding(.top, 20)
+                
+                // Action Buttons Section (在 Profile Header 和 Network Preferences 之间)
+                HStack(spacing: 12) {
+                    // 查看 Match 按钮
+                    Button(action: {
+                        loadMatches()
+                        showingMatches = true
+                    }) {
+                        HStack {
+                            Image(systemName: "cup.and.saucer.fill")
+                                .font(.system(size: 16))
+                                .foregroundColor(.white)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                if isLoadingMatches {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(0.7)
+                                } else {
+                                    Text("Matches")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(.white)
+                                    
+                                    Text("\(matches.count)")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.white.opacity(0.8))
+                                }
+                            }
+                            
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .background(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        .cornerRadius(12)
+                        .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                    }
+                    .disabled(isLoadingMatches)
+                    
+                    // 查看发送的 Invitation 按钮
+                    Button(action: {
+                        loadSentInvitations()
+                        showingSentInvitations = true
+                    }) {
+                        HStack {
+                            Image(systemName: "paperplane.fill")
+                                .font(.system(size: 16))
+                                .foregroundColor(.white)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                if isLoadingInvitations {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(0.7)
+                                } else {
+                                    Text("Sent Invitations")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(.white)
+                                    
+                                    Text("\(sentInvitations.filter { $0.status == .pending }.count)")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.white.opacity(0.8))
+                                }
+                            }
+                            
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .cornerRadius(12)
+                        .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                    }
+                    .disabled(isLoadingInvitations)
+                }
                 .padding(.horizontal, 16)
                 .padding(.top, 20)
                 
@@ -34,6 +120,68 @@ struct ProfileDisplayView: View {
         .background(Color(red: 0.98, green: 0.97, blue: 0.95))
         .navigationTitle("My Profile")
         .navigationBarTitleDisplayMode(.large)
+        .onAppear {
+            loadMatches()
+            loadSentInvitations()
+        }
+        .sheet(isPresented: $showingMatches) {
+            NavigationStack {
+                MatchesListView(matches: matches, isLoading: isLoadingMatches)
+                    .environmentObject(authManager)
+                    .environmentObject(supabaseService)
+            }
+        }
+        .sheet(isPresented: $showingSentInvitations) {
+            NavigationStack {
+                SentInvitationsListView(invitations: sentInvitations, isLoading: isLoadingInvitations)
+                    .environmentObject(authManager)
+                    .environmentObject(supabaseService)
+            }
+        }
+    }
+    
+    private func loadMatches() {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        isLoadingMatches = true
+        Task {
+            do {
+                let fetchedMatches = try await supabaseService.getActiveMatches(userId: currentUser.id)
+                await MainActor.run {
+                    matches = fetchedMatches
+                    isLoadingMatches = false
+                    print("✅ Loaded \(fetchedMatches.count) matches")
+                }
+            } catch {
+                print("❌ Failed to load matches: \(error.localizedDescription)")
+                await MainActor.run {
+                    matches = []
+                    isLoadingMatches = false
+                }
+            }
+        }
+    }
+    
+    private func loadSentInvitations() {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        isLoadingInvitations = true
+        Task {
+            do {
+                let fetchedInvitations = try await supabaseService.getSentInvitations(userId: currentUser.id)
+                await MainActor.run {
+                    sentInvitations = fetchedInvitations
+                    isLoadingInvitations = false
+                    print("✅ Loaded \(fetchedInvitations.count) sent invitations")
+                }
+            } catch {
+                print("❌ Failed to load sent invitations: \(error.localizedDescription)")
+                await MainActor.run {
+                    sentInvitations = []
+                    isLoadingInvitations = false
+                }
+            }
+        }
     }
 }
 
@@ -852,6 +1000,277 @@ struct VisibilityRow: View {
             
             Spacer()
         }
+    }
+}
+
+// MARK: - Matches List View
+struct MatchesListView: View {
+    let matches: [SupabaseMatch]
+    let isLoading: Bool
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    @Environment(\.dismiss) var dismiss
+    
+    var body: some View {
+        ZStack {
+            Color(red: 0.98, green: 0.97, blue: 0.95)
+                .ignoresSafeArea()
+            
+            if isLoading {
+                ProgressView()
+                    .scaleEffect(1.2)
+            } else if matches.isEmpty {
+                VStack(spacing: 20) {
+                    Image(systemName: "cup.and.saucer.fill")
+                        .font(.system(size: 60))
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    
+                    Text("No Matches Yet")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    
+                    Text("Start sending invitations to find your matches!")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(40)
+            } else {
+                List {
+                    ForEach(matches) { match in
+                        MatchRowView(match: match)
+                    }
+                }
+                .listStyle(PlainListStyle())
+            }
+        }
+        .navigationTitle("My Matches")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Done") {
+                    dismiss()
+                }
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            }
+        }
+    }
+}
+
+// MARK: - Match Row View
+struct MatchRowView: View {
+    let match: SupabaseMatch
+    @EnvironmentObject var supabaseService: SupabaseService
+    @State private var matchedUserProfile: BrewNetProfile?
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Avatar
+            Image(systemName: "person.circle.fill")
+                .font(.system(size: 50))
+                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+            
+            // User Info
+            VStack(alignment: .leading, spacing: 4) {
+                Text(matchedUserProfile?.coreIdentity.name ?? match.matchedUserName)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.black)
+                
+                Text(match.matchType.rawValue.replacingOccurrences(of: "_", with: " ").capitalized)
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray)
+                
+                if let createdAt = parseDate(match.createdAt) {
+                    Text("Matched \(formatDate(createdAt))")
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray)
+                }
+            }
+            
+            Spacer()
+            
+            // Match indicator
+            Image(systemName: "cup.and.saucer.fill")
+                .font(.system(size: 20))
+                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+        }
+        .padding(.vertical, 8)
+        .onAppear {
+            loadMatchedUserProfile()
+        }
+    }
+    
+    private func loadMatchedUserProfile() {
+        Task {
+            if let profile = try? await supabaseService.getProfile(userId: match.matchedUserId) {
+                await MainActor.run {
+                    matchedUserProfile = profile.toBrewNetProfile()
+                }
+            }
+        }
+    }
+    
+    private func parseDate(_ dateString: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        return formatter.date(from: dateString)
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+// MARK: - Sent Invitations List View
+struct SentInvitationsListView: View {
+    let invitations: [SupabaseInvitation]
+    let isLoading: Bool
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    @Environment(\.dismiss) var dismiss
+    
+    var body: some View {
+        ZStack {
+            Color(red: 0.98, green: 0.97, blue: 0.95)
+                .ignoresSafeArea()
+            
+            if isLoading {
+                ProgressView()
+                    .scaleEffect(1.2)
+            } else if invitations.isEmpty {
+                VStack(spacing: 20) {
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 60))
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    
+                    Text("No Sent Invitations")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    
+                    Text("Start exploring and send invitations to connect!")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(40)
+            } else {
+                List {
+                    ForEach(invitations) { invitation in
+                        SentInvitationRowView(invitation: invitation)
+                    }
+                }
+                .listStyle(PlainListStyle())
+            }
+        }
+        .navigationTitle("Sent Invitations")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Done") {
+                    dismiss()
+                }
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            }
+        }
+    }
+}
+
+// MARK: - Sent Invitation Row View
+struct SentInvitationRowView: View {
+    let invitation: SupabaseInvitation
+    @EnvironmentObject var supabaseService: SupabaseService
+    @State private var receiverProfile: BrewNetProfile?
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Avatar
+            Image(systemName: "person.circle.fill")
+                .font(.system(size: 50))
+                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+            
+            // User Info
+            VStack(alignment: .leading, spacing: 4) {
+                Text(receiverProfile?.coreIdentity.name ?? "Loading...")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.black)
+                
+                // Status badge
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 6, height: 6)
+                    
+                    Text(invitation.status.rawValue.capitalized)
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                }
+                
+                if let createdAt = parseDate(invitation.createdAt) {
+                    Text("Sent \(formatDate(createdAt))")
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray)
+                }
+            }
+            
+            Spacer()
+            
+            // Status icon
+            Image(systemName: statusIcon)
+                .font(.system(size: 20))
+                .foregroundColor(statusColor)
+        }
+        .padding(.vertical, 8)
+        .onAppear {
+            loadReceiverProfile()
+        }
+    }
+    
+    private var statusColor: Color {
+        switch invitation.status {
+        case .pending:
+            return .orange
+        case .accepted:
+            return .green
+        case .rejected:
+            return .red
+        case .cancelled:
+            return .gray
+        }
+    }
+    
+    private var statusIcon: String {
+        switch invitation.status {
+        case .pending:
+            return "clock.fill"
+        case .accepted:
+            return "checkmark.circle.fill"
+        case .rejected:
+            return "xmark.circle.fill"
+        case .cancelled:
+            return "xmark.circle.fill"
+        }
+    }
+    
+    private func loadReceiverProfile() {
+        Task {
+            if let profile = try? await supabaseService.getProfile(userId: invitation.receiverId) {
+                await MainActor.run {
+                    receiverProfile = profile.toBrewNetProfile()
+                }
+            }
+        }
+    }
+    
+    private func parseDate(_ dateString: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        return formatter.date(from: dateString)
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 
