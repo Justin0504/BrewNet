@@ -288,6 +288,8 @@ struct ConnectionRequestDetailView: View {
     @EnvironmentObject var databaseManager: DatabaseManager
     @EnvironmentObject var supabaseService: SupabaseService
     
+    @State private var showMessageSheet = false
+    
     private var themeBrown: Color { BrewTheme.primaryBrown }
     private var themeBrownLight: Color { BrewTheme.secondaryBrown }
     
@@ -328,7 +330,29 @@ struct ConnectionRequestDetailView: View {
                 }
             }
             .toolbarBackground(.clear, for: .navigationBar)
+            .sheet(isPresented: $showMessageSheet) {
+                LeaveMessageView(
+                    request: request,
+                    onDismiss: { showMessageSheet = false },
+                    onSend: { message in
+                        handleSendMessage(message: message)
+                        showMessageSheet = false
+                        onMessage(request)
+                    }
+                )
+                .environmentObject(authManager)
+                .environmentObject(databaseManager)
+                .environmentObject(supabaseService)
+            }
         }
+    }
+    
+    private func handleSendMessage(message: String) {
+        // 在真实应用中，这里会发送消息到后端
+        print("💬 Sent message to \(request.requesterProfile.name): \(message)")
+        
+        // 可以创建一个未匹配的消息实体并保存到本地数据库
+        // 在实际应用中，这会发送到 Supabase
     }
     
     @ViewBuilder
@@ -542,7 +566,7 @@ struct ConnectionRequestDetailView: View {
                 
                 // Message Button
                 Button(action: {
-                    onMessage(request)
+                    showMessageSheet = true
                 }) {
                     Image(systemName: "message")
                         .font(.system(size: 20, weight: .semibold))
@@ -574,6 +598,206 @@ struct ConnectionRequestDetailView: View {
             }
             .padding(.vertical, 16)
             .background(Color.white)
+        }
+    }
+}
+
+// MARK: - Leave Message View
+struct LeaveMessageView: View {
+    let request: ConnectionRequest
+    let onDismiss: () -> Void
+    let onSend: (String) -> Void
+    
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var databaseManager: DatabaseManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    @State private var messageText = ""
+    @FocusState private var isTextFieldFocused: Bool
+    
+    private var themeBrown: Color { BrewTheme.primaryBrown }
+    private var themeBrownLight: Color { BrewTheme.secondaryBrown }
+    private let maxMessageLength = 200
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                // Top instruction area
+                VStack(spacing: 16) {
+                    // Profile info
+                    VStack(spacing: 8) {
+                        Image(systemName: "person.circle.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(themeBrownLight)
+                        
+                        Text("Leave a message for \(request.requesterProfile.name)")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(themeBrown)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 20)
+                        
+                        Text("You're not connected yet. This is your first step to reach out")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.top, 20)
+                    
+                    // Info box
+                    HStack(spacing: 12) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(BrewTheme.accentColor)
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Message Info")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(themeBrown)
+                            Text("You can send each other messages up to \(maxMessageLength) characters")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    .padding(16)
+                    .background(themeBrownLight.opacity(0.1))
+                    .cornerRadius(12)
+                    .padding(.horizontal, 20)
+                }
+                .padding(.vertical, 24)
+                
+                Divider()
+                
+                // Message input area
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Write your message")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(themeBrown)
+                        .padding(.horizontal, 20)
+                    
+                    ZStack(alignment: .topLeading) {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.white)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(isTextFieldFocused ? themeBrown : Color.gray.opacity(0.3), lineWidth: 2)
+                            )
+                            .frame(height: 150)
+                        
+                        VStack(alignment: .leading, spacing: 0) {
+                            TextEditor(text: $messageText)
+                                .font(.system(size: 16))
+                                .padding(8)
+                                .frame(height: 140)
+                                .scrollContentBackground(.hidden)
+                                .focused($isTextFieldFocused)
+                                .onChange(of: messageText) { newValue in
+                                    if newValue.count > maxMessageLength {
+                                        messageText = String(newValue.prefix(maxMessageLength))
+                                    }
+                                }
+                            
+                            // Character counter
+                            HStack {
+                                Spacer()
+                                Text("\(messageText.count)/\(maxMessageLength)")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(messageText.count > maxMessageLength * 90 / 100 ? .orange : .gray)
+                                    .padding(.trailing, 12)
+                                    .padding(.bottom, 8)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    
+                    // Tips
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "lightbulb.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(BrewTheme.accentColor)
+                            Text("Tips:")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(themeBrown)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            TipRow(text: "Introduce yourself and your professional background")
+                            TipRow(text: "Explain why you share common interests")
+                            TipRow(text: "Express your interest in collaboration or networking")
+                        }
+                        .padding(.leading, 22)
+                    }
+                    .padding(.horizontal, 20)
+                }
+                .padding(.vertical, 24)
+                
+                Spacer()
+                
+                // Send button
+                VStack(spacing: 0) {
+                    Divider()
+                    
+                    Button(action: {
+                        if !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            onSend(messageText.trimmingCharacters(in: .whitespacesAndNewlines))
+                        }
+                    }) {
+                        HStack {
+                            Spacer()
+                            Text("Send Message")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.white)
+                            Spacer()
+                        }
+                        .frame(height: 56)
+                        .background(
+                            Group {
+                                if messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    Color.gray.opacity(0.5)
+                                } else {
+                                    BrewTheme.gradientPrimary()
+                                }
+                            }
+                        )
+                        .cornerRadius(12)
+                    }
+                    .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+                }
+                .background(Color.white)
+            }
+            .background(BrewTheme.background)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .foregroundColor(themeBrown)
+                            .font(.system(size: 18, weight: .semibold))
+                    }
+                }
+            }
+        }
+        .onAppear {
+            isTextFieldFocused = true
+        }
+    }
+}
+
+// MARK: - Tip Row
+struct TipRow: View {
+    let text: String
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(BrewTheme.primaryBrown.opacity(0.3))
+                .frame(width: 5, height: 5)
+            
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundColor(.gray)
         }
     }
 }
