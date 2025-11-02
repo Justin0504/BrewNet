@@ -30,6 +30,14 @@ struct MainView: View {
                     Text("Profile")
                 }
                 .tag(2)
+            
+            // Explore
+            ExploreView()
+                .tabItem {
+                    Image(systemName: "safari.fill")
+                    Text("Explore")
+                }
+                .tag(3)
         }
         .accentColor(Color(red: 0.4, green: 0.2, blue: 0.1)) // Dark brown theme color
     }
@@ -46,6 +54,13 @@ struct MatchesView: View {
 struct ChatView: View {
     var body: some View {
         ChatInterfaceView()
+    }
+}
+
+// MARK: - Explore View
+struct ExploreView: View {
+    var body: some View {
+        ExploreMainView()
     }
 }
 
