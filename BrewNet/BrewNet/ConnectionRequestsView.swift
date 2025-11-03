@@ -462,6 +462,8 @@ struct ConnectionRequestDetailView: View {
     @EnvironmentObject var supabaseService: SupabaseService
     
     @State private var showMessageSheet = false
+    @State private var requesterProfile: BrewNetProfile?
+    @State private var isLoadingProfile = true
     
     private var themeBrown: Color { BrewTheme.primaryBrown }
     private var themeBrownLight: Color { BrewTheme.secondaryBrown }
@@ -469,20 +471,89 @@ struct ConnectionRequestDetailView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                BrewTheme.background
+                Color(red: 0.98, green: 0.97, blue: 0.95)
                     .ignoresSafeArea()
                 
                 ScrollView {
                     VStack(spacing: 0) {
-                        // Profile Header with Photo
-                        profileHeaderView()
-                        
-                        // Profile Details
-                        profileDetailsView()
-                        
-                        // Add padding at bottom for action buttons
-                        Spacer()
-                            .frame(height: 100)
+                        if isLoadingProfile {
+                            ProgressView()
+                                .padding(.top, 100)
+                        } else if let profile = requesterProfile {
+                            // Reason for Interest Section (if exists)
+                            if let reason = request.reasonForInterest {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "heart.fill")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(BrewTheme.accentColor)
+                                        Text("Reason for Interest")
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .foregroundColor(themeBrown)
+                                    }
+                                    
+                                    Text(reason)
+                                        .font(.system(size: 15))
+                                        .foregroundColor(.gray)
+                                }
+                                .frame(minHeight: 100)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(20)
+                                .background(Color.white)
+                                .cornerRadius(12)
+                                .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+                                .padding(.horizontal, 16)
+                                .padding(.top, 20)
+                            }
+                            
+                            // Profile Header (using PublicProfileView style)
+                            PublicProfileHeaderView(profile: profile)
+                                .padding(.horizontal, 16)
+                                .padding(.top, request.reasonForInterest != nil ? 24 : 20)
+                            
+                            // Networking Preferences Section (Only show if timeslot is public)
+                            if isVisible(profile.privacyTrust.visibilitySettings.timeslot) {
+                                ProfileSectionView(
+                                    title: "Network Preferences",
+                                    icon: "clock.fill"
+                                ) {
+                                    NetworkingPreferencesDisplayView(preferences: profile.networkingPreferences)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.top, 24)
+                            }
+                            
+                            // Professional Background Section (Only show public fields)
+                            if hasAnyPublicProfessionalInfo(profile) {
+                                ProfileSectionView(
+                                    title: "Professional Background",
+                                    icon: "briefcase.fill"
+                                ) {
+                                    PublicProfessionalBackgroundDisplayView(
+                                        background: profile.professionalBackground,
+                                        visibilitySettings: profile.privacyTrust.visibilitySettings
+                                    )
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.top, 24)
+                            }
+                            
+                            // Personality & Interests Section (Only show if interests is public)
+                            if isVisible(profile.privacyTrust.visibilitySettings.interests) {
+                                ProfileSectionView(
+                                    title: "Personality & Interests",
+                                    icon: "person.fill"
+                                ) {
+                                    PersonalitySocialDisplayView(personality: profile.personalitySocial)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.top, 24)
+                            }
+                            
+                            // Add padding at bottom for action buttons
+                            Spacer()
+                                .frame(height: 100)
+                        }
                     }
                 }
                 
@@ -517,6 +588,46 @@ struct ConnectionRequestDetailView: View {
                 .environmentObject(databaseManager)
                 .environmentObject(supabaseService)
             }
+            .onAppear {
+                loadRequesterProfile()
+            }
+        }
+    }
+    
+    // Helper to check if a field should be visible based on privacy settings
+    private func isVisible(_ visibilityLevel: VisibilityLevel) -> Bool {
+        return visibilityLevel == .public_
+    }
+    
+    // Check if there's any public professional information to show
+    private func hasAnyPublicProfessionalInfo(_ profile: BrewNetProfile) -> Bool {
+        let vs = profile.privacyTrust.visibilitySettings
+        return isVisible(vs.skills) || isVisible(vs.company)
+    }
+    
+    // Load requester's full profile
+    private func loadRequesterProfile() {
+        isLoadingProfile = true
+        Task {
+            do {
+                if let profile = try await supabaseService.getProfile(userId: request.requesterId) {
+                    await MainActor.run {
+                        requesterProfile = profile.toBrewNetProfile()
+                        isLoadingProfile = false
+                        print("✅ Loaded requester profile: \(profile.coreIdentity.name)")
+                    }
+                } else {
+                    await MainActor.run {
+                        isLoadingProfile = false
+                        print("⚠️ Failed to load requester profile")
+                    }
+                }
+            } catch {
+                print("❌ Failed to load requester profile: \(error.localizedDescription)")
+                await MainActor.run {
+                    isLoadingProfile = false
+                }
+            }
         }
     }
     
@@ -526,190 +637,6 @@ struct ConnectionRequestDetailView: View {
         
         // 可以创建一个未匹配的消息实体并保存到本地数据库
         // 在实际应用中，这会发送到 Supabase
-    }
-    
-    @ViewBuilder
-    private func profileHeaderView() -> some View {
-        ZStack(alignment: .topTrailing) {
-            // Background with gradient
-            RoundedRectangle(cornerRadius: 0)
-                .fill(
-                    LinearGradient(
-                        gradient: Gradient(colors: [
-                            themeBrownLight,
-                            themeBrown.opacity(0.9)
-                        ]),
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(height: 400)
-            
-            VStack(spacing: 0) {
-                Spacer()
-                    .frame(height: 60)
-                
-                // Profile Photo
-                ZStack {
-                    Image(systemName: "person.circle.fill")
-                        .font(.system(size: 140))
-                        .foregroundColor(.white.opacity(0.9))
-                        .shadow(color: Color.black.opacity(0.2), radius: 15, x: 0, y: 5)
-                }
-                .padding(.bottom, 20)
-                
-                // Name and Job Title
-                VStack(spacing: 12) {
-                    Text(request.requesterProfile.name)
-                        .font(.system(size: 32, weight: .bold))
-                        .foregroundColor(.white)
-                    
-                    Text(request.requesterProfile.jobTitle)
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundColor(.white.opacity(0.95))
-                    
-                    // Company and Location
-                    HStack(spacing: 20) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "building.2")
-                                .font(.system(size: 16))
-                                .foregroundColor(.white.opacity(0.9))
-                            Text(request.requesterProfile.company)
-                                .font(.system(size: 16))
-                                .foregroundColor(.white.opacity(0.9))
-                        }
-                        
-                        HStack(spacing: 8) {
-                            Image(systemName: "location")
-                                .font(.system(size: 16))
-                                .foregroundColor(.white.opacity(0.9))
-                            Text(request.requesterProfile.location)
-                                .font(.system(size: 16))
-                                .foregroundColor(.white.opacity(0.9))
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    
-                    // Online Status
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(Color.green)
-                            .frame(width: 10, height: 10)
-                        Text("Active now")
-                            .font(.system(size: 14))
-                            .foregroundColor(.white.opacity(0.9))
-                    }
-                    .padding(.top, 8)
-                }
-                .padding(.bottom, 30)
-                .frame(maxWidth: .infinity)
-                
-                Spacer()
-            }
-            
-            // Featured Professional Tag overlay
-            if request.isFeatured {
-                HStack {
-                    Spacer()
-                    
-                    HStack(spacing: 6) {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 12))
-                            .foregroundColor(.white)
-                        
-                        Text("Featured Professional")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.white)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(themeBrown)
-                    .cornerRadius(12)
-                    .padding(.top, 60)
-                    .padding(.trailing, 20)
-                }
-            }
-        }
-    }
-    
-    @ViewBuilder
-    private func profileDetailsView() -> some View {
-        VStack(spacing: 24) {
-            // Reason for Interest
-            if let reason = request.reasonForInterest {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "heart.fill")
-                            .font(.system(size: 16))
-                            .foregroundColor(BrewTheme.accentColor)
-                        Text("Reason for Interest")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(themeBrown)
-                    }
-                    
-                    Text(reason)
-                        .font(.system(size: 15))
-                        .foregroundColor(.gray)
-                }
-                .frame(minHeight: 100)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(20)
-                .background(Color.white)
-                .cornerRadius(12)
-                .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
-            }
-            
-            // Bio
-            VStack(alignment: .leading, spacing: 12) {
-                Text("About")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(themeBrown)
-                
-                Text(request.requesterProfile.bio)
-                    .font(.system(size: 15))
-                    .foregroundColor(.gray)
-                    .lineSpacing(4)
-            }
-            .frame(minHeight: 100)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(20)
-            .background(Color.white)
-            .cornerRadius(12)
-            .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
-            
-            // Expertise Section
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Expertise")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(themeBrown)
-                
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(request.requesterProfile.expertise, id: \.self) { skill in
-                            Text(skill)
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(themeBrown)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 10)
-                                .background(themeBrown.opacity(0.1))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(themeBrown, lineWidth: 1)
-                                )
-                                .cornerRadius(12)
-                        }
-                    }
-                }
-            }
-            .frame(minHeight: 100)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(20)
-            .background(Color.white)
-            .cornerRadius(12)
-            .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
     }
     
     @ViewBuilder
