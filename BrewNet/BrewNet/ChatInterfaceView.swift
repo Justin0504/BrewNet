@@ -19,6 +19,7 @@ struct ChatInterfaceView: View {
     @State private var lastChatLoadTime: Date? = nil // 记录上次加载时间
     @State private var showingUnmatchConfirmAlert = false
     @State private var sessionToUnmatch: ChatSession? = nil
+    @State private var userIdToFullProfileMap: [String: BrewNetProfile] = [:] // 存储完整的 profile 数据
     
     var body: some View {
         ZStack {
