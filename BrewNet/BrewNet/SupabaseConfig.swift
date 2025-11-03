@@ -23,6 +23,7 @@ class SupabaseConfig {
 enum SupabaseTable: String, CaseIterable {
     case users = "users"
     case profiles = "profiles"
+    case invitations = "invitations"
     case matches = "matches"
     case coffeeChats = "coffee_chats"
     case messages = "messages"
@@ -73,15 +74,35 @@ struct DatabaseSchema {
         """
         
         let _ = """
+        CREATE TABLE IF NOT EXISTS invitations (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            receiver_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected', 'cancelled')),
+            reason_for_interest TEXT,
+            sender_profile JSONB,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_invitations_unique_pending 
+            ON invitations(sender_id, receiver_id) 
+            WHERE status = 'pending';
+        """
+        
+        let _ = """
         CREATE TABLE IF NOT EXISTS matches (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            user_id UUID NOT NULL REFERENCES users(id),
-            matched_user_id TEXT NOT NULL,
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            matched_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             matched_user_name TEXT NOT NULL,
-            match_type TEXT NOT NULL,
+            match_type TEXT NOT NULL DEFAULT 'mutual' CHECK (match_type IN ('mutual', 'invitation_based', 'recommended')),
             is_active BOOLEAN DEFAULT TRUE,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_unique_active 
+            ON matches(user_id, matched_user_id) 
+            WHERE is_active = TRUE;
         """
         
         let _ = """

@@ -139,48 +139,178 @@ struct ConnectionRequestsView: View {
     
     // MARK: - Actions
     private func handleReject(request: ConnectionRequest) {
+        guard let currentUser = authManager.currentUser else { return }
+        
         // Remove from list
         if let index = requests.firstIndex(where: { $0.id == request.id }) {
             requests.remove(at: index)
         }
         
-        Task { @MainActor in
-            // In real app: call backend to reject
-            print("Rejected request from \(request.requesterProfile.name)")
+        Task {
+            do {
+                // 拒绝邀请（更新状态为 rejected）
+                _ = try await supabaseService.rejectInvitation(
+                    invitationId: request.id,
+                    userId: currentUser.id
+                )
+                
+                print("✅ Rejected invitation from \(request.requesterProfile.name)")
+                
+                await MainActor.run {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("ConnectionRequestRejected"),
+                        object: nil,
+                        userInfo: ["request": request]
+                    )
+                }
+            } catch {
+                print("❌ Failed to reject invitation: \(error.localizedDescription)")
+            }
         }
     }
     
     private func handleAccept(request: ConnectionRequest) {
-        // Remove from list
-        if let index = requests.firstIndex(where: { $0.id == request.id }) {
-            requests.remove(at: index)
-        }
+        guard let currentUser = authManager.currentUser else { return }
         
-        Task { @MainActor in
-            if let currentUser = authManager.currentUser {
-                _ = databaseManager.createMatchEntity(
-                    userId: currentUser.id,
-                    matchedUserId: request.requesterId,
-                    matchedUserName: request.requesterProfile.name,
-                    matchType: "connection_request"
+        // 保存索引以便失败时恢复
+        guard let index = requests.firstIndex(where: { $0.id == request.id }) else { return }
+        
+        // Remove from list
+        requests.remove(at: index)
+        
+        Task {
+            do {
+                // 接受邀请（这会自动创建匹配记录，因为数据库有触发器）
+                _ = try await supabaseService.acceptInvitation(
+                    invitationId: request.id,
+                    userId: currentUser.id
                 )
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("ConnectionRequestAccepted"),
-                    object: nil,
-                    userInfo: ["request": request]
-                )
+                
+                print("✅ Accepted invitation from \(request.requesterProfile.name)")
+                
+                // 同时保存到本地数据库
+                await MainActor.run {
+                    _ = databaseManager.createMatchEntity(
+                        userId: currentUser.id,
+                        matchedUserId: request.requesterId,
+                        matchedUserName: request.requesterProfile.name,
+                        matchType: "invitation_based"
+                    )
+                    
+                    // 发送通知：邀请已接受
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("ConnectionRequestAccepted"),
+                        object: nil,
+                        userInfo: ["request": request]
+                    )
+                    
+                    // 发送通知：导航到 Chat 界面
+                    // 延迟一点时间确保匹配记录已创建
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("NavigateToChat"),
+                            object: nil,
+                            userInfo: ["matchedUserId": request.requesterId]
+                        )
+                    }
+                }
+            } catch {
+                print("❌ Failed to accept invitation: \(error.localizedDescription)")
+                await MainActor.run {
+                    // 如果失败，恢复列表
+                    requests.insert(request, at: min(index, requests.count))
+                }
             }
         }
     }
     
     // MARK: - Data Loading
     private func loadConnectionRequests() {
+        guard let currentUser = authManager.currentUser else {
+            isLoading = false
+            return
+        }
+        
         isLoading = true
         Task {
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            await MainActor.run {
-                self.requests = ConnectionRequest.sampleRequests
-                self.isLoading = false
+            do {
+                // 从 Supabase 获取收到的待处理邀请
+                let supabaseInvitations = try await supabaseService.getPendingInvitations(userId: currentUser.id)
+                
+                // 转换为 ConnectionRequest 模型
+                var convertedRequests: [ConnectionRequest] = []
+                
+                for invitation in supabaseInvitations {
+                    // 获取发送者的 profile 信息
+                    var requesterProfile = ConnectionRequestProfile(
+                        profilePhoto: nil,
+                        name: "Unknown",
+                        jobTitle: "",
+                        company: "",
+                        location: "",
+                        bio: "",
+                        expertise: [],
+                        backgroundImage: nil
+                    )
+                    
+                    // 从 senderProfile JSONB 中提取信息
+                    if let senderProfile = invitation.senderProfile {
+                        requesterProfile = ConnectionRequestProfile(
+                            profilePhoto: senderProfile.profileImage,
+                            name: senderProfile.name,
+                            jobTitle: senderProfile.jobTitle ?? "",
+                            company: senderProfile.company ?? "",
+                            location: senderProfile.location ?? "",
+                            bio: senderProfile.bio ?? "",
+                            expertise: senderProfile.expertise ?? [],
+                            backgroundImage: nil
+                        )
+                    } else {
+                        // 如果没有 senderProfile，尝试从 profile 表获取
+                        if let senderProfile = try? await supabaseService.getProfile(userId: invitation.senderId) {
+                            let brewNetProfile = senderProfile.toBrewNetProfile()
+                            requesterProfile = ConnectionRequestProfile(
+                                profilePhoto: brewNetProfile.coreIdentity.profileImage,
+                                name: brewNetProfile.coreIdentity.name,
+                                jobTitle: brewNetProfile.professionalBackground.jobTitle ?? "",
+                                company: brewNetProfile.professionalBackground.currentCompany ?? "",
+                                location: brewNetProfile.coreIdentity.location ?? "",
+                                bio: brewNetProfile.coreIdentity.bio ?? "",
+                                expertise: brewNetProfile.professionalBackground.skills,
+                                backgroundImage: nil
+                            )
+                        }
+                    }
+                    
+                    // 解析创建时间
+                    let dateFormatter = ISO8601DateFormatter()
+                    let createdAt = dateFormatter.date(from: invitation.createdAt) ?? Date()
+                    
+                    let connectionRequest = ConnectionRequest(
+                        id: invitation.id,
+                        requesterId: invitation.senderId,
+                        requesterName: requesterProfile.name,
+                        requesterProfile: requesterProfile,
+                        reasonForInterest: invitation.reasonForInterest,
+                        createdAt: createdAt,
+                        isFeatured: false // 可以根据需要设置
+                    )
+                    
+                    convertedRequests.append(connectionRequest)
+                }
+                
+                await MainActor.run {
+                    self.requests = convertedRequests
+                    self.isLoading = false
+                    print("✅ Loaded \(convertedRequests.count) connection requests from database")
+                }
+                
+            } catch {
+                print("❌ Failed to load connection requests: \(error.localizedDescription)")
+                await MainActor.run {
+                    self.requests = []
+                    self.isLoading = false
+                }
             }
         }
     }

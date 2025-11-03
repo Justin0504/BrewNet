@@ -724,4 +724,17 @@ extension BrewNetProfile {
         
         return Double(completedSections) / 4.0
     }
+    
+    /// 转换为 InvitationProfile 用于发送邀请
+    func toInvitationProfile() -> InvitationProfile {
+        return InvitationProfile(
+            name: coreIdentity.name,
+            jobTitle: professionalBackground.jobTitle,
+            company: professionalBackground.currentCompany,
+            location: coreIdentity.location,
+            bio: coreIdentity.bio,
+            profileImage: coreIdentity.profileImage,
+            expertise: professionalBackground.skills
+        )
+    }
 }

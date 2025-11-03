@@ -5,6 +5,7 @@ struct MainView: View {
     @EnvironmentObject var databaseManager: DatabaseManager
     @EnvironmentObject var supabaseService: SupabaseService
     @State private var selectedTab = 0
+    @State private var profilesPreloaded = false // 标记是否已预加载
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -13,8 +14,7 @@ struct MainView: View {
                 MatchesView()
             }
                 .tabItem {
-                    Image(systemName: "heart.fill")
-                    Text("Matches")
+                    Image(systemName: "cup.and.saucer.fill")
                 }
                 .tag(0)
             
@@ -22,7 +22,6 @@ struct MainView: View {
             ExploreView()
                 .tabItem {
                     Image(systemName: "safari.fill")
-                    Text("Explore")
                 }
                 .tag(1)
             
@@ -30,7 +29,6 @@ struct MainView: View {
             RequestsView()
                 .tabItem {
                     Image(systemName: "person.badge.plus.fill")
-                    Text("Requests")
                 }
                 .tag(2)
             
@@ -40,7 +38,6 @@ struct MainView: View {
             }
                 .tabItem {
                     Image(systemName: "message.fill")
-                    Text("Chat")
                 }
                 .tag(3)
             
@@ -50,11 +47,49 @@ struct MainView: View {
             }
                 .tabItem {
                     Image(systemName: "person.fill")
-                    Text("Profile")
                 }
                 .tag(4)
         }
         .accentColor(Color(red: 0.4, green: 0.2, blue: 0.1)) // Dark brown theme color
+        .onAppear {
+            // 应用启动时预加载第一个 tab 的数据
+            preloadMatchesData()
+        }
+        .onChange(of: selectedTab) { newTab in
+            // 切换到第一个 tab 时，如果还没预加载，则预加载
+            if newTab == 0 && !profilesPreloaded {
+                preloadMatchesData()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToChat"))) { _ in
+            // 当收到导航到 Chat 的通知时，切换到 Chat tab
+            selectedTab = 3
+        }
+    }
+    
+    // 预加载 Matches 数据
+    private func preloadMatchesData() {
+        guard !profilesPreloaded else { return }
+        guard let currentUser = authManager.currentUser else { return }
+        
+        // 在后台预加载推荐用户
+        Task {
+            do {
+                let (profiles, _, _) = try await supabaseService.getRecommendedProfiles(
+                    userId: currentUser.id,
+                    limit: 20,
+                    offset: 0
+                )
+                // 数据加载成功，标记为已预加载
+                // 实际的数据会在 MatchesView 的 onAppear 中使用缓存
+                await MainActor.run {
+                    profilesPreloaded = true
+                    print("✅ Preloaded \(profiles.count) profiles for Matches tab")
+                }
+            } catch {
+                print("⚠️ Failed to preload profiles: \(error.localizedDescription)")
+            }
+        }
     }
 }
 
