@@ -19,11 +19,17 @@ struct ChatInterfaceView: View {
     @State private var lastChatLoadTime: Date? = nil // 记录上次加载时间
     
     var body: some View {
-        VStack(spacing: 0) {
-            if let session = selectedSession {
-                chatView(for: session)
-            } else {
-                chatListView
+        ZStack {
+            // Background - 与其他板块保持一致
+            Color(red: 0.98, green: 0.97, blue: 0.95)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                if let session = selectedSession {
+                    chatView(for: session)
+                } else {
+                    chatListView
+                }
             }
         }
         .navigationTitle("Chat")
@@ -209,7 +215,11 @@ struct ChatInterfaceView: View {
                     ChatSessionRowView(session: session) {
                         selectSession(session) // 使用新方法
                     }
+                    .listRowBackground(Color.clear) // 使列表项背景透明
                 }
+                .scrollContentBackground(.hidden) // 隐藏列表默认背景
+                .listStyle(.plain) // 使用plain样式，减少默认间距
+                .padding(.top, -8) // 减小顶部间距，使Chat标题和列表更近
             }
         }
     }
@@ -345,9 +355,9 @@ struct ChatInterfaceView: View {
                                 .fill(session.user.isOnline ? .green : .gray)
                                 .frame(width: 8, height: 8)
                             
-                            Text(session.user.isOnline ? "Online" : "Offline")
+                            Text(session.user.isOnline ? "Active" : "Offline")
                                 .font(.system(size: 12))
-                                .foregroundColor(.gray)
+                                .foregroundColor(session.user.isOnline ? .green : .gray)
                             
                             // Match date
                             if session.user.isMatched, let matchDate = session.user.matchDate {
@@ -640,10 +650,20 @@ struct ChatInterfaceView: View {
                 let matchDate = dateFormatter.date(from: match.createdAt)
                 
                 // 先创建基本会话（使用已有的名字，不需要等待 profile）
+                // 在线状态：从 users 表获取 lastLoginAt，如果最近5分钟内有活动则为在线
+                var isOnline = false
+                if let user = try? await supabaseService.getUser(id: matchedUserId) {
+                    let dateFormatter = ISO8601DateFormatter()
+                    if let lastLoginAt = dateFormatter.date(from: user.lastLoginAt) {
+                        let timeSinceLastLogin = Date().timeIntervalSince(lastLoginAt)
+                        isOnline = timeSinceLastLogin < 300 // 5分钟内活跃视为在线
+                    }
+                }
+                
                 let chatUser = ChatUser(
                     name: matchedUserName,
                     avatar: "person.circle.fill",
-                    isOnline: false,
+                    isOnline: isOnline,
                     lastSeen: matchDate ?? Date(),
                     interests: [], // 暂时为空，后台会更新
                     bio: "", // 暂时为空，后台会更新
@@ -673,11 +693,16 @@ struct ChatInterfaceView: View {
                 }
                 
                 // 创建 ChatSession（使用从数据库加载的消息）
-                let session = ChatSession(
+                // 计算最后一条消息的时间，如果没有消息则使用匹配时间
+                let lastMessageTime = messages.last?.timestamp ?? matchDate ?? Date()
+                
+                var session = ChatSession(
                     user: chatUser,
                     messages: messages,
                     aiSuggestions: []
                 )
+                // 手动设置最后消息时间
+                session.lastMessageAt = lastMessageTime
                 
                 sessions.append(session)
             }
@@ -1086,9 +1111,12 @@ struct ChatSessionRowView: View {
                         
                         Spacer()
                         
-                        Text(formatTime(session.lastMessageAt))
-                            .font(.system(size: 12))
-                            .foregroundColor(.gray)
+                        // 只在有消息时显示时间
+                        if !session.messages.isEmpty {
+                            Text(formatTime(session.lastMessageAt))
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                        }
                     }
                     
                     Text(session.messages.last?.content ?? "Start chatting...")
@@ -1101,9 +1129,9 @@ struct ChatSessionRowView: View {
                             .fill(session.user.isOnline ? .green : .gray)
                             .frame(width: 8, height: 8)
                         
-                        Text(session.user.isOnline ? "Online" : "Offline")
+                        Text(session.user.isOnline ? "Active" : "Offline")
                             .font(.system(size: 12))
-                            .foregroundColor(.gray)
+                            .foregroundColor(session.user.isOnline ? .green : .gray)
                         
                         // Match date
                         if session.user.isMatched, let matchDate = session.user.matchDate {
