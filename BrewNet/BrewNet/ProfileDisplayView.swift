@@ -1307,62 +1307,10 @@ struct PublicProfileView: View {
     @EnvironmentObject var supabaseService: SupabaseService
     @Environment(\.dismiss) var dismiss
     
-    // Helper to check if a field should be visible based on privacy settings
-    private func isVisible(_ visibilityLevel: VisibilityLevel) -> Bool {
-        return visibilityLevel == .public_
-    }
-    
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 0) {
-                    // Profile Header
-                    PublicProfileHeaderView(profile: profile)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 20)
-                    
-                    // Networking Preferences Section (Only show if timeslot is public)
-                    if isVisible(profile.privacyTrust.visibilitySettings.timeslot) {
-                        ProfileSectionView(
-                            title: "Network Preferences",
-                            icon: "clock.fill"
-                        ) {
-                            NetworkingPreferencesDisplayView(preferences: profile.networkingPreferences)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 24)
-                    }
-                    
-                    // Professional Background Section (Only show public fields)
-                    if hasAnyPublicProfessionalInfo {
-                        ProfileSectionView(
-                            title: "Professional Background",
-                            icon: "briefcase.fill"
-                        ) {
-                            PublicProfessionalBackgroundDisplayView(
-                                background: profile.professionalBackground,
-                                visibilitySettings: profile.privacyTrust.visibilitySettings
-                            )
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 24)
-                    }
-                    
-                    // Personality & Interests Section (Only show if interests is public)
-                    if isVisible(profile.privacyTrust.visibilitySettings.interests) {
-                        ProfileSectionView(
-                            title: "Personality & Interests",
-                            icon: "person.fill"
-                        ) {
-                            PersonalitySocialDisplayView(personality: profile.personalitySocial)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 24)
-                    }
-                }
-                .padding(.bottom, 20)
-            }
-            .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+            // Use unified PublicProfileCardView
+            PublicProfileCardView(profile: profile)
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1374,12 +1322,6 @@ struct PublicProfileView: View {
                 }
             }
         }
-    }
-    
-    // Check if there's any public professional information to show
-    private var hasAnyPublicProfessionalInfo: Bool {
-        let vs = profile.privacyTrust.visibilitySettings
-        return isVisible(vs.skills) || isVisible(vs.company)
     }
 }
 
