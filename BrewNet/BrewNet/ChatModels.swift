@@ -249,7 +249,8 @@ struct ChatSession: Identifiable, Codable {
         self.messages = messages
         self.aiSuggestions = aiSuggestions
         self.createdAt = Date()
-        self.lastMessageAt = Date()
+        // 使用最后一条消息的时间，如果没有消息则使用当前时间
+        self.lastMessageAt = messages.last?.timestamp ?? Date()
         self.isActive = isActive
     }
     
@@ -360,17 +361,42 @@ let sampleAISuggestions = [
 extension ChatMessage {
     /// 从 SupabaseMessage 创建 ChatMessage
     init(from supabaseMessage: SupabaseMessage, currentUserId: String) {
+        // 使用 ISO8601DateFormatter 解析数据库时间戳
         let dateFormatter = ISO8601DateFormatter()
-        let date = dateFormatter.date(from: supabaseMessage.timestamp) ?? Date()
+        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var date = dateFormatter.date(from: supabaseMessage.timestamp)
         
+        // 如果解析失败，尝试不带小数秒的格式
+        if date == nil {
+            dateFormatter.formatOptions = [.withInternetDateTime]
+            date = dateFormatter.date(from: supabaseMessage.timestamp)
+        }
+        
+        // 如果还是失败，尝试 PostgreSQL timestamp 格式
+        if date == nil {
+            let postgresFormatter = DateFormatter()
+            postgresFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSSZZZZZ"
+            postgresFormatter.locale = Locale(identifier: "en_US_POSIX")
+            postgresFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+            date = postgresFormatter.date(from: supabaseMessage.timestamp)
+        }
+        
+        // 最后兜底：使用当前时间（但应该尽量避免）
         self.id = UUID(uuidString: supabaseMessage.id) ?? UUID()
         self.content = supabaseMessage.content
-        self.timestamp = date
+        self.timestamp = date ?? Date()
         self.isFromUser = supabaseMessage.senderId == currentUserId
         self.messageType = MessageType(rawValue: supabaseMessage.messageType) ?? .text
         self.senderName = nil // 可以从数据库获取
         self.senderAvatar = nil
         self.isRead = supabaseMessage.isRead // 添加 isRead 信息
+        
+        // 打印调试信息
+        if date == nil {
+            print("⚠️ Failed to parse timestamp: \(supabaseMessage.timestamp), using current time")
+        } else {
+            print("✅ Parsed timestamp: \(supabaseMessage.timestamp) -> \(self.timestamp)")
+        }
     }
 }
 

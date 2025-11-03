@@ -216,10 +216,30 @@ struct ProfileDisplayView: View {
         Task {
             do {
                 let fetchedInvitations = try await supabaseService.getSentInvitations(userId: currentUser.id)
+                
+                // 去重：对于同一个 receiver_id，只保留最新的邀请
+                var uniqueInvitations: [SupabaseInvitation] = []
+                var seenReceiverIds: Set<String> = []
+                
+                // 按创建时间排序，最新的在前
+                let sortedInvitations = fetchedInvitations.sorted { inv1, inv2 in
+                    let date1 = ISO8601DateFormatter().date(from: inv1.createdAt) ?? Date.distantPast
+                    let date2 = ISO8601DateFormatter().date(from: inv2.createdAt) ?? Date.distantPast
+                    return date1 > date2
+                }
+                
+                // 只保留每个 receiver_id 的第一个（最新的）
+                for invitation in sortedInvitations {
+                    if !seenReceiverIds.contains(invitation.receiverId) {
+                        uniqueInvitations.append(invitation)
+                        seenReceiverIds.insert(invitation.receiverId)
+                    }
+                }
+                
                 await MainActor.run {
-                    sentInvitations = fetchedInvitations
+                    sentInvitations = uniqueInvitations
                     isLoadingInvitations = false
-                    print("✅ Loaded \(fetchedInvitations.count) sent invitations")
+                    print("✅ Loaded \(uniqueInvitations.count) unique sent invitations (removed \(fetchedInvitations.count - uniqueInvitations.count) duplicates)")
                 }
             } catch {
                 print("❌ Failed to load sent invitations: \(error.localizedDescription)")
