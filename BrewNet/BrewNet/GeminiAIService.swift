@@ -6,10 +6,33 @@ class GeminiAIService: ObservableObject {
     static let shared = GeminiAIService()
     
     // Note: In a real application, you need to get the API key from a secure place
-    private let apiKey = "YOUR_GEMINI_API_KEY" // Replace with your actual API key
-    private let baseURL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
+    private var apiKey: String {
+        // 首先尝试从环境变量读取
+        if let key = ProcessInfo.processInfo.environment["GEMINI_API_KEY"] {
+            return key
+        }
+        // 其次尝试从 Info.plist 读取
+        if let key = Bundle.main.object(forInfoDictionaryKey: "GEMINI_API_KEY") as? String {
+            return key
+        }
+        // 返回占位符（如果没有配置，将使用模拟模式）
+        return "YOUR_GEMINI_API_KEY"
+    }
+    // 使用 Gemini 2.0 Flash 模型（稳定版）
+    private let baseURL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+    private let useRealAPI: Bool // 是否使用真实 API
     
-    private init() {}
+    private init() {
+        // 检查是否有有效的 API Key
+        self.useRealAPI = ProcessInfo.processInfo.environment["GEMINI_API_KEY"] != nil || 
+                         (Bundle.main.object(forInfoDictionaryKey: "GEMINI_API_KEY") as? String) != nil
+        
+        if useRealAPI {
+            print("✅ Gemini API Key 已配置，将使用真实 AI 响应")
+        } else {
+            print("ℹ️ Gemini API Key 未配置，将使用模拟响应")
+        }
+    }
     
     // MARK: - Generate Ice Breaker Topics
     func generateIceBreakerTopics(for user: ChatUser, context: String = "") async -> [AISuggestion] {
@@ -148,8 +171,20 @@ class GeminiAIService: ObservableObject {
     }
     
     private func generateSuggestions(prompt: String, category: SuggestionCategory) async -> [AISuggestion] {
-        // 模拟AI响应（在实际应用中，这里会调用Gemini API）
-        return await simulateAIResponse(prompt: prompt, category: category)
+        // 如果配置了真实的 API Key，使用真实 API；否则使用模拟响应
+        if useRealAPI && apiKey != "YOUR_GEMINI_API_KEY" {
+            do {
+                let response = try await callGeminiAPI(prompt: prompt)
+                return parseAIResponse(response: response, category: category)
+            } catch {
+                print("⚠️ Gemini API 调用失败: \(error.localizedDescription)")
+                print("⚠️ 回退到模拟模式")
+                return await simulateAIResponse(prompt: prompt, category: category)
+            }
+        } else {
+            print("ℹ️ 使用模拟 AI 响应（未配置 API Key）")
+            return await simulateAIResponse(prompt: prompt, category: category)
+        }
     }
     
     private func simulateAIResponse(prompt: String, category: SuggestionCategory) async -> [AISuggestion] {
@@ -234,19 +269,89 @@ class GeminiAIService: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
         
-        let (data, _) = try await URLSession.shared.data(for: request)
+        // 调试：打印请求 URL（隐藏 API Key）
+        let debugURL = url.absoluteString.replacingOccurrences(of: "key=\(apiKey)", with: "key=***")
+        print("🚀 调用 Gemini API: \(debugURL)")
         
-        if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let candidates = json["candidates"] as? [[String: Any]],
-           let firstCandidate = candidates.first,
-           let content = firstCandidate["content"] as? [String: Any],
-           let parts = content["parts"] as? [[String: Any]],
-           let firstPart = parts.first,
-           let text = firstPart["text"] as? String {
-            return text
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        // 调试：打印原始响应
+        if let httpResponse = response as? HTTPURLResponse {
+            print("🔍 Gemini API 响应状态码: \(httpResponse.statusCode)")
+        }
+        
+        // 调试：打印响应数据
+        if let responseString = String(data: data, encoding: .utf8) {
+            print("🔍 Gemini API 原始响应: \(responseString.prefix(500))...")
+        }
+        
+        if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            // 调试：检查是否有错误
+            if let error = json["error"] as? [String: Any],
+               let message = error["message"] as? String {
+                print("❌ Gemini API 错误: \(message)")
+                throw AIError.networkError
+            }
+            
+            if let candidates = json["candidates"] as? [[String: Any]],
+               let firstCandidate = candidates.first,
+               let content = firstCandidate["content"] as? [String: Any],
+               let parts = content["parts"] as? [[String: Any]],
+               let firstPart = parts.first,
+               let text = firstPart["text"] as? String {
+                print("✅ Gemini API 成功返回: \(text.prefix(100))...")
+                return text
+            }
         }
         
         throw AIError.invalidResponse
+    }
+    
+    // MARK: - Parse AI Response
+    
+    /// 解析 Gemini API 返回的文本，提取建议内容
+    private func parseAIResponse(response: String, category: SuggestionCategory) -> [AISuggestion] {
+        // 首先尝试按双换行符分割（Gemini 常用格式）
+        var lines = response.components(separatedBy: "\n\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        
+        // 如果双换行分割失败，尝试单换行
+        if lines.count <= 1 {
+            lines = response.components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        }
+        
+        print("🔍 解析到 \(lines.count) 条建议")
+        
+        // 过滤掉编号、列表符号等
+        let cleanedLines = lines.map { line in
+            // 移除常见的编号格式（如 "1. ", "2. ", "- ", "* ", "• " 等）
+            var cleaned = line
+            if let match = cleaned.range(of: #"^[\d+\-\*\•]+\s*"#, options: .regularExpression) {
+                cleaned.removeSubrange(match)
+                cleaned = cleaned.trimmingCharacters(in: .whitespaces)
+            }
+            return cleaned
+        }
+        .filter { !$0.isEmpty }
+        
+        // 转换为 AISuggestion 数组
+        let suggestions = cleanedLines.prefix(5) // 最多取5条
+            .map { content in
+                AISuggestion(content: content, category: category)
+            }
+        
+        print("✅ 成功解析 \(suggestions.count) 条建议")
+        
+        // 如果没有有效建议，回退到模拟模式
+        if suggestions.isEmpty {
+            print("⚠️ AI 响应解析失败，使用默认建议")
+            return category.defaultSuggestions
+        }
+        
+        return Array(suggestions)
     }
 }
 
