@@ -9,6 +9,9 @@ struct ConnectionRequestsView: View {
     @State private var requests: [ConnectionRequest] = []
     @State private var isLoading = true
     @State private var selectedRequest: ConnectionRequest?
+    @State private var showingSentInvitations = false
+    @State private var sentInvitations: [SupabaseInvitation] = []
+    @State private var isLoadingSentInvitations = false
     
     private var themeBrown: Color { BrewTheme.primaryBrown }
     private var themeBrownLight: Color { BrewTheme.secondaryBrown }
@@ -36,6 +39,13 @@ struct ConnectionRequestsView: View {
                 }
             }
             .navigationBarHidden(true)
+            .sheet(isPresented: $showingSentInvitations) {
+                NavigationStack {
+                    SentInvitationsListView(invitations: sentInvitations, isLoading: isLoadingSentInvitations)
+                        .environmentObject(authManager)
+                        .environmentObject(supabaseService)
+                }
+            }
             .fullScreenCover(item: $selectedRequest) { request in
                 ConnectionRequestDetailView(
                     request: request,
@@ -59,6 +69,7 @@ struct ConnectionRequestsView: View {
             }
             .onAppear {
                 loadConnectionRequests()
+                loadSentInvitations()
             }
         }
     }
@@ -78,6 +89,15 @@ struct ConnectionRequestsView: View {
                     .foregroundColor(themeBrown)
             }
             Spacer()
+            
+            // Sent Invitations Icon
+            Button(action: {
+                showingSentInvitations = true
+            }) {
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(themeBrown)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -310,6 +330,29 @@ struct ConnectionRequestsView: View {
                 await MainActor.run {
                     self.requests = []
                     self.isLoading = false
+                }
+            }
+        }
+    }
+    
+    // MARK: - Load Sent Invitations
+    private func loadSentInvitations() {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        isLoadingSentInvitations = true
+        Task {
+            do {
+                let fetchedInvitations = try await supabaseService.getSentInvitations(userId: currentUser.id)
+                await MainActor.run {
+                    sentInvitations = fetchedInvitations
+                    isLoadingSentInvitations = false
+                    print("✅ Loaded \(fetchedInvitations.count) sent invitations")
+                }
+            } catch {
+                print("❌ Failed to load sent invitations: \(error.localizedDescription)")
+                await MainActor.run {
+                    sentInvitations = []
+                    isLoadingSentInvitations = false
                 }
             }
         }
