@@ -1883,6 +1883,77 @@ extension SupabaseService {
         return features
     }
     
+    /// 获取需要排除的用户ID集合（用于推荐系统）
+    /// 包括：已发送的 Invitations（所有状态）、已收到且被拒绝的 Invitations、已交互的用户（like/pass/match）
+    func getExcludedUserIds(userId: String) async throws -> Set<String> {
+        var excludedUserIds: Set<String> = []
+        
+        // 1. 排除所有已发送邀请的用户（所有状态：pending, accepted, rejected, cancelled）
+        do {
+            let sentInvitations = try await getSentInvitations(userId: userId)
+            for invitation in sentInvitations {
+                excludedUserIds.insert(invitation.receiverId)
+            }
+            print("🔍 Excluding \(sentInvitations.count) users with sent invitations (all statuses)")
+        } catch {
+            print("⚠️ Failed to fetch sent invitations for filtering: \(error.localizedDescription)")
+        }
+        
+        // 2. 排除所有已收到且被拒绝的邀请的发送者
+        do {
+            let receivedInvitations = try await getReceivedInvitations(userId: userId)
+            let rejectedInvitations = receivedInvitations.filter { $0.status == .rejected }
+            for invitation in rejectedInvitations {
+                excludedUserIds.insert(invitation.senderId)
+            }
+            print("🔍 Excluding \(rejectedInvitations.count) users with rejected invitations")
+        } catch {
+            print("⚠️ Failed to fetch received invitations for filtering: \(error.localizedDescription)")
+        }
+        
+        // 3. 排除所有已匹配的用户（包括活跃和非活跃的匹配）
+        do {
+            let allMatches = try await getMatches(userId: userId, activeOnly: false)
+            for match in allMatches {
+                if match.userId == userId {
+                    excludedUserIds.insert(match.matchedUserId)
+                } else if match.matchedUserId == userId {
+                    excludedUserIds.insert(match.userId)
+                }
+            }
+            print("🔍 Excluding \(allMatches.count) matched users (all matches, including inactive)")
+        } catch {
+            print("⚠️ Failed to fetch matches for filtering: \(error.localizedDescription)")
+        }
+        
+        // 4. 排除所有已交互过的用户（like/pass/match）
+        do {
+            let response = try await client
+                .from("user_interactions")
+                .select("target_user_id,interaction_type")
+                .eq("user_id", value: userId)
+                .execute()
+            
+            let data = response.data
+            if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                let typeSet = Set(["like", "pass", "match"])
+                for record in jsonArray {
+                    if let interactionType = record["interaction_type"] as? String,
+                       typeSet.contains(interactionType),
+                       let targetUserId = record["target_user_id"] as? String {
+                        excludedUserIds.insert(targetUserId)
+                    }
+                }
+                print("🔍 Excluding users with interactions (like/pass/match)")
+            }
+        } catch {
+            print("⚠️ Failed to fetch user interactions for filtering: \(error.localizedDescription)")
+        }
+        
+        print("✅ Total excluded users: \(excludedUserIds.count)")
+        return excludedUserIds
+    }
+    
     /// 获取所有候选用户特征（用于推荐）
     func getAllCandidateFeatures(
         excluding userId: String,

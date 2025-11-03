@@ -17,6 +17,7 @@ struct ChatInterfaceView: View {
     @State private var messageRefreshTimer: Timer?
     @State private var cachedChatSessions: [ChatSession] = [] // 缓存数据
     @State private var lastChatLoadTime: Date? = nil // 记录上次加载时间
+    @State private var userIdToFullProfileMap: [String: BrewNetProfile] = [:] // 存储完整的 profile 数据
     
     var body: some View {
         ZStack {
@@ -307,9 +308,7 @@ struct ChatInterfaceView: View {
             }) {
                 HStack(spacing: 12) {
                     ZStack(alignment: .bottomTrailing) {
-                        Image(systemName: session.user.avatar)
-                            .font(.system(size: 40))
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        AvatarView(avatarString: session.user.avatar, size: 40)
                         
                         // Match indicator
                         if session.user.isMatched {
@@ -578,8 +577,12 @@ struct ChatInterfaceView: View {
                     }
                     processedUserIds.insert(matchedUserId)
                     
-                    print("✅ Match 1: Current user is user_id, matched with: \(match.matchedUserName) (ID: \(matchedUserId))")
-                    basicSessionData.append((match, matchedUserId, match.matchedUserName))
+                    // 记录需要获取 profile 的用户 ID（不使用 matchedUserName 因为可能过期）
+                    if !userIdsToFetch.contains(matchedUserId) {
+                        userIdsToFetch.append(matchedUserId)
+                    }
+                    print("✅ Match 1: Current user is user_id, matched with: \(matchedUserId) (will fetch name)")
+                    basicSessionData.append((match, matchedUserId, "Loading..."))
                 } else if match.matchedUserId == currentUser.id {
                     // 当前用户是 matched_user_id，对方是 user_id
                     matchedUserId = match.userId
@@ -612,97 +615,126 @@ struct ChatInterfaceView: View {
                 }
             }
             
-            // 并发获取所有需要的 profile 名字
+            // 并发获取所有需要的 profile（包括名字、头像、兴趣、bio）
             if !userIdsToFetch.isEmpty {
-                let nameTasks = userIdsToFetch.map { userId -> Task<String, Never> in
+                let profileTasks = userIdsToFetch.map { userId -> Task<BrewNetProfile?, Never> in
                     Task {
-                        if let profile = try? await supabaseService.getProfile(userId: userId) {
-                            return profile.coreIdentity.name
+                        if let supabaseProfile = try? await supabaseService.getProfile(userId: userId) {
+                            return supabaseProfile.toBrewNetProfile()
                         }
-                        return "Unknown"
+                        return nil
                     }
                 }
                 
-                // 等待所有名字加载完成
-                var userIdToName: [String: String] = [:]
-                for (index, task) in nameTasks.enumerated() {
+                // 等待所有 profile 加载完成
+                var userIdToProfile: [String: BrewNetProfile] = [:]
+                for (index, task) in profileTasks.enumerated() {
                     let userId = userIdsToFetch[index]
-                    userIdToName[userId] = await task.value
+                    if let profile = await task.value {
+                        userIdToProfile[userId] = profile
+                    }
                 }
                 
                 // 更新 basicSessionData 中的名字
                 for (index, data) in basicSessionData.enumerated() {
                     if data.matchedUserName == "Loading..." {
-                        if let userName = userIdToName[data.matchedUserId] {
-                            basicSessionData[index] = (data.match, data.matchedUserId, userName)
+                        if let profile = userIdToProfile[data.matchedUserId] {
+                            basicSessionData[index] = (data.match, data.matchedUserId, profile.coreIdentity.name)
                         }
                     }
                 }
+                
+                // 保存完整 profile 映射
+                userIdToFullProfileMap = userIdToProfile
             }
             
-            // 第二步：先快速显示基本会话（不等待 profile 加载）
+            // 第二步：并发加载在线状态和消息（加速加载）
             let dateFormatter = ISO8601DateFormatter()
             
+            // 并发获取所有用户的在线状态
+            let onlineStatusTasks = basicSessionData.map { data -> Task<(userId: String, isOnline: Bool), Never> in
+                Task {
+                    var isOnline = false
+                    if let user = try? await supabaseService.getUser(id: data.matchedUserId) {
+                        let dateFormatter = ISO8601DateFormatter()
+                        if let lastLoginAt = dateFormatter.date(from: user.lastLoginAt) {
+                            let timeSinceLastLogin = Date().timeIntervalSince(lastLoginAt)
+                            isOnline = timeSinceLastLogin < 300 // 5分钟内活跃视为在线
+                        }
+                    }
+                    return (data.matchedUserId, isOnline)
+                }
+            }
+            
+            // 并发获取所有会话的消息
+            let messageTasks = basicSessionData.map { data -> Task<(userId: String, messages: [ChatMessage], lastMessageTime: Date), Never> in
+                Task {
+                    var messages: [ChatMessage] = []
+                    let matchDate = dateFormatter.date(from: data.match.createdAt) ?? Date()
+                    
+                    do {
+                        let supabaseMessages = try await supabaseService.getMessages(
+                            userId1: currentUser.id,
+                            userId2: data.matchedUserId
+                        )
+                        
+                        // 转换为 ChatMessage
+                        messages = supabaseMessages.map { supabaseMessage in
+                            supabaseMessage.toChatMessage(currentUserId: currentUser.id)
+                        }
+                    } catch {
+                        print("⚠️ Failed to load messages: \(error.localizedDescription)")
+                    }
+                    
+                    let lastMessageTime = messages.last?.timestamp ?? matchDate
+                    return (data.matchedUserId, messages, lastMessageTime)
+                }
+            }
+            
+            // 等待所有任务完成
+            var userIdToOnlineStatus: [String: Bool] = [:]
+            for task in onlineStatusTasks {
+                let result = await task.value
+                userIdToOnlineStatus[result.userId] = result.isOnline
+            }
+            
+            var userIdToMessages: [String: (messages: [ChatMessage], lastMessageTime: Date)] = [:]
+            for task in messageTasks {
+                let result = await task.value
+                userIdToMessages[result.userId] = (result.messages, result.lastMessageTime)
+            }
+            
+            // 快速创建会话列表（使用已加载的数据）
             for data in basicSessionData {
                 let match = data.match
                 let matchedUserId = data.matchedUserId
                 let matchedUserName = data.matchedUserName
-                let matchDate = dateFormatter.date(from: match.createdAt)
+                let matchDate = dateFormatter.date(from: match.createdAt) ?? Date()
                 
-                // 先创建基本会话（使用已有的名字，不需要等待 profile）
-                // 在线状态：从 users 表获取 lastLoginAt，如果最近5分钟内有活动则为在线
-                var isOnline = false
-                if let user = try? await supabaseService.getUser(id: matchedUserId) {
-                    let dateFormatter = ISO8601DateFormatter()
-                    if let lastLoginAt = dateFormatter.date(from: user.lastLoginAt) {
-                        let timeSinceLastLogin = Date().timeIntervalSince(lastLoginAt)
-                        isOnline = timeSinceLastLogin < 300 // 5分钟内活跃视为在线
-                    }
-                }
+                let isOnline = userIdToOnlineStatus[matchedUserId] ?? false
+                let profile = userIdToFullProfileMap[matchedUserId]
+                let avatarString = profile?.coreIdentity.profileImage ?? "person.circle.fill"
+                let messageData = userIdToMessages[matchedUserId] ?? ([], matchDate)
                 
                 let chatUser = ChatUser(
                     name: matchedUserName,
-                    avatar: "person.circle.fill",
+                    avatar: avatarString,
                     isOnline: isOnline,
-                    lastSeen: matchDate ?? Date(),
-                    interests: [], // 暂时为空，后台会更新
-                    bio: "", // 暂时为空，后台会更新
+                    lastSeen: matchDate,
+                    interests: profile?.personalitySocial.hobbies ?? [],
+                    bio: profile?.coreIdentity.bio ?? "",
                     isMatched: true,
                     matchDate: matchDate,
-                    matchType: .mutual, // invitation_based 对应 mutual
-                    userId: matchedUserId // 添加 userId
+                    matchType: .mutual,
+                    userId: matchedUserId
                 )
-                
-                // 从数据库加载历史消息
-                var messages: [ChatMessage] = []
-                do {
-                    let supabaseMessages = try await supabaseService.getMessages(
-                        userId1: currentUser.id,
-                        userId2: matchedUserId
-                    )
-                    
-                    // 转换为 ChatMessage
-                    messages = supabaseMessages.map { supabaseMessage in
-                        supabaseMessage.toChatMessage(currentUserId: currentUser.id)
-                    }
-                    
-                    print("✅ Loaded \(messages.count) messages for user \(matchedUserName)")
-                } catch {
-                    print("⚠️ Failed to load messages: \(error.localizedDescription)")
-                    // 继续创建会话，即使加载消息失败
-                }
-                
-                // 创建 ChatSession（使用从数据库加载的消息）
-                // 计算最后一条消息的时间，如果没有消息则使用匹配时间
-                let lastMessageTime = messages.last?.timestamp ?? matchDate ?? Date()
                 
                 var session = ChatSession(
                     user: chatUser,
-                    messages: messages,
+                    messages: messageData.messages,
                     aiSuggestions: []
                 )
-                // 手动设置最后消息时间
-                session.lastMessageAt = lastMessageTime
+                session.lastMessageAt = messageData.lastMessageTime
                 
                 sessions.append(session)
             }
@@ -723,68 +755,14 @@ struct ChatInterfaceView: View {
                 return true
             }
             
-            // 先显示基本会话列表（立即显示，不等待 profile）
+            // 显示会话列表（所有数据已加载完成）
             chatSessions = filteredSessions
             isLoadingMatches = false
-            print("✅ Loaded \(filteredSessions.count) matched users for chat (basic info)")
+            print("✅ Loaded \(filteredSessions.count) matched users for chat (完整信息)")
             print("📋 Matched users: \(filteredSessions.map { $0.user.name }.joined(separator: ", "))")
             
-            // 第三步：后台并发加载所有 profile 详细信息（不阻塞 UI）
-            Task {
-                let profileTasks = basicSessionData.map { data -> Task<BrewNetProfile?, Never> in
-                    Task {
-                        if let profile = try? await supabaseService.getProfile(userId: data.matchedUserId) {
-                            return profile.toBrewNetProfile()
-                        }
-                        return nil
-                    }
-                }
-                
-                // 等待所有 profile 加载完成（并发执行）
-                var profiles: [BrewNetProfile?] = []
-                for task in profileTasks {
-                    profiles.append(await task.value)
-                }
-                
-                // 更新会话的详细信息（重新创建会话列表以更新不可变属性）
-                await MainActor.run {
-                    var updatedSessions: [ChatSession] = []
-                    
-                    for (index, session) in chatSessions.enumerated() {
-                        var updatedUser = session.user
-                        
-                        if index < profiles.count, let profile = profiles[index] {
-                            // 创建新的 ChatUser（因为属性是不可变的）
-                            updatedUser = ChatUser(
-                                name: session.user.name,
-                                avatar: session.user.avatar,
-                                isOnline: session.user.isOnline,
-                                lastSeen: session.user.lastSeen,
-                                interests: profile.personalitySocial.hobbies,
-                                bio: profile.coreIdentity.bio ?? "",
-                                isMatched: session.user.isMatched,
-                                matchDate: session.user.matchDate,
-                                matchType: session.user.matchType,
-                                userId: session.user.userId
-                            )
-                        }
-                        
-                        // 创建新的会话（保留消息和其他数据）
-                        let updatedSession = ChatSession(
-                            user: updatedUser,
-                            messages: session.messages,
-                            aiSuggestions: session.aiSuggestions,
-                            isActive: session.isActive
-                        )
-                        updatedSessions.append(updatedSession)
-                    }
-                    
-                    chatSessions = updatedSessions
-                    // 保存更新后的缓存
-                    saveCachedChatSessionsToStorage()
-                    print("✅ Updated chat sessions with detailed profile info")
-                }
-            }
+            // 保存缓存
+            saveCachedChatSessionsToStorage()
             
         } catch {
             print("❌ Failed to load matches: \(error.localizedDescription)")
@@ -1079,9 +1057,7 @@ struct ChatSessionRowView: View {
             HStack(spacing: 12) {
                 // Avatar with match indicator
                 ZStack(alignment: .bottomTrailing) {
-                    Image(systemName: session.user.avatar)
-                        .font(.system(size: 50))
-                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    AvatarView(avatarString: session.user.avatar, size: 50)
                     
                     // Match indicator
                     if session.user.isMatched {
@@ -1840,6 +1816,40 @@ struct ProfileCardSheetView: View {
 struct ChatInterfaceView_Previews: PreviewProvider {
     static var previews: some View {
         ChatInterfaceView()
+    }
+}
+
+// MARK: - Avatar View Helper
+struct AvatarView: View {
+    let avatarString: String
+    let size: CGFloat
+    
+    init(avatarString: String, size: CGFloat = 50) {
+        self.avatarString = avatarString
+        self.size = size
+    }
+    
+    var body: some View {
+        // 判断是 URL 还是 SF Symbol
+        if avatarString.hasPrefix("http://") || avatarString.hasPrefix("https://") {
+            // 如果是 URL，使用 AsyncImage
+            AsyncImage(url: URL(string: avatarString)) { image in
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } placeholder: {
+                Image(systemName: "person.circle.fill")
+                    .font(.system(size: size))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+        } else {
+            // 如果是 SF Symbol
+            Image(systemName: avatarString)
+                .font(.system(size: size))
+                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+        }
     }
 }
 
