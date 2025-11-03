@@ -190,6 +190,47 @@ enum SuggestionCategory: String, Codable, CaseIterable {
             return .purple
         }
     }
+    
+    /// 默认建议内容（用于 API 调用失败时的回退）
+    var defaultSuggestions: [AISuggestion] {
+        switch self {
+        case .iceBreaker:
+            return [
+                AISuggestion(content: "Hi! I'd love to learn more about your professional journey.", category: .iceBreaker),
+                AISuggestion(content: "What exciting projects have you been working on lately?", category: .iceBreaker),
+                AISuggestion(content: "If you could master any new skill, what would it be?", category: .iceBreaker),
+                AISuggestion(content: "How do you usually spend your weekends to recharge?", category: .iceBreaker),
+                AISuggestion(content: "What's the best professional advice you've ever received?", category: .iceBreaker)
+            ]
+        case .followUp:
+            return [
+                AISuggestion(content: "That sounds interesting! Could you tell me more about that?", category: .followUp),
+                AISuggestion(content: "How did you get interested in this field?", category: .followUp),
+                AISuggestion(content: "What challenges have you faced along the way?", category: .followUp)
+            ]
+        case .compliment:
+            return [
+                AISuggestion(content: "I really appreciate your professional insights!", category: .compliment),
+                AISuggestion(content: "Your experience and perspectives are inspiring!", category: .compliment),
+                AISuggestion(content: "I admire your dedication to continuous learning!", category: .compliment)
+            ]
+        case .sharedInterest:
+            return [
+                AISuggestion(content: "We seem to share similar interests! Would love to chat more about this.", category: .sharedInterest),
+                AISuggestion(content: "I'm also passionate about this topic! What drew you to it?", category: .sharedInterest),
+                AISuggestion(content: "It's great to find someone with common interests!", category: .sharedInterest),
+                AISuggestion(content: "We have a lot in common! Let's explore these topics together.", category: .sharedInterest)
+            ]
+        case .question:
+            return [
+                AISuggestion(content: "How do you maintain work-life balance?", category: .question),
+                AISuggestion(content: "In your field, what skills do you think are most valuable?", category: .question),
+                AISuggestion(content: "Any books or resources you'd recommend?", category: .question),
+                AISuggestion(content: "What's the most challenging project you've worked on?", category: .question),
+                AISuggestion(content: "Any advice for someone starting in your industry?", category: .question)
+            ]
+        }
+    }
 }
 
 // MARK: - Chat Session Model

@@ -22,36 +22,14 @@ struct ContentView: View {
                 // 加载界面
                 LoadingView()
             case .authenticated(let user):
-                // 已登录，检查是否需要完成资料设置
-                if isCheckingProfile {
-                    // 正在检查 profile 状态
-                    VStack(spacing: 24) {
-                        Spacer()
-                        
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
-                            .scaleEffect(1.2)
-                        
-                        Text("Checking profile status...")
-                            .font(.system(size: 16))
-                            .foregroundColor(.gray)
-                        
-                        Spacer()
-                    }
-                    .onAppear {
+                // 已登录，显示启动画面并加载数据
+                SplashScreenWrapperView(
+                    user: user,
+                    isCheckingProfile: $isCheckingProfile,
+                    onProfileCheck: {
                         checkProfileStatus(for: user)
                     }
-                } else if user.profileSetupCompleted {
-                    MainView()
-                        .onAppear {
-                            print("🏠 主界面已显示，用户: \(user.name)")
-                        }
-                } else {
-                    ProfileSetupView()
-                        .onAppear {
-                            print("📝 资料设置界面已显示，用户: \(user.name)")
-                        }
-                }
+                )
             case .unauthenticated:
                 // 未登录，显示登录界面
                 LoginView()
@@ -73,15 +51,9 @@ struct ContentView: View {
             case .authenticated(let user):
                 print("🔄 ContentView 认证状态变化: authenticated - \(user.name) (游客: \(user.isGuest))")
                 
-                // 如果用户没有标记为已完成 profile 设置，进行额外检查
-                if !user.profileSetupCompleted {
-                    print("🔍 用户未标记为已完成 profile 设置，开始检查...")
-                    isCheckingProfile = true
-                }
-                
-                // 强制刷新界面，确保立即跳转到主界面
+                // 强制刷新界面
                 self.refreshID = UUID()
-                print("🔄 ContentView 强制刷新界面，跳转到主界面")
+                print("🔄 ContentView 强制刷新界面，显示启动画面")
             case .unauthenticated:
                 print("🔄 ContentView 认证状态变化: unauthenticated")
                 // 强制刷新界面，确保立即跳转到登录页面

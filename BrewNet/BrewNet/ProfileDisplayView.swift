@@ -395,7 +395,7 @@ struct ProfileHeaderView: View {
                                 }
                             } else {
                                 // 如果都没有，显示占位符
-                                Text("完成个人资料")
+                                Text("Complete Your Profile")
                                     .font(.system(size: 16, weight: .medium))
                                     .foregroundColor(.gray)
                             }

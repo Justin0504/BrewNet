@@ -1862,5 +1862,183 @@ enum InvitationError: LocalizedError {
     }
 }
 
+// MARK: - Two-Tower Recommendation Methods
+
+extension SupabaseService {
+    
+    /// 获取用户特征
+    func getUserFeatures(userId: String) async throws -> UserTowerFeatures? {
+        print("🔍 Fetching user features for: \(userId)")
+        
+        let response = try await client
+            .from("user_features")
+            .select()
+            .eq("user_id", value: userId)
+            .single()
+            .execute()
+        
+        let data = response.data
+        let features = try JSONDecoder().decode(UserTowerFeatures.self, from: data)
+        print("✅ Fetched user features successfully")
+        return features
+    }
+    
+    /// 获取所有候选用户特征（用于推荐）
+    func getAllCandidateFeatures(
+        excluding userId: String,
+        limit: Int = 1000
+    ) async throws -> [(userId: String, features: UserTowerFeatures)] {
+        print("🔍 Fetching candidate features, excluding: \(userId), limit: \(limit)")
+        
+        let response = try await client
+            .from("user_features")
+            .select()
+            .neq("user_id", value: userId)
+            .limit(limit)
+            .execute()
+        
+        let data = response.data
+        
+        // 解析为字典，包含 user_id 和 features
+        if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            var results: [(userId: String, features: UserTowerFeatures)] = []
+            
+            for record in jsonArray {
+                if let userIdStr = record["user_id"] as? String,
+                   let recordData = try? JSONSerialization.data(withJSONObject: record),
+                   let features = try? JSONDecoder().decode(UserTowerFeatures.self, from: recordData) {
+                    results.append((userIdStr, features))
+                }
+            }
+            
+            print("✅ Fetched \(results.count) candidate features")
+            return results
+        }
+        
+        print("⚠️ Failed to parse candidate features")
+        return []
+    }
+    
+    /// 记录用户交互
+    func recordInteraction(
+        userId: String,
+        targetUserId: String,
+        type: InteractionType
+    ) async throws {
+        print("📝 Recording interaction: \(userId) -> \(targetUserId), type: \(type)")
+        
+        struct InteractionInsert: Codable {
+            let userId: String
+            let targetUserId: String
+            let interactionType: String
+            
+            enum CodingKeys: String, CodingKey {
+                case userId = "user_id"
+                case targetUserId = "target_user_id"
+                case interactionType = "interaction_type"
+            }
+        }
+        
+        let insert = InteractionInsert(
+            userId: userId,
+            targetUserId: targetUserId,
+            interactionType: type.rawValue
+        )
+        
+        try await client
+            .from("user_interactions")
+            .insert(insert)
+            .execute()
+        
+        print("✅ Interaction recorded")
+    }
+    
+    /// 缓存推荐结果
+    func cacheRecommendations(
+        userId: String,
+        recommendations: [String],
+        scores: [Double],
+        modelVersion: String = "baseline",
+        expiresIn: TimeInterval = 300
+    ) async throws {
+        print("💾 Caching recommendations for: \(userId)")
+        
+        struct CacheInsert: Codable {
+            let userId: String
+            let recommendedUserIds: [String]
+            let scores: [Double]
+            let modelVersion: String
+            let expiresAt: String
+            
+            enum CodingKeys: String, CodingKey {
+                case userId = "user_id"
+                case recommendedUserIds = "recommended_user_ids"
+                case scores
+                case modelVersion = "model_version"
+                case expiresAt = "expires_at"
+            }
+        }
+        
+        let expiresDate = Date().addingTimeInterval(expiresIn)
+        let formatter = ISO8601DateFormatter()
+        
+        let insert = CacheInsert(
+            userId: userId,
+            recommendedUserIds: recommendations,
+            scores: scores,
+            modelVersion: modelVersion,
+            expiresAt: formatter.string(from: expiresDate)
+        )
+        
+        try await client
+            .from("recommendation_cache")
+            .upsert(insert)
+            .execute()
+        
+        print("✅ Recommendations cached")
+    }
+    
+    /// 获取缓存的推荐结果
+    func getCachedRecommendations(userId: String) async throws -> ([String], [Double])? {
+        print("🔍 Fetching cached recommendations for: \(userId)")
+        
+        let response = try await client
+            .from("recommendation_cache")
+            .select()
+            .eq("user_id", value: userId)
+            .gt("expires_at", value: ISO8601DateFormatter().string(from: Date()))
+            .limit(1)
+            .execute()
+        
+        let data = response.data
+        
+        // 尝试解析为数组
+        struct CacheResult: Codable {
+            let recommendedUserIds: [String]
+            let scores: [Double]
+            
+            enum CodingKeys: String, CodingKey {
+                case recommendedUserIds = "recommended_user_ids"
+                case scores
+            }
+        }
+        
+        if let results = try? JSONDecoder().decode([CacheResult].self, from: data),
+           let result = results.first {
+            print("✅ Found cached recommendations")
+            return (result.recommendedUserIds, result.scores)
+        }
+        
+        print("ℹ️ No cached recommendations found")
+        return nil
+    }
+}
+
+enum InteractionType: String, Codable {
+    case like = "like"
+    case pass = "pass"
+    case match = "match"
+}
+
 // MARK: - DatabaseManager Extensions
 // 这些方法已移动到 DatabaseManager.swift 中

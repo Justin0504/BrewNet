@@ -26,6 +26,7 @@ struct BrewNetMatchesView: View {
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
+    private let recommendationService = RecommendationService.shared
     
     var body: some View {
         ZStack {
@@ -281,9 +282,17 @@ struct BrewNetMatchesView: View {
             let profile = profiles[currentIndex]
             passedProfiles.append(profile)
             
-            // TODO: Send pass action to backend
-            print("Passed profile: \(profile.id)")
+            // 记录 Pass 交互
+            if let currentUser = authManager.currentUser {
+                Task {
+                    await recommendationService.recordPass(
+                        userId: currentUser.id,
+                        targetUserId: profile.userId
+                    )
+                }
+            }
             
+            print("❌ Passed profile: \(profile.coreIdentity.name)")
             moveToNextProfile()
         }
     }
@@ -297,6 +306,14 @@ struct BrewNetMatchesView: View {
         
         let profile = profiles[currentIndex]
         likedProfiles.append(profile)
+        
+        // 记录 Like 交互
+        Task {
+            await recommendationService.recordLike(
+                userId: currentUser.id,
+                targetUserId: profile.userId
+            )
+        }
         
         // 发送邀请到 Supabase
         Task {
@@ -348,6 +365,12 @@ struct BrewNetMatchesView: View {
                         // 如果失败，可能匹配已经通过触发器创建了，不影响
                         print("⚠️ Failed to accept my invitation (match may already exist): \(error.localizedDescription)")
                     }
+                    
+                    // 记录 Match 交互
+                    await recommendationService.recordMatch(
+                        userId: currentUser.id,
+                        targetUserId: profile.userId
+                    )
                     
                     // 显示匹配成功提示
                     await MainActor.run {
@@ -523,6 +546,33 @@ struct BrewNetMatchesView: View {
             let likedUserIds = Set(likedProfiles.map { $0.userId })
             
             // Load actual profiles from Supabase with offset and limit
+            // ========== Two-Tower 推荐模式 ==========
+            if offset == 0 && isInitial {
+                // 使用 Two-Tower 推荐引擎
+                print("🚀 Using Two-Tower recommendation engine")
+                let recommendations = try await recommendationService.getRecommendations(
+                    for: currentUser.id,
+                    limit: 20
+                )
+                
+                let brewNetProfiles = recommendations.map { $0.profile }
+                
+                await MainActor.run {
+                    profiles = brewNetProfiles
+                    cachedProfiles = brewNetProfiles
+                    lastLoadTime = Date()
+                    isLoading = false
+                    saveCachedProfilesToStorage()
+                    hasMoreProfiles = false // Two-Tower 返回固定数量
+                    
+                    print("✅ Two-Tower recommendations loaded: \(brewNetProfiles.count) profiles")
+                    print("📊 Scores: \(recommendations.map { String(format: "%.3f", $0.score) }.joined(separator: ", "))")
+                }
+                return
+            }
+            
+            // ========== 传统模式（分页加载更多）==========
+            print("📄 Using traditional pagination mode")
             let (supabaseProfiles, totalInBatch, filteredCount) = try await supabaseService.getRecommendedProfiles(
                 userId: currentUser.id,
                 limit: limit,
