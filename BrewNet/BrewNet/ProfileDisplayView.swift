@@ -36,6 +36,131 @@ struct ProfileDisplayView: View {
         }
         .background(Color(red: 0.98, green: 0.97, blue: 0.95))
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            loadMatches()
+            loadSentInvitations()
+        }
+        .sheet(isPresented: $showingMatches) {
+            NavigationStack {
+                MatchesListView(matches: matches, isLoading: isLoadingMatches)
+                    .environmentObject(authManager)
+                    .environmentObject(supabaseService)
+            }
+        }
+        .sheet(isPresented: $showingSentInvitations) {
+            NavigationStack {
+                SentInvitationsListView(invitations: sentInvitations, isLoading: isLoadingInvitations)
+                    .environmentObject(authManager)
+                    .environmentObject(supabaseService)
+            }
+        }
+    }
+    
+    private func loadMatches() {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        isLoadingMatches = true
+        Task {
+            do {
+                let fetchedMatches = try await supabaseService.getActiveMatches(userId: currentUser.id)
+                
+                // 过滤掉自己（不应该出现在匹配列表中）
+                let filteredMatches = fetchedMatches.filter { match in
+                    // 确定对方用户ID
+                    let otherUserId: String
+                    if match.userId == currentUser.id {
+                        otherUserId = match.matchedUserId
+                    } else {
+                        otherUserId = match.userId
+                    }
+                    
+                    // 确保对方用户不是当前用户（防御性检查）
+                    let isValid = otherUserId != currentUser.id && !otherUserId.isEmpty
+                    
+                    if !isValid {
+                        print("⚠️ Filtering out invalid match: user_id=\(match.userId), matched_user_id=\(match.matchedUserId), currentUser=\(currentUser.id)")
+                    }
+                    
+                    return isValid
+                }
+                
+                // 去重：确保每个匹配用户只显示一次
+                // 因为数据库中可能有两条记录（user_id=A,matched_user_id=B 和 user_id=B,matched_user_id=A）
+                var seenUserIds = Set<String>()
+                let uniqueMatches = filteredMatches.filter { match in
+                    // 确定对方用户ID
+                    let otherUserId: String
+                    if match.userId == currentUser.id {
+                        otherUserId = match.matchedUserId
+                    } else {
+                        otherUserId = match.userId
+                    }
+                    
+                    // 如果这个用户已经处理过，跳过
+                    if seenUserIds.contains(otherUserId) {
+                        print("⚠️ Skipping duplicate match for user: \(otherUserId)")
+                        return false
+                    }
+                    
+                    seenUserIds.insert(otherUserId)
+                    return true
+                }
+                
+                await MainActor.run {
+                    matches = uniqueMatches
+                    isLoadingMatches = false
+                    print("✅ Loaded \(uniqueMatches.count) unique matches (from \(fetchedMatches.count) total, after filtering \(filteredMatches.count))")
+                }
+            } catch {
+                print("❌ Failed to load matches: \(error.localizedDescription)")
+                await MainActor.run {
+                    matches = []
+                    isLoadingMatches = false
+                }
+            }
+        }
+    }
+    
+    private func loadSentInvitations() {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        isLoadingInvitations = true
+        Task {
+            do {
+                let fetchedInvitations = try await supabaseService.getSentInvitations(userId: currentUser.id)
+                
+                // 去重：对于同一个 receiver_id，只保留最新的邀请
+                var uniqueInvitations: [SupabaseInvitation] = []
+                var seenReceiverIds: Set<String> = []
+                
+                // 按创建时间排序，最新的在前
+                let sortedInvitations = fetchedInvitations.sorted { inv1, inv2 in
+                    let date1 = ISO8601DateFormatter().date(from: inv1.createdAt) ?? Date.distantPast
+                    let date2 = ISO8601DateFormatter().date(from: inv2.createdAt) ?? Date.distantPast
+                    return date1 > date2
+                }
+                
+                // 只保留每个 receiver_id 的第一个（最新的）
+                for invitation in sortedInvitations {
+                    if !seenReceiverIds.contains(invitation.receiverId) {
+                        uniqueInvitations.append(invitation)
+                        seenReceiverIds.insert(invitation.receiverId)
+                    }
+                }
+                
+                await MainActor.run {
+                    sentInvitations = uniqueInvitations
+                    isLoadingInvitations = false
+                    print("✅ Loaded \(uniqueInvitations.count) unique sent invitations (removed \(fetchedInvitations.count - uniqueInvitations.count) duplicates)")
+                }
+            } catch {
+                print("❌ Failed to load sent invitations: \(error.localizedDescription)")
+                await MainActor.run {
+                    sentInvitations = []
+                    isLoadingInvitations = false
+                }
+            }
+        }
     }
 }
 

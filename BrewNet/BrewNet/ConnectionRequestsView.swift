@@ -257,10 +257,32 @@ struct ConnectionRequestsView: View {
                 // 从 Supabase 获取收到的待处理邀请
                 let supabaseInvitations = try await supabaseService.getPendingInvitations(userId: currentUser.id)
                 
+                // 获取所有已匹配的用户ID，用于过滤
+                var matchedUserIds: Set<String> = []
+                do {
+                    let matches = try await supabaseService.getActiveMatches(userId: currentUser.id)
+                    for match in matches {
+                        if match.userId == currentUser.id {
+                            matchedUserIds.insert(match.matchedUserId)
+                        } else if match.matchedUserId == currentUser.id {
+                            matchedUserIds.insert(match.userId)
+                        }
+                    }
+                } catch {
+                    print("⚠️ Failed to fetch matches for filtering: \(error.localizedDescription)")
+                }
+                
+                // 过滤掉已经匹配的邀请
+                let filteredInvitations = supabaseInvitations.filter { invitation in
+                    !matchedUserIds.contains(invitation.senderId)
+                }
+                
+                print("📊 Filtered connection requests: \(filteredInvitations.count) remaining (removed \(supabaseInvitations.count - filteredInvitations.count) already matched)")
+                
                 // 转换为 ConnectionRequest 模型
                 var convertedRequests: [ConnectionRequest] = []
                 
-                for invitation in supabaseInvitations {
+                for invitation in filteredInvitations {
                     // 获取发送者的 profile 信息
                     var requesterProfile = ConnectionRequestProfile(
                         profilePhoto: nil,
