@@ -17,6 +17,8 @@ struct ChatInterfaceView: View {
     @State private var messageRefreshTimer: Timer?
     @State private var cachedChatSessions: [ChatSession] = [] // 缓存数据
     @State private var lastChatLoadTime: Date? = nil // 记录上次加载时间
+    @State private var showingUnmatchConfirmAlert = false
+    @State private var sessionToUnmatch: ChatSession? = nil
     
     var body: some View {
         ZStack {
@@ -153,6 +155,21 @@ struct ChatInterfaceView: View {
                 )
             }
         }
+        .alert("Unmatch", isPresented: $showingUnmatchConfirmAlert) {
+            Button("Cancel", role: .cancel) {
+                sessionToUnmatch = nil
+            }
+            Button("Unmatch", role: .destructive) {
+                if let session = sessionToUnmatch {
+                    performUnmatch(session: session)
+                }
+                sessionToUnmatch = nil
+            }
+        } message: {
+            if let session = sessionToUnmatch {
+                Text("Are you sure you want to unmatch with \(session.user.name)? This action cannot be undone.")
+            }
+        }
         .sheet(isPresented: $showingProfileCard) {
             if isLoadingProfile {
                 NavigationView {
@@ -212,9 +229,15 @@ struct ChatInterfaceView: View {
                 emptyStateView
             } else {
                 List(chatSessions) { session in
-                    ChatSessionRowView(session: session) {
-                        selectSession(session) // 使用新方法
-                    }
+                    ChatSessionRowView(
+                        session: session,
+                        onTap: {
+                            selectSession(session)
+                        },
+                        onUnmatch: {
+                            handleUnmatchForSession(session)
+                        }
+                    )
                     .listRowBackground(Color.clear) // 使列表项背景透明
                 }
                 .scrollContentBackground(.hidden) // 隐藏列表默认背景
@@ -1071,98 +1094,172 @@ struct ChatInterfaceView: View {
         // 刷新消息列表以更新未读状态
         await refreshMessagesForCurrentSession()
     }
+    
+    // MARK: - Action Handlers
+    /// 处理从聊天列表左滑的unmatch操作（显示确认对话框）
+    private func handleUnmatchForSession(_ session: ChatSession) {
+        sessionToUnmatch = session
+        showingUnmatchConfirmAlert = true
+    }
+    
+    /// 实际执行取消匹配操作
+    private func performUnmatch(session: ChatSession) {
+        guard let currentUser = authManager.currentUser,
+              let matchedUserId = session.user.userId else {
+            print("❌ Cannot unmatch: missing user info")
+            return
+        }
+        
+        Task {
+            do {
+                // 查找匹配ID
+                let matches = try await supabaseService.getActiveMatches(userId: currentUser.id)
+                let match = matches.first { match in
+                    (match.userId == currentUser.id && match.matchedUserId == matchedUserId) ||
+                    (match.matchedUserId == currentUser.id && match.userId == matchedUserId)
+                }
+                
+                if let matchId = match?.id {
+                    // 取消匹配
+                    _ = try await supabaseService.deactivateMatch(matchId: matchId, userId: currentUser.id)
+                    print("✅ Successfully unmatched with \(session.user.name)")
+                    
+                    // 从列表中移除该会话
+                    await MainActor.run {
+                        // 如果当前正在查看这个会话，先关闭它
+                        if selectedSession?.id == session.id {
+                            selectedSession = nil
+                        }
+                        // 从列表中移除
+                        chatSessions.removeAll { $0.id == session.id }
+                        // 更新缓存
+                        saveCachedChatSessionsToStorage()
+                    }
+                } else {
+                    print("⚠️ Match not found for unmatch")
+                    // 即使找不到匹配，也从列表中移除（可能是数据不一致）
+                    await MainActor.run {
+                        if selectedSession?.id == session.id {
+                            selectedSession = nil
+                        }
+                        chatSessions.removeAll { $0.id == session.id }
+                    }
+                }
+            } catch {
+                print("❌ Failed to unmatch: \(error.localizedDescription)")
+                // 即使失败，也从UI中移除（提供即时反馈）
+                await MainActor.run {
+                    if selectedSession?.id == session.id {
+                        selectedSession = nil
+                    }
+                    chatSessions.removeAll { $0.id == session.id }
+                }
+            }
+        }
+    }
+    
 }
 
 // MARK: - Chat Session Row View
 struct ChatSessionRowView: View {
     let session: ChatSession
     let onTap: () -> Void
+    let onUnmatch: () -> Void
     
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 12) {
-                // Avatar with match indicator
-                ZStack(alignment: .bottomTrailing) {
-                    Image(systemName: session.user.avatar)
-                        .font(.system(size: 50))
-                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+        HStack(spacing: 12) {
+            // Avatar with match indicator
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: session.user.avatar)
+                    .font(.system(size: 50))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                
+                // Match indicator
+                if session.user.isMatched {
+                    ZStack {
+                        Circle()
+                            .fill(session.user.matchType.gradient)
+                            .frame(width: 20, height: 20)
+                        
+                        Image(systemName: session.user.matchType.icon)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                    .offset(x: 5, y: 5)
+                }
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(session.user.name)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                     
-                    // Match indicator
+                    // Match type badge
                     if session.user.isMatched {
-                        ZStack {
-                            Circle()
-                                .fill(session.user.matchType.gradient)
-                                .frame(width: 20, height: 20)
-                            
-                            Image(systemName: session.user.matchType.icon)
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(.white)
-                        }
-                        .offset(x: 5, y: 5)
+                        matchTypeBadge
+                    }
+                    
+                    Spacer()
+                    
+                    // 只在有消息时显示时间
+                    if !session.messages.isEmpty {
+                        Text(formatTime(session.lastMessageAt))
+                            .font(.system(size: 12))
+                            .foregroundColor(.gray)
                     }
                 }
                 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(session.user.name)
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                        
-                        // Match type badge
-                        if session.user.isMatched {
-                            matchTypeBadge
-                        }
-                        
-                        Spacer()
-                        
-                        // 只在有消息时显示时间
-                        if !session.messages.isEmpty {
-                            Text(formatTime(session.lastMessageAt))
-                                .font(.system(size: 12))
-                                .foregroundColor(.gray)
-                        }
+                Text(session.messages.last?.content ?? "Start chatting...")
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+                    .lineLimit(1)
+                
+                HStack {
+                    Circle()
+                        .fill(session.user.isOnline ? .green : .gray)
+                        .frame(width: 8, height: 8)
+                    
+                    Text(session.user.isOnline ? "Active" : "Offline")
+                        .font(.system(size: 12))
+                        .foregroundColor(session.user.isOnline ? .green : .gray)
+                    
+                    // Match date
+                    if session.user.isMatched, let matchDate = session.user.matchDate {
+                        Text("• Matched on \(formatMatchDate(matchDate))")
+                            .font(.system(size: 12))
+                            .foregroundColor(session.user.matchType.color)
                     }
                     
-                    Text(session.messages.last?.content ?? "Start chatting...")
-                        .font(.system(size: 14))
-                        .foregroundColor(.gray)
-                        .lineLimit(1)
+                    Spacer()
                     
-                    HStack {
-                        Circle()
-                            .fill(session.user.isOnline ? .green : .gray)
-                            .frame(width: 8, height: 8)
-                        
-                        Text(session.user.isOnline ? "Active" : "Offline")
-                            .font(.system(size: 12))
-                            .foregroundColor(session.user.isOnline ? .green : .gray)
-                        
-                        // Match date
-                        if session.user.isMatched, let matchDate = session.user.matchDate {
-                            Text("• Matched on \(formatMatchDate(matchDate))")
-                                .font(.system(size: 12))
-                                .foregroundColor(session.user.matchType.color)
-                        }
-                        
-                        Spacer()
-                        
-                        // 显示未读消息数，而不是总消息数
-                        let unreadCount = session.unreadCount
-                        if unreadCount > 0 {
-                            Text("\(unreadCount)")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2)
-                                .background(session.user.isMatched ? session.user.matchType.color : Color(red: 0.4, green: 0.2, blue: 0.1))
-                                .cornerRadius(10)
-                        }
+                    // 显示未读消息数，而不是总消息数
+                    let unreadCount = session.unreadCount
+                    if unreadCount > 0 {
+                        Text("\(unreadCount)")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(session.user.isMatched ? session.user.matchType.color : Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .cornerRadius(10)
                     }
                 }
             }
-            .padding(.vertical, 8)
         }
-        .buttonStyle(PlainButtonStyle())
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onTap()
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+                onUnmatch()
+            } label: {
+                Label("Unmatch", systemImage: "xmark.circle.fill")
+            }
+            .tint(.red)
+        }
     }
     
     private var matchTypeBadge: some View {
@@ -1846,4 +1943,5 @@ struct ChatInterfaceView_Previews: PreviewProvider {
         ChatInterfaceView()
     }
 }
+
 
