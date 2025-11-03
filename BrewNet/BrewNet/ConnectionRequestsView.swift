@@ -496,86 +496,44 @@ struct ConnectionRequestDetailView: View {
                 Color(red: 0.98, green: 0.97, blue: 0.95)
                     .ignoresSafeArea()
                 
-                ScrollView {
-                    VStack(spacing: 0) {
-                        if isLoadingProfile {
-                            ProgressView()
-                                .padding(.top, 100)
-                        } else if let profile = requesterProfile {
-                            // Reason for Interest Section (if exists)
-                            if let reason = request.reasonForInterest {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "heart.fill")
-                                            .font(.system(size: 16))
-                                            .foregroundColor(BrewTheme.accentColor)
-                                        Text("Reason for Interest")
-                                            .font(.system(size: 16, weight: .semibold))
-                                            .foregroundColor(themeBrown)
-                                    }
-                                    
-                                    Text(reason)
-                                        .font(.system(size: 15))
-                                        .foregroundColor(.gray)
+                VStack(spacing: 0) {
+                    if isLoadingProfile {
+                        ProgressView()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if let profile = requesterProfile {
+                        // Reason for Interest Section (if exists) - shown at top
+                        if let reason = request.reasonForInterest {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "heart.fill")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(BrewTheme.accentColor)
+                                    Text("Reason for Interest")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(themeBrown)
                                 }
-                                .frame(minHeight: 100)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(20)
-                                .background(Color.white)
-                                .cornerRadius(12)
-                                .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
-                                .padding(.horizontal, 16)
-                                .padding(.top, 20)
+                                
+                                Text(reason)
+                                    .font(.system(size: 15))
+                                    .foregroundColor(.gray)
                             }
-                            
-                            // Profile Header (using PublicProfileView style)
-                            PublicProfileHeaderView(profile: profile)
-                                .padding(.horizontal, 16)
-                                .padding(.top, request.reasonForInterest != nil ? 24 : 20)
-                            
-                            // Networking Preferences Section (Only show if timeslot is public)
-                            if isVisible(profile.privacyTrust.visibilitySettings.timeslot) {
-                                ProfileSectionView(
-                                    title: "Network Preferences",
-                                    icon: "clock.fill"
-                                ) {
-                                    NetworkingPreferencesDisplayView(preferences: profile.networkingPreferences)
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.top, 24)
-                            }
-                            
-                            // Professional Background Section (Only show public fields)
-                            if hasAnyPublicProfessionalInfo(profile) {
-                                ProfileSectionView(
-                                    title: "Professional Background",
-                                    icon: "briefcase.fill"
-                                ) {
-                                    PublicProfessionalBackgroundDisplayView(
-                                        background: profile.professionalBackground,
-                                        visibilitySettings: profile.privacyTrust.visibilitySettings
-                                    )
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.top, 24)
-                            }
-                            
-                            // Personality & Interests Section (Only show if interests is public)
-                            if isVisible(profile.privacyTrust.visibilitySettings.interests) {
-                                ProfileSectionView(
-                                    title: "Personality & Interests",
-                                    icon: "person.fill"
-                                ) {
-                                    PersonalitySocialDisplayView(personality: profile.personalitySocial)
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.top, 24)
-                            }
-                            
-                            // Add padding at bottom for action buttons
-                            Spacer()
-                                .frame(height: 100)
+                            .frame(minHeight: 100)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(20)
+                            .background(Color.white)
+                            .cornerRadius(12)
+                            .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 20)
                         }
+                        
+                        // Use unified PublicProfileCardView
+                        PublicProfileCardView(profile: profile)
+                            .padding(.top, request.reasonForInterest != nil ? 16 : 0)
+                        
+                        // Add padding at bottom for action buttons
+                        Spacer()
+                            .frame(height: 100)
                     }
                 }
                 
@@ -616,16 +574,6 @@ struct ConnectionRequestDetailView: View {
         }
     }
     
-    // Helper to check if a field should be visible based on privacy settings
-    private func isVisible(_ visibilityLevel: VisibilityLevel) -> Bool {
-        return visibilityLevel == .public_
-    }
-    
-    // Check if there's any public professional information to show
-    private func hasAnyPublicProfessionalInfo(_ profile: BrewNetProfile) -> Bool {
-        let vs = profile.privacyTrust.visibilitySettings
-        return isVisible(vs.skills) || isVisible(vs.company)
-    }
     
     // Load requester's full profile
     private func loadRequesterProfile() {
