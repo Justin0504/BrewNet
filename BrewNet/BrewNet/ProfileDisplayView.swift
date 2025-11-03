@@ -7,12 +7,6 @@ struct ProfileDisplayView: View {
     
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var supabaseService: SupabaseService
-    @State private var showingMatches = false
-    @State private var showingSentInvitations = false
-    @State private var matches: [SupabaseMatch] = []
-    @State private var sentInvitations: [SupabaseInvitation] = []
-    @State private var isLoadingMatches = false
-    @State private var isLoadingInvitations = false
     
     var body: some View {
         ScrollView {
@@ -27,88 +21,6 @@ struct ProfileDisplayView: View {
                 )
                 .padding(.horizontal, 16)
                 .padding(.top, 20)
-                
-                // Action Buttons Section (在 Profile Header 和 Network Preferences 之间)
-                HStack(spacing: 12) {
-                    // 查看 Match 按钮
-                    Button(action: {
-                        loadMatches()
-                        showingMatches = true
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "cup.and.saucer.fill")
-                                .font(.system(size: 12))
-                                .foregroundColor(.white)
-                            
-                            VStack(alignment: .leading, spacing: 1) {
-                                if isLoadingMatches {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        .scaleEffect(0.5)
-                                } else {
-                                    Text("Matches")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundColor(.white)
-                                    
-                                    Text("\(matches.count)")
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.white.opacity(0.8))
-                                }
-                            }
-                            
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Color(red: 0.75, green: 0.65, blue: 0.5)) // 浅棕色
-                        .cornerRadius(8)
-                        .shadow(color: Color.black.opacity(0.08), radius: 2, x: 0, y: 1)
-                    }
-                    .disabled(isLoadingMatches)
-                    .buttonStyle(PlainButtonStyle())
-                    
-                    // 查看发送的 Invitation 按钮
-                    Button(action: {
-                        loadSentInvitations()
-                        showingSentInvitations = true
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "paperplane.fill")
-                                .font(.system(size: 12))
-                                .foregroundColor(.white)
-                            
-                            VStack(alignment: .leading, spacing: 1) {
-                                if isLoadingInvitations {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        .scaleEffect(0.5)
-                                } else {
-                                    Text("Sent")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundColor(.white)
-                                    
-                                    Text("\(sentInvitations.filter { $0.status == .pending }.count)")
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.white.opacity(0.8))
-                                }
-                            }
-                            
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Color(red: 0.75, green: 0.65, blue: 0.5)) // 浅棕色
-                        .cornerRadius(8)
-                        .shadow(color: Color.black.opacity(0.08), radius: 2, x: 0, y: 1)
-                    }
-                    .disabled(isLoadingInvitations)
-                    .buttonStyle(PlainButtonStyle())
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
-                .padding(.bottom, 6)
                 
                 // Networking Preferences Section
                 ProfileSectionView(
@@ -1282,48 +1194,62 @@ struct SentInvitationRowView: View {
     let invitation: SupabaseInvitation
     @EnvironmentObject var supabaseService: SupabaseService
     @State private var receiverProfile: BrewNetProfile?
+    @State private var showingProfileCard = false
     
     var body: some View {
-        HStack(spacing: 12) {
-            // Avatar
-            Image(systemName: "person.circle.fill")
-                .font(.system(size: 50))
-                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-            
-            // User Info
-            VStack(alignment: .leading, spacing: 4) {
-                Text(receiverProfile?.coreIdentity.name ?? "Loading...")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.black)
-                
-                // Status badge
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 6, height: 6)
-                    
-                    Text(invitation.status.rawValue.capitalized)
-                        .font(.system(size: 12))
-                        .foregroundColor(.gray)
-                }
-                
-                if let createdAt = parseDate(invitation.createdAt) {
-                    Text("Sent \(formatDate(createdAt))")
-                        .font(.system(size: 11))
-                        .foregroundColor(.gray)
-                }
+        Button(action: {
+            if receiverProfile != nil {
+                showingProfileCard = true
             }
-            
-            Spacer()
-            
-            // Status icon
-            Image(systemName: statusIcon)
-                .font(.system(size: 20))
-                .foregroundColor(statusColor)
+        }) {
+            HStack(spacing: 12) {
+                // Avatar
+                Image(systemName: "person.circle.fill")
+                    .font(.system(size: 50))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                
+                // User Info
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(receiverProfile?.coreIdentity.name ?? "Loading...")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.black)
+                    
+                    // Status badge
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(statusColor)
+                            .frame(width: 6, height: 6)
+                        
+                        Text(invitation.status.rawValue.capitalized)
+                            .font(.system(size: 12))
+                            .foregroundColor(.gray)
+                    }
+                    
+                    if let createdAt = parseDate(invitation.createdAt) {
+                        Text("Sent \(formatDate(createdAt))")
+                            .font(.system(size: 11))
+                            .foregroundColor(.gray)
+                    }
+                }
+                
+                Spacer()
+                
+                // Status icon
+                Image(systemName: statusIcon)
+                    .font(.system(size: 20))
+                    .foregroundColor(statusColor)
+            }
+            .padding(.vertical, 8)
         }
-        .padding(.vertical, 8)
+        .buttonStyle(PlainButtonStyle())
         .onAppear {
             loadReceiverProfile()
+        }
+        .sheet(isPresented: $showingProfileCard) {
+            if let profile = receiverProfile {
+                PublicProfileView(profile: profile)
+                    .environmentObject(supabaseService)
+            }
         }
     }
     
@@ -1372,6 +1298,243 @@ struct SentInvitationRowView: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
         return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+// MARK: - Public Profile View (Read-only view for viewing other users' profiles)
+struct PublicProfileView: View {
+    let profile: BrewNetProfile
+    @EnvironmentObject var supabaseService: SupabaseService
+    @Environment(\.dismiss) var dismiss
+    
+    // Helper to check if a field should be visible based on privacy settings
+    private func isVisible(_ visibilityLevel: VisibilityLevel) -> Bool {
+        return visibilityLevel == .public_
+    }
+    
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Profile Header
+                    PublicProfileHeaderView(profile: profile)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 20)
+                    
+                    // Networking Preferences Section (Only show if timeslot is public)
+                    if isVisible(profile.privacyTrust.visibilitySettings.timeslot) {
+                        ProfileSectionView(
+                            title: "Network Preferences",
+                            icon: "clock.fill"
+                        ) {
+                            NetworkingPreferencesDisplayView(preferences: profile.networkingPreferences)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 24)
+                    }
+                    
+                    // Professional Background Section (Only show public fields)
+                    if hasAnyPublicProfessionalInfo {
+                        ProfileSectionView(
+                            title: "Professional Background",
+                            icon: "briefcase.fill"
+                        ) {
+                            PublicProfessionalBackgroundDisplayView(
+                                background: profile.professionalBackground,
+                                visibilitySettings: profile.privacyTrust.visibilitySettings
+                            )
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 24)
+                    }
+                    
+                    // Personality & Interests Section (Only show if interests is public)
+                    if isVisible(profile.privacyTrust.visibilitySettings.interests) {
+                        ProfileSectionView(
+                            title: "Personality & Interests",
+                            icon: "person.fill"
+                        ) {
+                            PersonalitySocialDisplayView(personality: profile.personalitySocial)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 24)
+                    }
+                }
+                .padding(.bottom, 20)
+            }
+            .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                }
+            }
+        }
+    }
+    
+    // Check if there's any public professional information to show
+    private var hasAnyPublicProfessionalInfo: Bool {
+        let vs = profile.privacyTrust.visibilitySettings
+        return isVisible(vs.skills) || isVisible(vs.company)
+    }
+}
+
+// MARK: - Public Professional Background Display View
+struct PublicProfessionalBackgroundDisplayView: View {
+    let background: ProfessionalBackground
+    let visibilitySettings: VisibilitySettings
+    
+    // Helper to check if a field should be visible based on privacy settings
+    private func isVisible(_ visibilityLevel: VisibilityLevel) -> Bool {
+        return visibilityLevel == .public_
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Only show skills if public
+            if isVisible(visibilitySettings.skills) && !background.skills.isEmpty {
+                SkillsDisplayView(skills: background.skills)
+            }
+            
+            // Note: Other fields like industry, experience level, career stage, etc.
+            // don't have individual privacy controls, so we can show them
+            if let industry = background.industry {
+                InfoRow(label: "Industry", value: industry)
+            }
+            
+            InfoRow(label: "Experience Level", value: background.experienceLevel.displayName)
+            
+            if let years = background.yearsOfExperience {
+                InfoRow(label: "Years of Experience", value: "\(years) years")
+            }
+            
+            InfoRow(label: "Career Stage", value: background.careerStage.displayName)
+            
+            if let education = background.education {
+                InfoRow(label: "Education", value: education)
+            }
+            
+            if !background.certifications.isEmpty {
+                CertificationsDisplayView(certifications: background.certifications)
+            }
+            
+            if !background.languagesSpoken.isEmpty {
+                LanguagesDisplayView(languages: background.languagesSpoken)
+            }
+        }
+    }
+}
+
+// MARK: - Public Profile Header View
+struct PublicProfileHeaderView: View {
+    let profile: BrewNetProfile
+    
+    // Helper to check if a field should be visible based on privacy settings
+    private func isVisible(_ visibilityLevel: VisibilityLevel) -> Bool {
+        return visibilityLevel == .public_
+    }
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            // Top Row: Avatar on left, Name on right
+            HStack(alignment: .top, spacing: 16) {
+                // Left: Profile Image
+                ZStack {
+                    AsyncImage(url: URL(string: profile.coreIdentity.profileImage ?? "")) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Image(systemName: "person.circle.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(.gray)
+                    }
+                    .frame(width: 100, height: 100)
+                    .clipShape(Circle())
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white, lineWidth: 2)
+                    )
+                }
+                
+                // Right: Name and basic info
+                VStack(alignment: .leading, spacing: 8) {
+                    // Name (always visible)
+                    HStack(spacing: 4) {
+                        Text(profile.coreIdentity.name)
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundColor(.black)
+                    }
+                    
+                    // Pronouns (always visible)
+                    if let pronouns = profile.coreIdentity.pronouns {
+                        Text(pronouns)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.gray)
+                    }
+                    
+                    // Location (only if public)
+                    if isVisible(profile.privacyTrust.visibilitySettings.location),
+                       let location = profile.coreIdentity.location, !location.isEmpty {
+                        Text(location)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.gray)
+                    }
+                    
+                    // Company/School and Title button (only if company is public)
+                    if isVisible(profile.privacyTrust.visibilitySettings.company) {
+                        HStack {
+                            // 优先显示公司，如果没有则显示学校
+                            if let company = profile.professionalBackground.currentCompany, !company.isEmpty {
+                                Text(company)
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.black)
+                                
+                                // 如果有 title，显示在后面
+                                if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
+                                    Text(" · \(jobTitle)")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.gray)
+                                }
+                            } else if let education = profile.professionalBackground.education, !education.isEmpty {
+                                // 如果没有公司，显示学校
+                                Text(education)
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.black)
+                                
+                                // 如果有 title，显示在后面
+                                if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
+                                    Text(" · \(jobTitle)")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.gray)
+                                }
+                            }
+                            
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(Color.white)
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                        )
+                    }
+                }
+                
+                Spacer()
+            }
+        }
+        .padding(20)
+        .background(Color.white)
+        .onAppear {
+            print("🌍 显示公开 Profile: \(profile.coreIdentity.name)")
+        }
     }
 }
 
