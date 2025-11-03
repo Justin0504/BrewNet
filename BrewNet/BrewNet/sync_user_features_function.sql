@@ -190,7 +190,7 @@ BEGIN
         profile_completion,
         is_verified
     ) VALUES (
-        NEW.id,
+        NEW.user_id,
         NEW.core_identity->>'location',
         NEW.core_identity->>'time_zone',
         NEW.professional_background->>'industry',
