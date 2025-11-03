@@ -645,16 +645,55 @@ class SupabaseService: ObservableObject {
         print("🔍 Fetching recommended profiles for user: \(userId), limit: \(limit), offset: \(offset)")
         
         do {
+            // 获取需要排除的用户ID集合（所有在 Sent 和 Matches 中出现过的用户）
+            var excludedUserIds: Set<String> = []
+            
+            // 1. 排除所有已发送邀请的用户（所有状态）
+            do {
+                let sentInvitations = try await getSentInvitations(userId: userId)
+                for invitation in sentInvitations {
+                    excludedUserIds.insert(invitation.receiverId)
+                }
+                print("🔍 Excluding \(sentInvitations.count) users with sent invitations (all statuses: pending, accepted, rejected, cancelled)")
+            } catch {
+                print("⚠️ Failed to fetch sent invitations for filtering: \(error.localizedDescription)")
+                // 如果获取失败，不应该继续，因为这可能导致重复推荐
+                throw error
+            }
+            
+            // 2. 排除所有已匹配的用户（包括活跃和非活跃的匹配）
+            do {
+                // 获取所有匹配（包括非活跃的），因为即使匹配被取消，也不应该再推荐
+                let allMatches = try await getMatches(userId: userId, activeOnly: false)
+                for match in allMatches {
+                    if match.userId == userId {
+                        excludedUserIds.insert(match.matchedUserId)
+                    } else if match.matchedUserId == userId {
+                        excludedUserIds.insert(match.userId)
+                    }
+                }
+                print("🔍 Excluding \(allMatches.count) matched users (all matches, including inactive)")
+            } catch {
+                print("⚠️ Failed to fetch matches for filtering: \(error.localizedDescription)")
+                // 如果获取失败，不应该继续，因为这可能导致重复推荐
+                throw error
+            }
+            
             // 构建查询（Supabase PostgREST 使用 range header 进行分页）
-            var query = client
+            // 注意：由于 Supabase Swift 客户端限制，无法在查询中直接排除多个用户ID
+            // 我们只在查询时排除当前用户，然后在客户端过滤其他需要排除的用户
+            let query = client
                 .from(SupabaseTable.profiles.rawValue)
                 .select()
                 .neq("user_id", value: userId)
                 .order("created_at", ascending: false)
+                .range(from: offset, to: offset + limit * 3 - 1) // 多获取一些，以便过滤后仍有足够的结果
             
-            // 使用 range 进行分页（Supabase 使用 range header: "range: 0-9" 格式）
-            // offset 到 offset + limit - 1 是包含两端的位置
-            query = query.range(from: offset, to: offset + limit - 1)
+            if !excludedUserIds.isEmpty {
+                print("🔍 Will exclude \(excludedUserIds.count) users from recommendations (client-side filtering)")
+                print("   - Users in Sent list: \(excludedUserIds.count)")
+                print("   - These users will NOT appear in recommendations")
+            }
             
             let response = try await query.execute()
             
@@ -668,8 +707,26 @@ class SupabaseService: ObservableObject {
             // 尝试解码
             do {
                 let profiles = try JSONDecoder().decode([SupabaseProfile].self, from: data)
-                print("✅ Fetched \(profiles.count) recommended profiles (offset: \(offset))")
-                return (profiles, profiles.count, 0)
+                
+                // 客户端过滤：严格排除所有在 Sent 和 Matches 中出现过的用户
+                let filteredProfiles = profiles.filter { profile in
+                    let shouldExclude = excludedUserIds.contains(profile.userId)
+                    if shouldExclude {
+                        print("⚠️ Filtering out user \(profile.userId) - appears in Sent or Matches")
+                    }
+                    return !shouldExclude
+                }
+                
+                // 只返回请求的数量（如果过滤后还有足够的结果）
+                let finalProfiles = Array(filteredProfiles.prefix(limit))
+                let totalFiltered = profiles.count - filteredProfiles.count
+                
+                if totalFiltered > 0 {
+                    print("🔍 Filtered out \(totalFiltered) profiles (users in Sent/Matches lists)")
+                }
+                
+                print("✅ Fetched \(finalProfiles.count) recommended profiles (offset: \(offset), excluded: \(excludedUserIds.count) users from Sent/Matches)")
+                return (finalProfiles, profiles.count, totalFiltered)
             } catch let decodingError as DecodingError {
                 // 详细解析解码错误
                 print("❌ Decoding error details:")
@@ -778,16 +835,49 @@ class SupabaseService: ObservableObject {
         print("🔍 Fetching profiles for intention: \(intention.rawValue), limit: \(limit), offset: \(offset)")
         
         do {
+            // 获取需要排除的用户ID集合（所有在 Sent 和 Matches 中出现过的用户）
+            var excludedUserIds: Set<String> = []
+            
+            // 1. 排除所有已发送邀请的用户（所有状态）
+            do {
+                let sentInvitations = try await getSentInvitations(userId: userId)
+                for invitation in sentInvitations {
+                    excludedUserIds.insert(invitation.receiverId)
+                }
+                print("🔍 Excluding \(sentInvitations.count) users with sent invitations")
+            } catch {
+                print("⚠️ Failed to fetch sent invitations for filtering: \(error.localizedDescription)")
+                throw error
+            }
+            
+            // 2. 排除所有已匹配的用户（包括非活跃的）
+            do {
+                let allMatches = try await getMatches(userId: userId, activeOnly: false)
+                for match in allMatches {
+                    if match.userId == userId {
+                        excludedUserIds.insert(match.matchedUserId)
+                    } else if match.matchedUserId == userId {
+                        excludedUserIds.insert(match.userId)
+                    }
+                }
+                print("🔍 Excluding \(allMatches.count) matched users from intention-based recommendations")
+            } catch {
+                print("⚠️ Failed to fetch matches for filtering: \(error.localizedDescription)")
+                throw error
+            }
+            
             // 构建查询（使用 JSONB 过滤）
-            var query = client
+            let query = client
                 .from(SupabaseTable.profiles.rawValue)
                 .select()
                 .neq("user_id", value: userId)
                 .eq("networking_intention->selected_intention", value: intention.rawValue)
                 .order("created_at", ascending: false)
+                .range(from: offset, to: offset + limit * 3 - 1) // 多获取一些，以便过滤后仍有足够的结果
             
-            // 使用 range 进行分页
-            query = query.range(from: offset, to: offset + limit - 1)
+            if !excludedUserIds.isEmpty {
+                print("🔍 Will exclude \(excludedUserIds.count) users from intention recommendations (client-side filtering)")
+            }
             
             let response = try await query.execute()
             
@@ -796,8 +886,22 @@ class SupabaseService: ObservableObject {
             // 尝试解码
             do {
                 let profiles = try JSONDecoder().decode([SupabaseProfile].self, from: data)
-                print("✅ Fetched \(profiles.count) profiles for intention \(intention.rawValue) (offset: \(offset))")
-                return (profiles, profiles.count, 0)
+                
+                // 客户端过滤：严格排除所有在 Sent 和 Matches 中出现过的用户
+                let filteredProfiles = profiles.filter { profile in
+                    !excludedUserIds.contains(profile.userId)
+                }
+                
+                // 只返回请求的数量（如果过滤后还有足够的结果）
+                let finalProfiles = Array(filteredProfiles.prefix(limit))
+                let totalFiltered = profiles.count - filteredProfiles.count
+                
+                if totalFiltered > 0 {
+                    print("🔍 Filtered out \(totalFiltered) profiles (sent invitations/matches) from intention recommendations")
+                }
+                
+                print("✅ Fetched \(finalProfiles.count) profiles for intention \(intention.rawValue) (offset: \(offset), excluded: \(excludedUserIds.count) users from Sent/Matches)")
+                return (finalProfiles, profiles.count, totalFiltered)
             } catch let decodingError as DecodingError {
                 // 详细解析解码错误
                 print("❌ Decoding error details:")
@@ -1099,6 +1203,20 @@ class SupabaseService: ObservableObject {
     func sendInvitation(senderId: String, receiverId: String, reasonForInterest: String?, senderProfile: InvitationProfile?) async throws -> SupabaseInvitation {
         print("📨 Sending invitation from \(senderId) to \(receiverId)")
         
+        // 先检查是否已经存在pending的邀请
+        do {
+            let existingInvitations = try await getSentInvitations(userId: senderId)
+            if let existingInvitation = existingInvitations.first(where: { 
+                $0.receiverId == receiverId && $0.status == .pending 
+            }) {
+                print("ℹ️ Invitation already exists (pending), returning existing: \(existingInvitation.id)")
+                return existingInvitation
+            }
+        } catch {
+            print("⚠️ Error checking existing invitations: \(error.localizedDescription)")
+            // 继续尝试发送，如果确实存在，会在插入时被捕获
+        }
+        
         // 创建可编码的邀请结构体
         struct InvitationInsert: Codable {
             let senderId: String
@@ -1124,17 +1242,41 @@ class SupabaseService: ObservableObject {
             senderProfile: senderProfile
         )
         
-        let response = try await client
-            .from(SupabaseTable.invitations.rawValue)
-            .insert(invitationInsert)
-            .select()
-            .single()
-            .execute()
-        
-        let data = response.data
-        let createdInvitation = try JSONDecoder().decode(SupabaseInvitation.self, from: data)
-        print("✅ Invitation sent successfully: \(createdInvitation.id)")
-        return createdInvitation
+        do {
+            let response = try await client
+                .from(SupabaseTable.invitations.rawValue)
+                .insert(invitationInsert)
+                .select()
+                .single()
+                .execute()
+            
+            let data = response.data
+            let createdInvitation = try JSONDecoder().decode(SupabaseInvitation.self, from: data)
+            print("✅ Invitation sent successfully: \(createdInvitation.id)")
+            return createdInvitation
+        } catch {
+            // 处理唯一约束冲突错误
+            let errorMessage = error.localizedDescription
+            if errorMessage.contains("duplicate key") || 
+               errorMessage.contains("unique constraint") ||
+               errorMessage.contains("already exists") {
+                // 如果因为唯一约束失败，尝试获取已存在的邀请
+                print("ℹ️ Duplicate invitation detected, fetching existing invitation...")
+                do {
+                    let existingInvitations = try await getSentInvitations(userId: senderId)
+                    if let existingInvitation = existingInvitations.first(where: { 
+                        $0.receiverId == receiverId && $0.status == .pending 
+                    }) {
+                        print("✅ Found existing invitation: \(existingInvitation.id)")
+                        return existingInvitation
+                    }
+                } catch {
+                    print("⚠️ Failed to fetch existing invitation: \(error.localizedDescription)")
+                }
+                throw InvitationError.alreadyExists("An invitation to this user already exists")
+            }
+            throw error
+        }
     }
     
     /// 获取用户发送的所有邀请
@@ -1520,6 +1662,119 @@ class SupabaseService: ObservableObject {
         let match = try JSONDecoder().decode(SupabaseMatch.self, from: data)
         print("✅ Match fetched successfully")
         return match
+    }
+    
+    // MARK: - Message Operations
+    
+    /// 发送消息
+    func sendMessage(senderId: String, receiverId: String, content: String, messageType: String = "text") async throws -> SupabaseMessage {
+        print("📨 Sending message from \(senderId) to \(receiverId)")
+        
+        struct MessageInsert: Codable {
+            let senderId: String
+            let receiverId: String
+            let content: String
+            let messageType: String
+            let isRead: Bool
+            
+            enum CodingKeys: String, CodingKey {
+                case senderId = "sender_id"
+                case receiverId = "receiver_id"
+                case content
+                case messageType = "message_type"
+                case isRead = "is_read"
+            }
+        }
+        
+        let messageInsert = MessageInsert(
+            senderId: senderId,
+            receiverId: receiverId,
+            content: content,
+            messageType: messageType,
+            isRead: false
+        )
+        
+        let response = try await client
+            .from(SupabaseTable.messages.rawValue)
+            .insert(messageInsert)
+            .select()
+            .single()
+            .execute()
+        
+        let data = response.data
+        let createdMessage = try JSONDecoder().decode(SupabaseMessage.self, from: data)
+        print("✅ Message sent successfully: \(createdMessage.id)")
+        return createdMessage
+    }
+    
+    /// 获取两个用户之间的所有消息
+    func getMessages(userId1: String, userId2: String) async throws -> [SupabaseMessage] {
+        print("🔍 Fetching messages between \(userId1) and \(userId2)")
+        
+        // 获取所有消息：userId1 发送给 userId2 的，或 userId2 发送给 userId1 的
+        // 使用 OR 查询
+        let response = try await client
+            .from(SupabaseTable.messages.rawValue)
+            .select()
+            .or("sender_id.eq.\(userId1),receiver_id.eq.\(userId1)")
+            .or("sender_id.eq.\(userId2),receiver_id.eq.\(userId2)")
+            .order("timestamp", ascending: true)
+            .execute()
+        
+        let data = response.data
+        
+        // 解析 JSON 数组
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw ProfileError.fetchFailed("Failed to parse messages response")
+        }
+        
+        var messages: [SupabaseMessage] = []
+        for json in jsonArray {
+            // 只包含涉及这两个用户的消息
+            let senderId = json["sender_id"] as? String ?? ""
+            let receiverId = json["receiver_id"] as? String ?? ""
+            
+            if (senderId == userId1 && receiverId == userId2) || 
+               (senderId == userId2 && receiverId == userId1) {
+                if let messageData = try? JSONSerialization.data(withJSONObject: json),
+                   let message = try? JSONDecoder().decode(SupabaseMessage.self, from: messageData) {
+                    messages.append(message)
+                }
+            }
+        }
+        
+        print("✅ Found \(messages.count) messages between users")
+        return messages
+    }
+    
+    /// 将消息标记为已读
+    func markMessageAsRead(messageId: String) async throws {
+        print("✅ Marking message \(messageId) as read")
+        
+        try await client
+            .from(SupabaseTable.messages.rawValue)
+            .update(["is_read": true])
+            .eq("id", value: messageId)
+            .execute()
+    }
+    
+    /// 获取未读消息数量
+    func getUnreadMessageCount(userId: String) async throws -> Int {
+        print("🔍 Getting unread message count for user: \(userId)")
+        
+        let response = try await client
+            .from(SupabaseTable.messages.rawValue)
+            .select("id")
+            .eq("receiver_id", value: userId)
+            .eq("is_read", value: false)
+            .execute()
+        
+        let data = response.data
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return 0
+        }
+        
+        return jsonArray.count
     }
 }
 

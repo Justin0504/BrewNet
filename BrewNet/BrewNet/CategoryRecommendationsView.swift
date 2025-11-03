@@ -425,6 +425,40 @@ struct CategoryRecommendationsView: View {
                 return
             }
             
+            // 获取需要排除的用户ID集合（已匹配 + 已发送邀请）
+            var excludedUserIds: Set<String> = []
+            
+            // 1. 排除已匹配的用户
+            do {
+                let matches = try await supabaseService.getActiveMatches(userId: currentUser.id)
+                for match in matches {
+                    if match.userId == currentUser.id {
+                        excludedUserIds.insert(match.matchedUserId)
+                    } else if match.matchedUserId == currentUser.id {
+                        excludedUserIds.insert(match.userId)
+                    }
+                }
+                if !matches.isEmpty {
+                    print("🔍 CategoryRecommendationsView: Excluding \(matches.count) matched users")
+                }
+            } catch {
+                print("⚠️ Failed to fetch matches for filtering: \(error.localizedDescription)")
+            }
+            
+            // 2. 排除所有已发送邀请的用户（包括 pending, accepted, rejected, cancelled）
+            // 这样可以确保在匹配板块中已发送喜欢/拒绝的人不会出现在 explore
+            do {
+                let sentInvitations = try await supabaseService.getSentInvitations(userId: currentUser.id)
+                for invitation in sentInvitations {
+                    excludedUserIds.insert(invitation.receiverId)
+                }
+                if !sentInvitations.isEmpty {
+                    print("🔍 CategoryRecommendationsView: Excluding \(sentInvitations.count) users with sent invitations (all statuses)")
+                }
+            } catch {
+                print("⚠️ Failed to fetch sent invitations for filtering: \(error.localizedDescription)")
+            }
+            
             // Load profiles from Supabase with pagination using database offset
             let (supabaseProfiles, totalInBatch, filteredCount) = try await supabaseService.getRecommendedProfiles(
                 userId: currentUser.id,
@@ -435,28 +469,44 @@ struct CategoryRecommendationsView: View {
             // Convert SupabaseProfile to BrewNetProfile
             let brewNetProfiles = supabaseProfiles.map { $0.toBrewNetProfile() }
             
+            // 防御性过滤：再次确保已匹配和已发送邀请的用户被排除
+            // 即使 getRecommendedProfiles 已经过滤了，这里再过滤一次确保万无一失
+            let profilesWithoutExcluded = brewNetProfiles.filter { profile in
+                !excludedUserIds.contains(profile.userId)
+            }
+            
+            if excludedUserIds.count > 0 && brewNetProfiles.count > profilesWithoutExcluded.count {
+                let additionalFiltered = brewNetProfiles.count - profilesWithoutExcluded.count
+                print("🔍 CategoryRecommendationsView: Additional filtering excluded \(additionalFiltered) users")
+            }
+            
             // Filter profiles by the selected category (intention) if applicable
             let filteredProfiles: [BrewNetProfile]
             if let category = category {
                 // Filter by networking intention
-                filteredProfiles = brewNetProfiles.filter { profile in
+                filteredProfiles = profilesWithoutExcluded.filter { profile in
                     profile.networkingIntention.selectedIntention == category
                 }
-                print("📊 Filtered \(filteredProfiles.count) profiles from \(brewNetProfiles.count) for category \(category.rawValue)")
+                print("📊 Filtered \(filteredProfiles.count) profiles from \(profilesWithoutExcluded.count) for category \(category.rawValue)")
             } else {
                 // For "Out of Orbit" or other special categories, show all profiles
-                filteredProfiles = brewNetProfiles
+                filteredProfiles = profilesWithoutExcluded
             }
             
             await MainActor.run {
                 if isInitial {
                     profiles = filteredProfiles
                     isLoading = false
-                    print("✅ Initially loaded \(filteredProfiles.count) profiles for category")
+                    print("✅ Initially loaded \(filteredProfiles.count) profiles for category (excluded \(excludedUserIds.count) users)")
                 } else {
-                    profiles.append(contentsOf: filteredProfiles)
+                    // 追加时也要排除重复的
+                    let existingUserIds = Set(profiles.map { $0.userId })
+                    let newProfiles = filteredProfiles.filter { profile in
+                        !existingUserIds.contains(profile.userId)
+                    }
+                    profiles.append(contentsOf: newProfiles)
                     isLoadingMore = false
-                    print("✅ Loaded \(filteredProfiles.count) more profiles (total: \(profiles.count))")
+                    print("✅ Loaded \(newProfiles.count) more profiles (total: \(profiles.count), filtered duplicates: \(filteredProfiles.count - newProfiles.count))")
                 }
                 
                 // Update database offset for next query

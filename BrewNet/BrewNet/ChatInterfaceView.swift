@@ -14,15 +14,22 @@ struct ChatInterfaceView: View {
     @State private var showingProfileCard = false
     @State private var displayedProfile: BrewNetProfile?
     @State private var isLoadingProfile = false
+    @State private var messageRefreshTimer: Timer?
     @State private var cachedChatSessions: [ChatSession] = [] // 缓存数据
     @State private var lastChatLoadTime: Date? = nil // 记录上次加载时间
     
     var body: some View {
-        VStack(spacing: 0) {
-            if let session = selectedSession {
-                chatView(for: session)
-            } else {
-                chatListView
+        ZStack {
+            // Background - 与其他板块保持一致
+            Color(red: 0.98, green: 0.97, blue: 0.95)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                if let session = selectedSession {
+                    chatView(for: session)
+                } else {
+                    chatListView
+                }
             }
         }
         .navigationTitle("Chat")
@@ -36,6 +43,11 @@ struct ChatInterfaceView: View {
             }
         }
         .onAppear {
+            loadChatSessions()
+            startMessageRefreshTimer()
+        }
+        .onDisappear {
+            stopMessageRefreshTimer()
             // 先尝试从持久化缓存加载
             loadCachedChatSessionsFromStorage()
             
@@ -83,13 +95,17 @@ struct ChatInterfaceView: View {
                     
                     // 等待数据加载完成后再选择会话
                     await MainActor.run {
-                        // 由于我们按时间排序，新匹配的会话应该在第一位
-                        // 或者通过用户名匹配（match.matchedUserName 应该对应 ChatUser.name）
-                        if let matchedSession = chatSessions.first {
-                            // 选择最新的匹配（第一个）
+                        // 通过 userId 匹配会话，如果没有找到则选择最新的匹配
+                        if let matchedSession = chatSessions.first(where: { $0.user.userId == matchedUserId }) {
+                            // 选择匹配的会话
                             selectedSession = matchedSession
                             loadAISuggestions(for: matchedSession.user)
-                            print("✅ Auto-selected chat session with \(matchedSession.user.name)")
+                            print("✅ Auto-selected chat session with \(matchedSession.user.name) (matchedUserId: \(matchedUserId))")
+                        } else if let firstSession = chatSessions.first {
+                            // 如果没有找到精确匹配，选择最新的匹配（第一个）
+                            selectedSession = firstSession
+                            loadAISuggestions(for: firstSession.user)
+                            print("✅ Auto-selected first chat session: \(firstSession.user.name) (requested matchedUserId: \(matchedUserId))")
                         } else {
                             // 如果仍然没找到，可能数据还没加载完，延迟再试一次
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
@@ -197,10 +213,13 @@ struct ChatInterfaceView: View {
             } else {
                 List(chatSessions) { session in
                     ChatSessionRowView(session: session) {
-                        selectedSession = session
-                        loadAISuggestions(for: session.user)
+                        selectSession(session) // 使用新方法
                     }
+                    .listRowBackground(Color.clear) // 使列表项背景透明
                 }
+                .scrollContentBackground(.hidden) // 隐藏列表默认背景
+                .listStyle(.plain) // 使用plain样式，减少默认间距
+                .padding(.top, -8) // 减小顶部间距，使Chat标题和列表更近
             }
         }
     }
@@ -336,9 +355,9 @@ struct ChatInterfaceView: View {
                                 .fill(session.user.isOnline ? .green : .gray)
                                 .frame(width: 8, height: 8)
                             
-                            Text(session.user.isOnline ? "Online" : "Offline")
+                            Text(session.user.isOnline ? "Active" : "Offline")
                                 .font(.system(size: 12))
-                                .foregroundColor(.gray)
+                                .foregroundColor(session.user.isOnline ? .green : .gray)
                             
                             // Match date
                             if session.user.isMatched, let matchDate = session.user.matchDate {
@@ -559,8 +578,12 @@ struct ChatInterfaceView: View {
                     }
                     processedUserIds.insert(matchedUserId)
                     
-                    print("✅ Match 1: Current user is user_id, matched with: \(match.matchedUserName) (ID: \(matchedUserId))")
-                    basicSessionData.append((match, matchedUserId, match.matchedUserName))
+                    // 记录需要获取 profile 的用户 ID（不使用 matchedUserName 因为可能过期）
+                    if !userIdsToFetch.contains(matchedUserId) {
+                        userIdsToFetch.append(matchedUserId)
+                    }
+                    print("✅ Match 1: Current user is user_id, matched with: \(matchedUserId) (will fetch name)")
+                    basicSessionData.append((match, matchedUserId, "Loading..."))
                 } else if match.matchedUserId == currentUser.id {
                     // 当前用户是 matched_user_id，对方是 user_id
                     matchedUserId = match.userId
@@ -626,27 +649,64 @@ struct ChatInterfaceView: View {
             
             for data in basicSessionData {
                 let match = data.match
+                let matchedUserId = data.matchedUserId
                 let matchedUserName = data.matchedUserName
                 let matchDate = dateFormatter.date(from: match.createdAt)
                 
                 // 先创建基本会话（使用已有的名字，不需要等待 profile）
+                // 在线状态：从 users 表获取 lastLoginAt，如果最近5分钟内有活动则为在线
+                var isOnline = false
+                if let user = try? await supabaseService.getUser(id: matchedUserId) {
+                    let dateFormatter = ISO8601DateFormatter()
+                    if let lastLoginAt = dateFormatter.date(from: user.lastLoginAt) {
+                        let timeSinceLastLogin = Date().timeIntervalSince(lastLoginAt)
+                        isOnline = timeSinceLastLogin < 300 // 5分钟内活跃视为在线
+                    }
+                }
+                
                 let chatUser = ChatUser(
                     name: matchedUserName,
                     avatar: "person.circle.fill",
-                    isOnline: false,
+                    isOnline: isOnline,
                     lastSeen: matchDate ?? Date(),
                     interests: [], // 暂时为空，后台会更新
                     bio: "", // 暂时为空，后台会更新
                     isMatched: true,
                     matchDate: matchDate,
-                    matchType: .mutual
+                    matchType: .mutual, // invitation_based 对应 mutual
+                    userId: matchedUserId // 添加 userId
                 )
                 
-                let session = ChatSession(
+                // 从数据库加载历史消息
+                var messages: [ChatMessage] = []
+                do {
+                    let supabaseMessages = try await supabaseService.getMessages(
+                        userId1: currentUser.id,
+                        userId2: matchedUserId
+                    )
+                    
+                    // 转换为 ChatMessage
+                    messages = supabaseMessages.map { supabaseMessage in
+                        supabaseMessage.toChatMessage(currentUserId: currentUser.id)
+                    }
+                    
+                    print("✅ Loaded \(messages.count) messages for user \(matchedUserName)")
+                } catch {
+                    print("⚠️ Failed to load messages: \(error.localizedDescription)")
+                    // 继续创建会话，即使加载消息失败
+                }
+                
+                // 创建 ChatSession（使用从数据库加载的消息）
+                // 计算最后一条消息的时间，如果没有消息则使用匹配时间
+                let lastMessageTime = messages.last?.timestamp ?? matchDate ?? Date()
+                
+                var session = ChatSession(
                     user: chatUser,
-                    messages: [],
-                    aiSuggestions: sampleAISuggestions
+                    messages: messages,
+                    aiSuggestions: []
                 )
+                // 手动设置最后消息时间
+                session.lastMessageAt = lastMessageTime
                 
                 sessions.append(session)
             }
@@ -770,46 +830,56 @@ struct ChatInterfaceView: View {
     }
     
     private func sendMessage(_ content: String) {
-        guard !content.isEmpty, let session = selectedSession else { return }
+        guard !content.isEmpty, 
+              let session = selectedSession,
+              let currentUser = authManager.currentUser,
+              let receiverUserId = session.user.userId else { 
+            return 
+        }
         
+        // 创建本地消息对象
         let message = ChatMessage(
             content: content,
             isFromUser: true
         )
         
+        // 先更新本地UI（乐观更新）
         if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
             chatSessions[index].addMessage(message)
             selectedSession = chatSessions[index]
         }
         
-        // Simulate other party's reply
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            simulateReply(for: session)
+        // 发送到数据库
+        Task {
+            do {
+                let _ = try await supabaseService.sendMessage(
+                    senderId: currentUser.id,
+                    receiverId: receiverUserId,
+                    content: content,
+                    messageType: "text"
+                )
+                print("✅ Message saved to database")
+            } catch {
+                print("❌ Failed to send message: \(error.localizedDescription)")
+                // 如果发送失败，可以显示错误提示或回滚本地消息
+                await MainActor.run {
+                    if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
+                        // 移除失败的消息
+                        chatSessions[index].messages.removeAll { $0.id == message.id }
+                        selectedSession = chatSessions[index]
+                    }
+                }
+            }
         }
+        
+        // 移除自动回复功能 - 删除以下代码：
+        // DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+        //     simulateReply(for: session)
+        // }
     }
     
-    private func simulateReply(for session: ChatSession) {
-        let replies = [
-            "That's interesting! Can you tell me more?",
-            "I think so too!",
-            "That sounds great!",
-            "I'm very interested!",
-            "That reminds me of...",
-            "You're absolutely right!",
-            "I've had similar experiences!"
-        ]
-        
-        let reply = ChatMessage(
-            content: replies.randomElement() ?? "That's interesting!",
-            isFromUser: false,
-            senderName: session.user.name
-        )
-        
-        if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
-            chatSessions[index].addMessage(reply)
-            selectedSession = chatSessions[index]
-        }
-    }
+    // 删除 simulateReply 函数
+    // private func simulateReply(for session: ChatSession) { ... }
     
     private func loadProfile(for user: ChatUser) {
         print("👆 Profile card clicked for user: \(user.name)")
@@ -918,6 +988,89 @@ struct ChatInterfaceView: View {
             )
         )
     }
+    
+    // 添加定时刷新方法
+    private func startMessageRefreshTimer() {
+        stopMessageRefreshTimer() // 先停止现有的定时器
+        
+        // 注意：ChatInterfaceView 是 struct，不能使用 weak
+        // 在 SwiftUI 中，可以直接调用方法，不需要捕获 self
+        messageRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+            Task { @MainActor in
+                await refreshMessagesForCurrentSession()
+            }
+        }
+    }
+    
+    private func stopMessageRefreshTimer() {
+        messageRefreshTimer?.invalidate()
+        messageRefreshTimer = nil
+    }
+    
+    @MainActor
+    private func refreshMessagesForCurrentSession() async {
+        guard let session = selectedSession,
+              let currentUser = authManager.currentUser,
+              let receiverUserId = session.user.userId else {
+            return
+        }
+        
+        do {
+            let supabaseMessages = try await supabaseService.getMessages(
+                userId1: currentUser.id,
+                userId2: receiverUserId
+            )
+            
+            let messages = supabaseMessages.map { supabaseMessage in
+                supabaseMessage.toChatMessage(currentUserId: currentUser.id)
+            }
+            
+            // 更新会话消息
+            if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
+                chatSessions[index].messages = messages
+                selectedSession = chatSessions[index]
+            }
+        } catch {
+            print("⚠️ Failed to refresh messages: \(error.localizedDescription)")
+        }
+    }
+    
+    // 在选择会话时标记消息为已读
+    private func selectSession(_ session: ChatSession) {
+        selectedSession = session
+        loadAISuggestions(for: session.user)
+        
+        // 标记来自对方的未读消息为已读
+        Task {
+            await markMessagesAsRead(for: session)
+        }
+    }
+    
+    @MainActor
+    private func markMessagesAsRead(for session: ChatSession) async {
+        guard let currentUser = authManager.currentUser,
+              let receiverUserId = session.user.userId else {
+            return
+        }
+        
+        // 找到所有未读且来自对方的消息
+        let unreadMessages = session.messages.filter { !$0.isFromUser && !$0.isRead }
+        
+        // 批量标记为已读
+        for message in unreadMessages {
+            if let messageId = UUID(uuidString: message.id.uuidString)?.uuidString {
+                do {
+                    try await supabaseService.markMessageAsRead(messageId: messageId)
+                    print("✅ Marked message \(messageId) as read")
+                } catch {
+                    print("⚠️ Failed to mark message as read: \(error.localizedDescription)")
+                }
+            }
+        }
+        
+        // 刷新消息列表以更新未读状态
+        await refreshMessagesForCurrentSession()
+    }
 }
 
 // MARK: - Chat Session Row View
@@ -962,9 +1115,12 @@ struct ChatSessionRowView: View {
                         
                         Spacer()
                         
-                        Text(formatTime(session.lastMessageAt))
-                            .font(.system(size: 12))
-                            .foregroundColor(.gray)
+                        // 只在有消息时显示时间
+                        if !session.messages.isEmpty {
+                            Text(formatTime(session.lastMessageAt))
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                        }
                     }
                     
                     Text(session.messages.last?.content ?? "Start chatting...")
@@ -977,9 +1133,9 @@ struct ChatSessionRowView: View {
                             .fill(session.user.isOnline ? .green : .gray)
                             .frame(width: 8, height: 8)
                         
-                        Text(session.user.isOnline ? "Online" : "Offline")
+                        Text(session.user.isOnline ? "Active" : "Offline")
                             .font(.system(size: 12))
-                            .foregroundColor(.gray)
+                            .foregroundColor(session.user.isOnline ? .green : .gray)
                         
                         // Match date
                         if session.user.isMatched, let matchDate = session.user.matchDate {
@@ -990,8 +1146,10 @@ struct ChatSessionRowView: View {
                         
                         Spacer()
                         
-                        if !session.messages.isEmpty {
-                            Text("\(session.messages.count)")
+                        // 显示未读消息数，而不是总消息数
+                        let unreadCount = session.unreadCount
+                        if unreadCount > 0 {
+                            Text("\(unreadCount)")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 8)
@@ -1688,3 +1846,4 @@ struct ChatInterfaceView_Previews: PreviewProvider {
         ChatInterfaceView()
     }
 }
+

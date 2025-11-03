@@ -392,7 +392,26 @@ struct BrewNetMatchesView: View {
             } catch {
                 print("❌ Failed to send invitation: \(error.localizedDescription)")
                 await MainActor.run {
-                    errorMessage = "Failed to send invitation. Please try again."
+                    // 检查是否是已存在的邀请错误
+                    if let invitationError = error as? InvitationError,
+                       case .alreadyExists = invitationError {
+                        // 如果是重复邀请，静默处理，不显示错误
+                        print("ℹ️ Invitation already exists, continuing...")
+                        moveToNextProfile()
+                    } else if error.localizedDescription.contains("already exists") ||
+                              error.localizedDescription.contains("duplicate") {
+                        // 捕获其他形式的重复错误
+                        print("ℹ️ Invitation already exists, continuing...")
+                        moveToNextProfile()
+                    } else {
+                        // 其他错误才显示错误信息
+                        errorMessage = "Failed to send invitation: \(error.localizedDescription)"
+                        // 延迟清除错误信息
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            errorMessage = nil
+                        }
+                    }
+                    // 即使出错也继续下一个profile
                     moveToNextProfile()
                 }
             }
@@ -410,9 +429,16 @@ struct BrewNetMatchesView: View {
         currentIndex = 0
         // 如果有缓存，先显示缓存（提供即时反馈）
         if !cachedProfiles.isEmpty {
-            profiles = cachedProfiles
+            // 过滤掉已pass和已like的用户
+            let passedUserIds = Set(passedProfiles.map { $0.userId })
+            let likedUserIds = Set(likedProfiles.map { $0.userId })
+            let filteredCache = cachedProfiles.filter { profile in
+                !passedUserIds.contains(profile.userId) && !likedUserIds.contains(profile.userId)
+            }
+            profiles = filteredCache
+            cachedProfiles = filteredCache
             isLoading = false // 允许用户立即看到数据
-            print("✅ Displaying cached profiles immediately: \(cachedProfiles.count) profiles")
+            print("✅ Displaying cached profiles immediately: \(filteredCache.count) profiles (filtered from \(cachedProfiles.count))")
         } else {
             // 没有缓存时才显示加载状态
             isLoading = true
@@ -497,6 +523,29 @@ struct BrewNetMatchesView: View {
                 return
             }
             
+            // 获取已匹配的用户ID集合（防御性过滤，确保已匹配用户不会出现）
+            var excludedMatchedUserIds: Set<String> = []
+            do {
+                let matches = try await supabaseService.getActiveMatches(userId: currentUser.id)
+                for match in matches {
+                    if match.userId == currentUser.id {
+                        excludedMatchedUserIds.insert(match.matchedUserId)
+                    } else if match.matchedUserId == currentUser.id {
+                        excludedMatchedUserIds.insert(match.userId)
+                    }
+                }
+                if !excludedMatchedUserIds.isEmpty {
+                    print("🔍 BrewNetMatchesView: Excluding \(excludedMatchedUserIds.count) matched users (defensive filtering)")
+                }
+            } catch {
+                print("⚠️ Failed to fetch matches for defensive filtering: \(error.localizedDescription)")
+            }
+            
+            // 获取已pass的用户ID集合（用于过滤）
+            let passedUserIds = Set(passedProfiles.map { $0.userId })
+            let likedUserIds = Set(likedProfiles.map { $0.userId })
+            
+            // Load actual profiles from Supabase with offset and limit
             // ========== Two-Tower 推荐模式 ==========
             if offset == 0 && isInitial {
                 // 使用 Two-Tower 推荐引擎
@@ -533,28 +582,45 @@ struct BrewNetMatchesView: View {
             // Convert SupabaseProfile to BrewNetProfile
             let brewNetProfiles = supabaseProfiles.map { $0.toBrewNetProfile() }
             
+            // 过滤掉已pass、已like和已匹配的用户（避免重复显示）
+            let filteredProfiles = brewNetProfiles.filter { profile in
+                !passedUserIds.contains(profile.userId) && 
+                !likedUserIds.contains(profile.userId) &&
+                !excludedMatchedUserIds.contains(profile.userId) // 防御性过滤已匹配用户
+            }
+            
+            let localFilteredCount = brewNetProfiles.count - filteredProfiles.count
+            if localFilteredCount > 0 {
+                print("🔍 Filtered out \(localFilteredCount) profiles that were already passed/liked/matched locally")
+            }
+            
             await MainActor.run {
                 if isInitial {
-                    profiles = brewNetProfiles
-                    // 更新缓存
-                    cachedProfiles = brewNetProfiles
+                    profiles = filteredProfiles
+                    // 更新缓存（只缓存过滤后的）
+                    cachedProfiles = filteredProfiles
                     lastLoadTime = Date()
                     isLoading = false
                     // 保存到持久化存储
                     saveCachedProfilesToStorage()
-                    print("✅ Initially loaded \(brewNetProfiles.count) profiles from Supabase")
+                    print("✅ Initially loaded \(filteredProfiles.count) profiles from Supabase")
                 } else {
-                    profiles.append(contentsOf: brewNetProfiles)
+                    // 追加时也要过滤重复的
+                    let existingUserIds = Set(profiles.map { $0.userId })
+                    let newProfiles = filteredProfiles.filter { profile in
+                        !existingUserIds.contains(profile.userId)
+                    }
+                    profiles.append(contentsOf: newProfiles)
                     // 更新缓存
-                    cachedProfiles.append(contentsOf: brewNetProfiles)
+                    cachedProfiles.append(contentsOf: newProfiles)
                     isLoadingMore = false
                     // 保存到持久化存储
                     saveCachedProfilesToStorage()
-                    print("✅ Loaded \(brewNetProfiles.count) more profiles (total: \(profiles.count))")
+                    print("✅ Loaded \(newProfiles.count) more profiles (total: \(profiles.count), filtered duplicates: \(filteredProfiles.count - newProfiles.count))")
                 }
                 
                 totalFetched += totalInBatch
-                totalFiltered += filteredCount
+                totalFiltered += filteredCount + localFilteredCount
                 
                 // 如果返回的数量少于请求的数量，说明没有更多了
                 if supabaseProfiles.count < limit {

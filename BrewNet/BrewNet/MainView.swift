@@ -6,6 +6,8 @@ struct MainView: View {
     @EnvironmentObject var supabaseService: SupabaseService
     @State private var selectedTab = 0
     @State private var profilesPreloaded = false // 标记是否已预加载
+    @State private var unreadMessageCount = 0 // 未读消息总数
+    @State private var chatListRefreshTimer: Timer? // 用于刷新未读消息数
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -36,10 +38,11 @@ struct MainView: View {
             NavigationStack {
                 ChatView()
             }
-                .tabItem {
-                    Image(systemName: "message.fill")
-                }
-                .tag(3)
+            .tabItem {
+                Image(systemName: "message.fill")
+            }
+            .tag(3)
+            .badge(unreadMessageCount > 0 ? unreadMessageCount : 0)
             
             // Profile
             NavigationStack {
@@ -54,6 +57,11 @@ struct MainView: View {
         .onAppear {
             // 应用启动时预加载第一个 tab 的数据
             preloadMatchesData()
+            // 开始刷新未读消息数
+            startUnreadMessageCountRefresh()
+        }
+        .onDisappear {
+            stopUnreadMessageCountRefresh()
         }
         .onChange(of: selectedTab) { newTab in
             // 切换到第一个 tab 时，如果还没预加载，则预加载
@@ -89,6 +97,65 @@ struct MainView: View {
             } catch {
                 print("⚠️ Failed to preload profiles: \(error.localizedDescription)")
             }
+        }
+    }
+    
+    // MARK: - Unread Message Count Refresh
+    private func startUnreadMessageCountRefresh() {
+        stopUnreadMessageCountRefresh()
+        
+        // 立即刷新一次
+        Task {
+            await updateUnreadMessageCount()
+        }
+        
+        // 每5秒刷新一次未读消息数
+        chatListRefreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+            Task {
+                await updateUnreadMessageCount()
+            }
+        }
+    }
+    
+    private func stopUnreadMessageCountRefresh() {
+        chatListRefreshTimer?.invalidate()
+        chatListRefreshTimer = nil
+    }
+    
+    @MainActor
+    private func updateUnreadMessageCount() async {
+        guard let currentUser = authManager.currentUser else {
+            unreadMessageCount = 0
+            return
+        }
+        
+        do {
+            // 获取所有活跃的匹配
+            let matches = try await supabaseService.getActiveMatches(userId: currentUser.id)
+            
+            var totalUnread = 0
+            
+            // 对每个匹配，获取未读消息数
+            for match in matches {
+                let otherUserId = match.userId == currentUser.id ? match.matchedUserId : match.userId
+                
+                // 获取该用户的所有消息
+                let messages = try await supabaseService.getMessages(
+                    userId1: currentUser.id,
+                    userId2: otherUserId
+                )
+                
+                // 计算未读消息数（接收者是自己且未读）
+                let unread = messages.filter { message in
+                    message.receiverId == currentUser.id && !message.isRead
+                }.count
+                
+                totalUnread += unread
+            }
+            
+            unreadMessageCount = totalUnread
+        } catch {
+            print("⚠️ Failed to update unread message count: \(error.localizedDescription)")
         }
     }
 }
