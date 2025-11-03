@@ -17,6 +17,7 @@ struct ChatInterfaceView: View {
     @State private var messageRefreshTimer: Timer?
     @State private var cachedChatSessions: [ChatSession] = [] // 缓存数据
     @State private var lastChatLoadTime: Date? = nil // 记录上次加载时间
+    @State private var userIdToProfileMap: [String: (name: String, avatar: String)] = [:] // 临时存储 profile 数据
     
     var body: some View {
         ZStack {
@@ -307,9 +308,7 @@ struct ChatInterfaceView: View {
             }) {
                 HStack(spacing: 12) {
                     ZStack(alignment: .bottomTrailing) {
-                        Image(systemName: session.user.avatar)
-                            .font(.system(size: 40))
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        AvatarView(avatarString: session.user.avatar, size: 40)
                         
                         // Match indicator
                         if session.user.isMatched {
@@ -616,32 +615,36 @@ struct ChatInterfaceView: View {
                 }
             }
             
-            // 并发获取所有需要的 profile 名字
+            // 并发获取所有需要的 profile 名字和头像
             if !userIdsToFetch.isEmpty {
-                let nameTasks = userIdsToFetch.map { userId -> Task<String, Never> in
+                let profileTasks = userIdsToFetch.map { userId -> Task<(name: String, avatar: String), Never> in
                     Task {
                         if let profile = try? await supabaseService.getProfile(userId: userId) {
-                            return profile.coreIdentity.name
+                            let avatar = profile.coreIdentity.profileImage ?? "person.circle.fill"
+                            return (profile.coreIdentity.name, avatar)
                         }
-                        return "Unknown"
+                        return ("Unknown", "person.circle.fill")
                     }
                 }
                 
-                // 等待所有名字加载完成
-                var userIdToName: [String: String] = [:]
-                for (index, task) in nameTasks.enumerated() {
+                // 等待所有 profile 加载完成
+                var userIdToProfile: [String: (name: String, avatar: String)] = [:]
+                for (index, task) in profileTasks.enumerated() {
                     let userId = userIdsToFetch[index]
-                    userIdToName[userId] = await task.value
+                    userIdToProfile[userId] = await task.value
                 }
                 
                 // 更新 basicSessionData 中的名字
                 for (index, data) in basicSessionData.enumerated() {
                     if data.matchedUserName == "Loading..." {
-                        if let userName = userIdToName[data.matchedUserId] {
-                            basicSessionData[index] = (data.match, data.matchedUserId, userName)
+                        if let profile = userIdToProfile[data.matchedUserId] {
+                            basicSessionData[index] = (data.match, data.matchedUserId, profile.name)
                         }
                     }
                 }
+                
+                // 保存 profile 映射以便后续使用
+                userIdToProfileMap = userIdToProfile
             }
             
             // 第二步：先快速显示基本会话（不等待 profile 加载）
@@ -664,9 +667,12 @@ struct ChatInterfaceView: View {
                     }
                 }
                 
+                // 获取头像：优先使用已加载的头像，否则使用默认头像
+                let avatarString = userIdToProfileMap[matchedUserId]?.avatar ?? "person.circle.fill"
+                
                 let chatUser = ChatUser(
                     name: matchedUserName,
-                    avatar: "person.circle.fill",
+                    avatar: avatarString,
                     isOnline: isOnline,
                     lastSeen: matchDate ?? Date(),
                     interests: [], // 暂时为空，后台会更新
@@ -759,9 +765,11 @@ struct ChatInterfaceView: View {
                         
                         if index < profiles.count, let profile = profiles[index] {
                             // 创建新的 ChatUser（因为属性是不可变的）
+                            // 使用 profileImage URL，如果不存在则使用默认的 SF Symbol
+                            let avatarString = profile.coreIdentity.profileImage ?? "person.circle.fill"
                             updatedUser = ChatUser(
                                 name: session.user.name,
-                                avatar: session.user.avatar,
+                                avatar: avatarString,
                                 isOnline: session.user.isOnline,
                                 lastSeen: session.user.lastSeen,
                                 interests: profile.personalitySocial.hobbies,
@@ -1083,9 +1091,7 @@ struct ChatSessionRowView: View {
             HStack(spacing: 12) {
                 // Avatar with match indicator
                 ZStack(alignment: .bottomTrailing) {
-                    Image(systemName: session.user.avatar)
-                        .font(.system(size: 50))
-                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    AvatarView(avatarString: session.user.avatar, size: 50)
                     
                     // Match indicator
                     if session.user.isMatched {
@@ -1844,6 +1850,40 @@ struct ProfileCardSheetView: View {
 struct ChatInterfaceView_Previews: PreviewProvider {
     static var previews: some View {
         ChatInterfaceView()
+    }
+}
+
+// MARK: - Avatar View Helper
+struct AvatarView: View {
+    let avatarString: String
+    let size: CGFloat
+    
+    init(avatarString: String, size: CGFloat = 50) {
+        self.avatarString = avatarString
+        self.size = size
+    }
+    
+    var body: some View {
+        // 判断是 URL 还是 SF Symbol
+        if avatarString.hasPrefix("http://") || avatarString.hasPrefix("https://") {
+            // 如果是 URL，使用 AsyncImage
+            AsyncImage(url: URL(string: avatarString)) { image in
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } placeholder: {
+                Image(systemName: "person.circle.fill")
+                    .font(.system(size: size))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+        } else {
+            // 如果是 SF Symbol
+            Image(systemName: avatarString)
+                .font(.system(size: size))
+                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+        }
     }
 }
 
