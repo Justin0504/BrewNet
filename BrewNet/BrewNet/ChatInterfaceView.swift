@@ -266,7 +266,8 @@ struct ChatInterfaceView: View {
                 .padding(.horizontal, 40)
             
             Button("Start Matching") {
-                // Navigate to matches
+                // 发送通知切换到 Matches tab
+                NotificationCenter.default.post(name: NSNotification.Name("NavigateToMatches"), object: nil)
             }
             .font(.system(size: 16, weight: .semibold))
             .foregroundColor(.white)

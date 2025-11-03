@@ -80,6 +80,11 @@
             value = "AIzaSyBLKpuoF-OV-e_wfdQyRqIwGDjZT8cdWe4"
             isEnabled = "YES">
          </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "GEMINLAPIKEY"
+            value = "AIzaSyCyOrgim_Mv0Gahlpt_JiVrJ-tdIStctp0"
+            isEnabled = "YES">
+         </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction
