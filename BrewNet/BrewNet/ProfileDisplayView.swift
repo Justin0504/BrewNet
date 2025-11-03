@@ -8,6 +8,15 @@ struct ProfileDisplayView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var supabaseService: SupabaseService
     
+    // State variables for matches and invitations
+    @State private var showingMatches = false
+    @State private var matches: [SupabaseMatch] = []
+    @State private var isLoadingMatches = false
+    
+    @State private var showingSentInvitations = false
+    @State private var sentInvitations: [SupabaseInvitation] = []
+    @State private var isLoadingInvitations = false
+    
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
