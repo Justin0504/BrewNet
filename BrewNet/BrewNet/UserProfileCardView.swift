@@ -253,7 +253,7 @@ struct UserProfileCardView: View {
         case .inPerson:
             return "person.2.fill"
         case .either:
-            return "arrow.left.right"
+            return "repeat"
         }
     }
     
