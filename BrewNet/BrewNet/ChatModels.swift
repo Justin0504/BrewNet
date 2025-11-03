@@ -10,8 +10,9 @@ struct ChatMessage: Identifiable, Codable {
     let messageType: MessageType
     let senderName: String?
     let senderAvatar: String?
+    let isRead: Bool // 添加是否已读属性
     
-    init(content: String, isFromUser: Bool, messageType: MessageType = .text, senderName: String? = nil, senderAvatar: String? = nil) {
+    init(content: String, isFromUser: Bool, messageType: MessageType = .text, senderName: String? = nil, senderAvatar: String? = nil, isRead: Bool = true) {
         self.id = UUID()
         self.content = content
         self.timestamp = Date()
@@ -19,6 +20,7 @@ struct ChatMessage: Identifiable, Codable {
         self.messageType = messageType
         self.senderName = senderName
         self.senderAvatar = senderAvatar
+        self.isRead = isRead
     }
 }
 
@@ -269,6 +271,11 @@ struct ChatSession: Identifiable, Codable {
             )
         }
     }
+    
+    // 计算未读消息数（来自对方且未读的消息）
+    var unreadCount: Int {
+        return messages.filter { !$0.isFromUser && !$0.isRead }.count
+    }
 }
 
 // MARK: - Sample Data
@@ -348,3 +355,28 @@ let sampleAISuggestions = [
         category: .iceBreaker
     )
 ]
+
+// MARK: - Message Conversion Extensions
+extension ChatMessage {
+    /// 从 SupabaseMessage 创建 ChatMessage
+    init(from supabaseMessage: SupabaseMessage, currentUserId: String) {
+        let dateFormatter = ISO8601DateFormatter()
+        let date = dateFormatter.date(from: supabaseMessage.timestamp) ?? Date()
+        
+        self.id = UUID(uuidString: supabaseMessage.id) ?? UUID()
+        self.content = supabaseMessage.content
+        self.timestamp = date
+        self.isFromUser = supabaseMessage.senderId == currentUserId
+        self.messageType = MessageType(rawValue: supabaseMessage.messageType) ?? .text
+        self.senderName = nil // 可以从数据库获取
+        self.senderAvatar = nil
+        self.isRead = supabaseMessage.isRead // 添加 isRead 信息
+    }
+}
+
+extension SupabaseMessage {
+    /// 转换为 ChatMessage（需要 currentUserId 来确定 isFromUser）
+    func toChatMessage(currentUserId: String) -> ChatMessage {
+        return ChatMessage(from: self, currentUserId: currentUserId)
+    }
+}
