@@ -27,7 +27,7 @@ class RecommendationService: ObservableObject {
         // 1. 检查缓存
         if let cached = try await supabaseService.getCachedRecommendations(userId: userId) {
             print("✅ Using cached recommendations")
-            return try await loadProfilesWithCache(cached)
+            return try await loadProfilesWithCache(cached, userId: userId)
         }
         
         // 2. 获取用户特征
@@ -41,13 +41,22 @@ class RecommendationService: ObservableObject {
         let userVector = encoder.computeEmbedding(encoder.encodeUser(userFeatures))
         print("✅ User encoded to embedding vector (64 dimensions)")
         
+        // 3.5. 获取需要排除的用户ID集合（包括 Invitations、Matches、Interactions）
+        let excludedUserIds = try await supabaseService.getExcludedUserIds(userId: userId)
+        print("🚫 Will exclude \(excludedUserIds.count) users from recommendations")
+        
         // 4. 获取候选用户特征
-        let candidates = try await supabaseService.getAllCandidateFeatures(
+        let allCandidates = try await supabaseService.getAllCandidateFeatures(
             excluding: userId,
             limit: 1000
         )
         
-        print("📊 Processing \(candidates.count) candidates")
+        // 4.5. 过滤掉需要排除的用户
+        let candidates = allCandidates.filter { candidate in
+            !excludedUserIds.contains(candidate.userId)
+        }
+        
+        print("📊 Processing \(candidates.count) candidates (filtered from \(allCandidates.count), excluded \(allCandidates.count - candidates.count))")
         
         guard !candidates.isEmpty else {
             throw RecommendationError.noCandidates
@@ -99,19 +108,32 @@ class RecommendationService: ObservableObject {
     
     /// 从缓存加载推荐结果
     private func loadProfilesWithCache(
-        _ cached: ([String], [Double])
+        _ cached: ([String], [Double]),
+        userId: String
     ) async throws -> [(userId: String, score: Double, profile: BrewNetProfile)] {
         let (userIds, scores) = cached
+        
+        // 获取需要排除的用户ID集合（包括 Invitations、Matches、Interactions）
+        let excludedUserIds = try await supabaseService.getExcludedUserIds(userId: userId)
+        print("🚫 Filtering cache: excluding \(excludedUserIds.count) users")
+        
         var results: [(userId: String, score: Double, profile: BrewNetProfile)] = []
         
-        for (index, userId) in userIds.enumerated() {
+        for (index, cachedUserId) in userIds.enumerated() {
+            // 跳过需要排除的用户
+            if excludedUserIds.contains(cachedUserId) {
+                print("⚠️ Skipping cached user \(cachedUserId) - already interacted/invited/matched")
+                continue
+            }
+            
             if index < scores.count,
-               let supabaseProfile = try? await supabaseService.getProfile(userId: userId) {
+               let supabaseProfile = try? await supabaseService.getProfile(userId: cachedUserId) {
                 let brewNetProfile = supabaseProfile.toBrewNetProfile()
-                results.append((userId, scores[index], brewNetProfile))
+                results.append((cachedUserId, scores[index], brewNetProfile))
             }
         }
         
+        print("✅ Loaded \(results.count) profiles from cache (filtered from \(userIds.count))")
         return results
     }
     

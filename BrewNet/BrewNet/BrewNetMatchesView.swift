@@ -113,15 +113,25 @@ struct BrewNetMatchesView: View {
             // 先尝试从持久化缓存加载
             loadCachedProfilesFromStorage()
             
-            // 如果有缓存数据且距离上次加载不到5分钟，先显示缓存，然后后台刷新
+            // 如果有缓存数据且距离上次加载不到5分钟，先过滤缓存，然后显示，最后后台刷新
             if !cachedProfiles.isEmpty, let lastLoad = lastLoadTime, Date().timeIntervalSince(lastLoad) < 300 {
-                // 显示缓存数据（立即显示，无延迟）
-                profiles = cachedProfiles
+                // 先快速过滤掉本地的 passed/liked（同步）
+                let passedUserIds = Set(passedProfiles.map { $0.userId })
+                let likedUserIds = Set(likedProfiles.map { $0.userId })
+                let quicklyFiltered = cachedProfiles.filter { profile in
+                    !passedUserIds.contains(profile.userId) && !likedUserIds.contains(profile.userId)
+                }
+                
+                // 立即显示快速过滤后的缓存（避免显示已本地pass/like的用户）
+                profiles = quicklyFiltered
                 isLoading = false
                 currentIndex = 0 // 重置到第一张卡片
-                print("✅ Using cached profiles: \(cachedProfiles.count) profiles")
-                // 后台静默刷新
+                print("✅ Using cached profiles (quickly filtered): \(quicklyFiltered.count) profiles")
+                
+                // 然后异步获取完整的排除列表（包括 invitations），再次过滤
                 Task {
+                    await filterCachedProfilesWithExclusions()
+                    // 后台静默刷新
                     await refreshProfilesSilently()
                 }
             } else {
@@ -449,6 +459,42 @@ struct BrewNetMatchesView: View {
         
         Task {
             await loadProfilesBatch(offset: 0, limit: 20, isInitial: true) // 先加载少量数据（20个）快速显示
+        }
+    }
+    
+    // 使用完整的排除列表过滤缓存的 profiles（异步）
+    @MainActor
+    private func filterCachedProfilesWithExclusions() async {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        do {
+            // 获取完整的排除列表（包括 invitations、matches、interactions）
+            let excludedUserIds = try await supabaseService.getExcludedUserIds(userId: currentUser.id)
+            
+            // 过滤当前的 profiles
+            let filteredProfiles = profiles.filter { profile in
+                !excludedUserIds.contains(profile.userId)
+            }
+            
+            // 如果过滤后有变化，立即更新 UI（无动画，立即移除）
+            if filteredProfiles.count != profiles.count {
+                let removedCount = profiles.count - filteredProfiles.count
+                print("🚫 Filtered out \(removedCount) excluded profiles from cache (invitations/rejected/matched/interactions)")
+                
+                // 立即更新 profiles（无动画，避免闪烁）
+                profiles = filteredProfiles
+                cachedProfiles = filteredProfiles
+                
+                // 更新当前索引，确保不越界
+                if currentIndex >= profiles.count && !profiles.isEmpty {
+                    currentIndex = 0
+                }
+                
+                // 保存过滤后的缓存
+                saveCachedProfilesToStorage()
+            }
+        } catch {
+            print("⚠️ Failed to filter cached profiles with exclusions: \(error.localizedDescription)")
         }
     }
     
