@@ -89,13 +89,17 @@ struct ChatInterfaceView: View {
                     
                     // 等待数据加载完成后再选择会话
                     await MainActor.run {
-                        // 由于我们按时间排序，新匹配的会话应该在第一位
-                        // 或者通过用户名匹配（match.matchedUserName 应该对应 ChatUser.name）
-                        if let matchedSession = chatSessions.first {
-                            // 选择最新的匹配（第一个）
+                        // 通过 userId 匹配会话，如果没有找到则选择最新的匹配
+                        if let matchedSession = chatSessions.first(where: { $0.user.userId == matchedUserId }) {
+                            // 选择匹配的会话
                             selectedSession = matchedSession
                             loadAISuggestions(for: matchedSession.user)
-                            print("✅ Auto-selected chat session with \(matchedSession.user.name)")
+                            print("✅ Auto-selected chat session with \(matchedSession.user.name) (matchedUserId: \(matchedUserId))")
+                        } else if let firstSession = chatSessions.first {
+                            // 如果没有找到精确匹配，选择最新的匹配（第一个）
+                            selectedSession = firstSession
+                            loadAISuggestions(for: firstSession.user)
+                            print("✅ Auto-selected first chat session: \(firstSession.user.name) (requested matchedUserId: \(matchedUserId))")
                         } else {
                             // 如果仍然没找到，可能数据还没加载完，延迟再试一次
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
@@ -631,6 +635,7 @@ struct ChatInterfaceView: View {
             
             for data in basicSessionData {
                 let match = data.match
+                let matchedUserId = data.matchedUserId
                 let matchedUserName = data.matchedUserName
                 let matchDate = dateFormatter.date(from: match.createdAt)
                 
