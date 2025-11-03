@@ -568,8 +568,12 @@ struct ChatInterfaceView: View {
                     }
                     processedUserIds.insert(matchedUserId)
                     
-                    print("✅ Match 1: Current user is user_id, matched with: \(match.matchedUserName) (ID: \(matchedUserId))")
-                    basicSessionData.append((match, matchedUserId, match.matchedUserName))
+                    // 记录需要获取 profile 的用户 ID（不使用 matchedUserName 因为可能过期）
+                    if !userIdsToFetch.contains(matchedUserId) {
+                        userIdsToFetch.append(matchedUserId)
+                    }
+                    print("✅ Match 1: Current user is user_id, matched with: \(matchedUserId) (will fetch name)")
+                    basicSessionData.append((match, matchedUserId, "Loading..."))
                 } else if match.matchedUserId == currentUser.id {
                     // 当前用户是 matched_user_id，对方是 user_id
                     matchedUserId = match.userId
