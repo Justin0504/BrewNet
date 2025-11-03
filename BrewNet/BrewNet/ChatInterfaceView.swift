@@ -18,6 +18,8 @@ struct ChatInterfaceView: View {
     @State private var cachedChatSessions: [ChatSession] = [] // 缓存数据
     @State private var lastChatLoadTime: Date? = nil // 记录上次加载时间
     @State private var userIdToFullProfileMap: [String: BrewNetProfile] = [:] // 存储完整的 profile 数据
+    @State private var showingUnmatchConfirmAlert = false
+    @State private var sessionToUnmatch: ChatSession? = nil
     
     var body: some View {
         ZStack {
@@ -202,6 +204,21 @@ struct ChatInterfaceView: View {
                 }
             }
         }
+        .alert("Unmatch", isPresented: $showingUnmatchConfirmAlert) {
+            Button("Cancel", role: .cancel) {
+                sessionToUnmatch = nil
+            }
+            Button("Unmatch", role: .destructive) {
+                if let session = sessionToUnmatch {
+                    performUnmatch(session: session)
+                }
+                sessionToUnmatch = nil
+            }
+        } message: {
+            if let session = sessionToUnmatch {
+                Text("Are you sure you want to unmatch with \(session.user.name)? This action cannot be undone.")
+            }
+        }
     }
     
     private var chatListView: some View {
@@ -213,9 +230,15 @@ struct ChatInterfaceView: View {
                 emptyStateView
             } else {
                 List(chatSessions) { session in
-                    ChatSessionRowView(session: session) {
-                        selectSession(session) // 使用新方法
-                    }
+                    ChatSessionRowView(
+                        session: session,
+                        onTap: {
+                            selectSession(session)
+                        },
+                        onUnmatch: {
+                            handleUnmatchForSession(session)
+                        }
+                    )
                     .listRowBackground(Color.clear) // 使列表项背景透明
                 }
                 .scrollContentBackground(.hidden) // 隐藏列表默认背景
@@ -1045,12 +1068,78 @@ struct ChatInterfaceView: View {
         // 刷新消息列表以更新未读状态
         await refreshMessagesForCurrentSession()
     }
+    
+    // MARK: - Action Handlers
+    /// 处理从聊天列表左滑的unmatch操作（显示确认对话框）
+    private func handleUnmatchForSession(_ session: ChatSession) {
+        sessionToUnmatch = session
+        showingUnmatchConfirmAlert = true
+    }
+    
+    /// 实际执行取消匹配操作
+    private func performUnmatch(session: ChatSession) {
+        guard let currentUser = authManager.currentUser,
+              let matchedUserId = session.user.userId else {
+            print("❌ Cannot unmatch: missing user info")
+            return
+        }
+        
+        Task {
+            do {
+                // 查找匹配ID
+                let matches = try await supabaseService.getActiveMatches(userId: currentUser.id)
+                let match = matches.first { match in
+                    (match.userId == currentUser.id && match.matchedUserId == matchedUserId) ||
+                    (match.matchedUserId == currentUser.id && match.userId == matchedUserId)
+                }
+                
+                if let matchId = match?.id {
+                    // 取消匹配
+                    _ = try await supabaseService.deactivateMatch(matchId: matchId, userId: currentUser.id)
+                    print("✅ Successfully unmatched with \(session.user.name)")
+                    
+                    // 从列表中移除该会话
+                    await MainActor.run {
+                        // 如果当前正在查看这个会话，先关闭它
+                        if selectedSession?.id == session.id {
+                            selectedSession = nil
+                        }
+                        // 从列表中移除
+                        chatSessions.removeAll { $0.id == session.id }
+                        // 更新缓存
+                        saveCachedChatSessionsToStorage()
+                    }
+                } else {
+                    print("⚠️ Match not found for unmatch")
+                    // 即使找不到匹配，也从列表中移除（可能是数据不一致）
+                    await MainActor.run {
+                        if selectedSession?.id == session.id {
+                            selectedSession = nil
+                        }
+                        chatSessions.removeAll { $0.id == session.id }
+                        saveCachedChatSessionsToStorage()
+                    }
+                }
+            } catch {
+                print("❌ Failed to unmatch: \(error.localizedDescription)")
+                // 即使失败，也从UI中移除（提供即时反馈）
+                await MainActor.run {
+                    if selectedSession?.id == session.id {
+                        selectedSession = nil
+                    }
+                    chatSessions.removeAll { $0.id == session.id }
+                    saveCachedChatSessionsToStorage()
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Chat Session Row View
 struct ChatSessionRowView: View {
     let session: ChatSession
     let onTap: () -> Void
+    let onUnmatch: () -> Void
     
     var body: some View {
         Button(action: onTap) {
@@ -1135,6 +1224,14 @@ struct ChatSessionRowView: View {
             .padding(.vertical, 8)
         }
         .buttonStyle(PlainButtonStyle())
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+                onUnmatch()
+            } label: {
+                Label("Unmatch", systemImage: "xmark.circle.fill")
+            }
+            .tint(.red)
+        }
     }
     
     private var matchTypeBadge: some View {
