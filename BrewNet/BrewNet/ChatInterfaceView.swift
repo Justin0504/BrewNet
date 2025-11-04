@@ -20,6 +20,11 @@ struct ChatInterfaceView: View {
     @State private var userIdToFullProfileMap: [String: BrewNetProfile] = [:] // 存储完整的 profile 数据
     @State private var showingUnmatchConfirmAlert = false
     @State private var sessionToUnmatch: ChatSession? = nil
+    @State private var scrollToBottomId: UUID? = nil // 用于触发滚动到底部
+    @State private var isAtBottom: Bool = true // 跟踪用户是否在聊天底部
+    @State private var scrollViewHeight: CGFloat = 0 // ScrollView 高度
+    @State private var contentHeight: CGFloat = 0 // 内容高度
+    @State private var scrollOffset: CGFloat = 0 // 滚动偏移量
     
     var body: some View {
         ZStack {
@@ -89,6 +94,10 @@ struct ChatInterfaceView: View {
             // 下拉刷新时，保持现有聊天列表显示，后台更新数据
             // 不会清空 chatSessions，避免显示空状态
             await loadChatSessionsFromDatabase()
+        }
+        .onChange(of: selectedSession?.id) { newSessionId in
+            // 当会话切换时，重置滚动状态
+            scrollToBottomId = nil
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToChat"))) { notification in
             // 当收到导航到 Chat 的通知时，刷新匹配列表并自动选择匹配的用户
@@ -307,11 +316,148 @@ struct ChatInterfaceView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                }
-                .onChange(of: session.messages.count) { _ in
-                    if let lastMessage = session.messages.last {
-                        withAnimation(.easeInOut(duration: 0.3)) {
+                    .background(
+                        GeometryReader { contentGeometry in
+                            Color.clear
+                                .preference(key: ScrollOffsetPreferenceKey.self, 
+                                          value: contentGeometry.frame(in: .named("scroll")).minY)
+                                .preference(key: ContentHeightPreferenceKey.self, 
+                                          value: contentGeometry.size.height)
+                        }
+                    )
+                    .onAppear {
+                        // 在内容出现时立即滚动到底部，避免闪现顶部
+                        if let lastMessage = session.messages.last {
+                            // 立即尝试滚动，不等待
                             proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                            // 设置初始状态为在底部
+                            isAtBottom = true
+                        }
+                    }
+                }
+                .coordinateSpace(name: "scroll")
+                .background(
+                    GeometryReader { scrollGeometry in
+                        Color.clear
+                            .preference(key: ScrollViewHeightPreferenceKey.self, 
+                                      value: scrollGeometry.size.height)
+                    }
+                )
+                .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+                    scrollOffset = -value
+                    checkIfAtBottom()
+                }
+                .onPreferenceChange(ContentHeightPreferenceKey.self) { value in
+                    contentHeight = value
+                    // 延迟检查以确保布局完成
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        checkIfAtBottom()
+                    }
+                }
+                .onPreferenceChange(ScrollViewHeightPreferenceKey.self) { value in
+                    scrollViewHeight = value
+                    checkIfAtBottom()
+                }
+                .task {
+                    // 使用 task 在视图出现之前就开始滚动，避免闪现顶部
+                    if let lastMessage = session.messages.last {
+                        // 立即尝试滚动（无延迟）
+                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                    }
+                }
+                .onAppear {
+                    // 视图出现时再次确保滚动到底部（作为保险）
+                    if let lastMessage = session.messages.last {
+                        // 使用极短的延迟，确保视图已渲染
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                        }
+                        // 双重保险
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                        }
+                    }
+                }
+                .onChange(of: session.id) { _ in
+                    // 当会话切换时，立即滚动到底部
+                    if let lastMessage = session.messages.last {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                        }
+                    }
+                }
+                .onChange(of: scrollToBottomId) { newId in
+                    // 当需要滚动时（由sendMessage或refreshMessages触发）
+                    if let messageId = newId {
+                        // 检查这条消息是否是自己发送的
+                        let isUserMessage = session.messages.first(where: { $0.id == messageId })?.isFromUser ?? false
+                        
+                        // 延迟滚动，确保消息已渲染到视图
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo(messageId, anchor: .bottom)
+                            }
+                            // 滚动完成后，清空scrollToBottomId，避免重复触发
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                scrollToBottomId = nil
+                            }
+                        }
+                        // 双重保险，确保滚动成功
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo(messageId, anchor: .bottom)
+                            }
+                        }
+                    }
+                }
+                .onChange(of: session.messages.count) { newCount in
+                    // 如果scrollToBottomId已设置，且最后一条消息是自己发送的，则滚动
+                    if let scrollId = scrollToBottomId,
+                       let lastMessage = session.messages.last,
+                       lastMessage.isFromUser,
+                       lastMessage.id == scrollId {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo(scrollId, anchor: .bottom)
+                            }
+                        }
+                    } else if let lastMessage = session.messages.last,
+                              !lastMessage.isFromUser {
+                        // 如果是别人发送的消息，且用户在底部，则自动滚动
+                        if isAtBottom {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                }
+                            }
+                        }
+                    }
+                }
+                .onChange(of: session.messages.last?.id) { newMessageId in
+                    // 监听最后一条消息ID的变化
+                    if let lastMessage = session.messages.last,
+                       !lastMessage.isFromUser,
+                       let messageId = newMessageId,
+                       isAtBottom {
+                        // 如果是别人发送的新消息，且用户在底部，则自动滚动
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo(messageId, anchor: .bottom)
+                            }
+                        }
+                    }
+                }
+                .onChange(of: selectedSession?.messages.count) { newCount in
+                    // 监听消息数量变化（用于刷新消息后的滚动）
+                    if let session = selectedSession,
+                       let lastMessage = session.messages.last,
+                       !lastMessage.isFromUser,
+                       isAtBottom {
+                        // 如果是别人发送的新消息，且用户在底部，则自动滚动
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                            }
                         }
                     }
                 }
@@ -358,17 +504,6 @@ struct ChatInterfaceView: View {
                             Text(session.user.isOnline ? "Active" : "Offline")
                                 .font(.system(size: 12))
                                 .foregroundColor(session.user.isOnline ? .green : .gray)
-                            
-                            // Match date
-                            if session.user.isMatched, let matchDate = session.user.matchDate {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 4, height: 4)
-                                
-                                Text("Matched on \(formatMatchDate(matchDate))")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.red)
-                            }
                         }
                     }
                     
@@ -795,8 +930,24 @@ struct ChatInterfaceView: View {
                 sessions.append(session)
             }
             
-            // 按匹配时间排序，最新的在前面
+            // 按最新消息时间排序，最新的在前面
+            // 有消息的按最后消息时间排序，没有消息的按匹配时间排序放在后面
             sessions.sort { session1, session2 in
+                let hasMessages1 = !session1.messages.isEmpty
+                let hasMessages2 = !session2.messages.isEmpty
+                
+                // 如果两个都有消息，按最后消息时间排序
+                if hasMessages1 && hasMessages2 {
+                    return session1.lastMessageAt > session2.lastMessageAt
+                }
+                // 如果有消息的排在前面
+                if hasMessages1 && !hasMessages2 {
+                    return true
+                }
+                if !hasMessages1 && hasMessages2 {
+                    return false
+                }
+                // 两个都没有消息，按匹配时间排序
                 let date1 = session1.user.matchDate ?? Date.distantPast
                 let date2 = session2.user.matchDate ?? Date.distantPast
                 return date1 > date2
@@ -915,7 +1066,30 @@ struct ChatInterfaceView: View {
         // 先更新本地UI（乐观更新）
         if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
             chatSessions[index].addMessage(message)
+            // 更新最后消息时间
+            chatSessions[index].lastMessageAt = message.timestamp
             selectedSession = chatSessions[index]
+            // 设置需要滚动到的消息ID（触发滚动）
+            scrollToBottomId = message.id
+            
+            // 重新排序列表（按最新消息时间）
+            chatSessions.sort { session1, session2 in
+                let hasMessages1 = !session1.messages.isEmpty
+                let hasMessages2 = !session2.messages.isEmpty
+                
+                if hasMessages1 && hasMessages2 {
+                    return session1.lastMessageAt > session2.lastMessageAt
+                }
+                if hasMessages1 && !hasMessages2 {
+                    return true
+                }
+                if !hasMessages1 && hasMessages2 {
+                    return false
+                }
+                let date1 = session1.user.matchDate ?? Date.distantPast
+                let date2 = session2.user.matchDate ?? Date.distantPast
+                return date1 > date2
+            }
         }
         
         // 发送到数据库
@@ -1083,6 +1257,10 @@ struct ChatInterfaceView: View {
             return
         }
         
+        // 保存当前消息数量，用于检测是否有新消息
+        let previousMessageCount = session.messages.count
+        let previousLastMessageId = session.messages.last?.id
+        
         do {
             let supabaseMessages = try await supabaseService.getMessages(
                 userId1: currentUser.id,
@@ -1093,19 +1271,89 @@ struct ChatInterfaceView: View {
                 supabaseMessage.toChatMessage(currentUserId: currentUser.id)
             }
             
-            // 更新会话消息
+            // 去重：基于消息 ID 去重，确保不会有重复消息
+            var uniqueMessages: [ChatMessage] = []
+            var seenMessageIds = Set<UUID>()
+            for message in messages {
+                if !seenMessageIds.contains(message.id) {
+                    uniqueMessages.append(message)
+                    seenMessageIds.insert(message.id)
+                }
+            }
+            
+            // 检查是否有新消息（来自对方）
+            let hasNewMessageFromOther = uniqueMessages.count > previousMessageCount && 
+                                         uniqueMessages.last?.isFromUser == false &&
+                                         uniqueMessages.last?.id != previousLastMessageId
+            
+            // 更新会话消息（使用去重后的消息）
             if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
-                chatSessions[index].messages = messages
+                chatSessions[index].messages = uniqueMessages
+                // 更新最后消息时间
+                if let lastMessage = uniqueMessages.last {
+                    chatSessions[index].lastMessageAt = lastMessage.timestamp
+                }
                 selectedSession = chatSessions[index]
+                
+                // 更新列表中的会话（用于排序）
+                if let listIndex = chatSessions.firstIndex(where: { $0.id == session.id }) {
+                    chatSessions[listIndex] = chatSessions[index]
+                    // 重新排序
+                    chatSessions.sort { session1, session2 in
+                        let hasMessages1 = !session1.messages.isEmpty
+                        let hasMessages2 = !session2.messages.isEmpty
+                        
+                        if hasMessages1 && hasMessages2 {
+                            return session1.lastMessageAt > session2.lastMessageAt
+                        }
+                        if hasMessages1 && !hasMessages2 {
+                            return true
+                        }
+                        if !hasMessages1 && hasMessages2 {
+                            return false
+                        }
+                        let date1 = session1.user.matchDate ?? Date.distantPast
+                        let date2 = session2.user.matchDate ?? Date.distantPast
+                        return date1 > date2
+                    }
+                }
+                
+                // 如果有新消息且用户在底部，标记需要滚动
+                if hasNewMessageFromOther, isAtBottom, let lastMessage = uniqueMessages.last {
+                    // 通过设置 scrollToBottomId 触发滚动（会在 onChange 中处理）
+                    scrollToBottomId = lastMessage.id
+                }
             }
         } catch {
             print("⚠️ Failed to refresh messages: \(error.localizedDescription)")
         }
     }
     
+    // 检查用户是否在聊天底部
+    private func checkIfAtBottom() {
+        guard contentHeight > 0 && scrollViewHeight > 0 else {
+            return
+        }
+        
+        // 计算可滚动的高度
+        let scrollableHeight = contentHeight - scrollViewHeight
+        
+        // 如果内容不需要滚动（内容高度小于等于视图高度），认为在底部
+        if scrollableHeight <= 10 {
+            isAtBottom = true
+            return
+        }
+        
+        // 检查是否滚动到底部（使用50pt的容差）
+        let threshold = 50.0
+        isAtBottom = scrollOffset >= scrollableHeight - threshold
+    }
+    
     // 在选择会话时标记消息为已读
     private func selectSession(_ session: ChatSession) {
         selectedSession = session
+        scrollToBottomId = nil // 重置滚动状态
+        isAtBottom = true // 切换会话时，默认认为在底部
         loadAISuggestions(for: session.user)
         
         // 标记来自对方的未读消息为已读
@@ -1226,9 +1474,9 @@ struct ChatSessionRowView: View {
                         
                         Spacer()
                         
-                        // 只在有消息时显示时间
+                        // 显示最新消息时间（如果有消息）
                         if !session.messages.isEmpty {
-                            Text(formatTime(session.lastMessageAt))
+                            Text(formatLastMessageTime(session.lastMessageAt))
                                 .font(.system(size: 12))
                                 .foregroundColor(.gray)
                         }
@@ -1247,17 +1495,6 @@ struct ChatSessionRowView: View {
                         Text(session.user.isOnline ? "Active" : "Offline")
                             .font(.system(size: 12))
                             .foregroundColor(session.user.isOnline ? .green : .gray)
-                        
-                        // Match date
-                        if session.user.isMatched, let matchDate = session.user.matchDate {
-                            Circle()
-                                .fill(Color.red)
-                                .frame(width: 4, height: 4)
-                            
-                            Text("Matched on \(formatMatchDate(matchDate))")
-                                .font(.system(size: 12))
-                                .foregroundColor(.red)
-                        }
                         
                         Spacer()
                         
@@ -1292,6 +1529,24 @@ struct ChatSessionRowView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: date)
+    }
+    
+    private func formatLastMessageTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        let calendar = Calendar.current
+        
+        if calendar.isDateInToday(date) {
+            // 今天：显示时间
+            formatter.dateFormat = "HH:mm"
+            return formatter.string(from: date)
+        } else if calendar.isDateInYesterday(date) {
+            // 昨天：显示"昨天"
+            return "Yesterday"
+        } else {
+            // 更早：显示日期 MM/dd
+            formatter.dateFormat = "MM/dd"
+            return formatter.string(from: date)
+        }
     }
     
     private func formatMatchDate(_ date: Date) -> String {
@@ -1945,6 +2200,15 @@ struct ProfileCardSheetView: View {
     
     private var shouldShowTimeslot: Bool {
         profile.privacyTrust.visibilitySettings.timeslot.isVisible(isConnection: isConnection)
+    }
+}
+
+// MARK: - Preference Keys for Scroll Detection
+// Note: ScrollOffsetPreferenceKey and ContentHeightPreferenceKey are defined in ProfileSetupView.swift
+struct ScrollViewHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
