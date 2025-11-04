@@ -28,7 +28,12 @@
 	</dict>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<!-- 
+	⚠️ 重要：将下面的占位符替换为你的实际 API Key
+	或者使用环境变量 GEMINI_API_KEY
+	-->
 	<key>GEMINI_API_KEY</key>
-	<string>AIzaSyBSWp3cE-f-aAYuNn8ofQk9TCoTa8cQg6Y</string>
+	<string>YOUR_GEMINI_API_KEY_HERE</string>
 </dict>
 </plist>
+

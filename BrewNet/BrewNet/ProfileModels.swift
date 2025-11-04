@@ -198,6 +198,33 @@ struct PrivacyTrust: Codable {
         case dataSharingConsent = "data_sharing_consent"
         case reportPreferences = "report_preferences"
     }
+    
+    init(visibilitySettings: VisibilitySettings, verifiedStatus: VerifiedStatus, dataSharingConsent: Bool, reportPreferences: ReportPreferences) {
+        self.visibilitySettings = visibilitySettings
+        self.verifiedStatus = verifiedStatus
+        self.dataSharingConsent = dataSharingConsent
+        self.reportPreferences = reportPreferences
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        self.visibilitySettings = try container.decode(VisibilitySettings.self, forKey: .visibilitySettings)
+        self.verifiedStatus = try container.decode(VerifiedStatus.self, forKey: .verifiedStatus)
+        
+        // 处理 dataSharingConsent：可能是 Bool 或 Int (0/1)
+        if let boolValue = try? container.decode(Bool.self, forKey: .dataSharingConsent) {
+            self.dataSharingConsent = boolValue
+        } else if let intValue = try? container.decode(Int.self, forKey: .dataSharingConsent) {
+            self.dataSharingConsent = intValue != 0
+        } else {
+            // 尝试作为数字字符串
+            let stringValue = try container.decode(String.self, forKey: .dataSharingConsent)
+            self.dataSharingConsent = stringValue == "1" || stringValue.lowercased() == "true"
+        }
+        
+        self.reportPreferences = try container.decode(ReportPreferences.self, forKey: .reportPreferences)
+    }
 }
 
 // MARK: - Supporting Models
@@ -241,6 +268,34 @@ struct SkillSelection: Codable, Equatable {
         case skillName = "skill_name"
         case learnIn = "learn_in"
         case guideIn = "guide_in"
+    }
+    
+    init(skillName: String, learnIn: Bool, guideIn: Bool) {
+        self.skillName = skillName
+        self.learnIn = learnIn
+        self.guideIn = guideIn
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        self.skillName = try container.decode(String.self, forKey: .skillName)
+        
+        // 辅助函数：将值转换为 Bool（处理 Bool、Int、String）
+        func decodeBool(forKey key: CodingKeys) throws -> Bool {
+            if let boolValue = try? container.decode(Bool.self, forKey: key) {
+                return boolValue
+            } else if let intValue = try? container.decode(Int.self, forKey: key) {
+                return intValue != 0
+            } else {
+                // 尝试作为数字字符串
+                let stringValue = try container.decode(String.self, forKey: key)
+                return stringValue == "1" || stringValue.lowercased() == "true"
+            }
+        }
+        
+        self.learnIn = try decodeBool(forKey: .learnIn)
+        self.guideIn = try decodeBool(forKey: .guideIn)
     }
 }
 
@@ -289,6 +344,37 @@ struct DayTimeslots: Codable, Equatable {
     
     enum CodingKeys: String, CodingKey {
         case morning, noon, afternoon, evening, night
+    }
+    
+    init(morning: Bool, noon: Bool, afternoon: Bool, evening: Bool, night: Bool) {
+        self.morning = morning
+        self.noon = noon
+        self.afternoon = afternoon
+        self.evening = evening
+        self.night = night
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // 辅助函数：将值转换为 Bool（处理 Bool、Int、String）
+        func decodeBool(forKey key: CodingKeys) throws -> Bool {
+            if let boolValue = try? container.decode(Bool.self, forKey: key) {
+                return boolValue
+            } else if let intValue = try? container.decode(Int.self, forKey: key) {
+                return intValue != 0
+            } else {
+                // 尝试作为数字字符串
+                let stringValue = try container.decode(String.self, forKey: key)
+                return stringValue == "1" || stringValue.lowercased() == "true"
+            }
+        }
+        
+        self.morning = try decodeBool(forKey: .morning)
+        self.noon = try decodeBool(forKey: .noon)
+        self.afternoon = try decodeBool(forKey: .afternoon)
+        self.evening = try decodeBool(forKey: .evening)
+        self.night = try decodeBool(forKey: .night)
     }
 }
 
@@ -498,6 +584,28 @@ struct ReportPreferences: Codable {
     enum CodingKeys: String, CodingKey {
         case allowReports = "allow_reports"
         case reportCategories = "report_categories"
+    }
+    
+    init(allowReports: Bool, reportCategories: [String]) {
+        self.allowReports = allowReports
+        self.reportCategories = reportCategories
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // 处理 allowReports：可能是 Bool 或 Int (0/1)
+        if let boolValue = try? container.decode(Bool.self, forKey: .allowReports) {
+            self.allowReports = boolValue
+        } else if let intValue = try? container.decode(Int.self, forKey: .allowReports) {
+            self.allowReports = intValue != 0
+        } else {
+            // 尝试作为数字字符串
+            let stringValue = try container.decode(String.self, forKey: .allowReports)
+            self.allowReports = stringValue == "1" || stringValue.lowercased() == "true"
+        }
+        
+        self.reportCategories = try container.decode([String].self, forKey: .reportCategories)
     }
 }
 

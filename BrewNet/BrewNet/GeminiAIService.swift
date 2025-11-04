@@ -8,14 +8,23 @@ class GeminiAIService: ObservableObject {
     // Note: In a real application, you need to get the API key from a secure place
     private var apiKey: String {
         // 首先尝试从环境变量读取
-        if let key = ProcessInfo.processInfo.environment["GEMINI_API_KEY"] {
+        if let key = ProcessInfo.processInfo.environment["GEMINI_API_KEY"], !key.isEmpty {
+            print("🔑 从环境变量读取 API Key")
             return key
         }
         // 其次尝试从 Info.plist 读取
-        if let key = Bundle.main.object(forInfoDictionaryKey: "GEMINI_API_KEY") as? String {
+        if let key = Bundle.main.object(forInfoDictionaryKey: "GEMINI_API_KEY") as? String, !key.isEmpty, key != "YOUR_GEMINI_API_KEY" {
+            print("🔑 从 Info.plist 读取 API Key: \(key.prefix(10))...")
+            return key
+        }
+        // 尝试从 Info.plist 的根字典读取（备用方法）
+        if let infoDict = Bundle.main.infoDictionary,
+           let key = infoDict["GEMINI_API_KEY"] as? String, !key.isEmpty, key != "YOUR_GEMINI_API_KEY" {
+            print("🔑 从 Info.plist (infoDictionary) 读取 API Key: \(key.prefix(10))...")
             return key
         }
         // 返回占位符（如果没有配置，将使用模拟模式）
+        print("⚠️ 未找到有效的 API Key")
         return "YOUR_GEMINI_API_KEY"
     }
     // 使用 Gemini 2.0 Flash 模型（稳定版）
@@ -24,13 +33,28 @@ class GeminiAIService: ObservableObject {
     
     private init() {
         // 检查是否有有效的 API Key
-        self.useRealAPI = ProcessInfo.processInfo.environment["GEMINI_API_KEY"] != nil || 
-                         (Bundle.main.object(forInfoDictionaryKey: "GEMINI_API_KEY") as? String) != nil
+        let envKey = ProcessInfo.processInfo.environment["GEMINI_API_KEY"]
+        let plistKey1 = Bundle.main.object(forInfoDictionaryKey: "GEMINI_API_KEY") as? String
+        let plistKey2 = Bundle.main.infoDictionary?["GEMINI_API_KEY"] as? String
+        
+        // 检查是否有任何有效的 Key
+        let hasValidKey = (envKey != nil && !envKey!.isEmpty) ||
+                         (plistKey1 != nil && !plistKey1!.isEmpty && plistKey1 != "YOUR_GEMINI_API_KEY") ||
+                         (plistKey2 != nil && !plistKey2!.isEmpty && plistKey2 != "YOUR_GEMINI_API_KEY")
+        
+        self.useRealAPI = hasValidKey
         
         if useRealAPI {
             print("✅ Gemini API Key 已配置，将使用真实 AI 响应")
+            // 打印 API Key 的前几个字符用于调试（不打印完整 Key）
+            let actualKey = self.apiKey
+            if actualKey != "YOUR_GEMINI_API_KEY" {
+                print("🔑 API Key 长度: \(actualKey.count) 字符")
+            }
         } else {
             print("ℹ️ Gemini API Key 未配置，将使用模拟响应")
+            print("   - 环境变量 GEMINI_API_KEY: \(envKey != nil ? "存在" : "不存在")")
+            print("   - Info.plist GEMINI_API_KEY: \(plistKey1 ?? "未找到")")
         }
     }
     

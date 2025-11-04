@@ -475,12 +475,48 @@ class SupabaseService: ObservableObject {
                         self = .double(double)
                     case let bool as Bool:
                         self = .bool(bool)
+                    case let number as NSNumber:
+                        // JSONSerialization 可能返回 NSNumber，需要转换为正确的类型
+                        if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                            self = .bool(number.boolValue)
+                        } else {
+                            // 检查是否是浮点数：通过比较 doubleValue 和 intValue 是否相等
+                            let doubleVal = number.doubleValue
+                            let intVal = Double(number.intValue)
+                            // 如果 double 值不等于 int 值，或者类型编码显示是浮点数，则使用 double
+                            let objCType = String(cString: number.objCType)
+                            if objCType.contains("f") || objCType.contains("d") || abs(doubleVal - intVal) > 0.0001 {
+                                self = .double(doubleVal)
+                            } else {
+                                self = .int(number.intValue)
+                            }
+                        }
                     case let array as [Any]:
                         self = .array(array.map { AnyCodableValue($0) })
                     case let dict as [String: Any]:
                         self = .object(dict.mapValues { AnyCodableValue($0) })
                     default:
                         self = .null
+                    }
+                }
+                
+                func encode(to encoder: Encoder) throws {
+                    var container = encoder.singleValueContainer()
+                    switch self {
+                    case .string(let value):
+                        try container.encode(value)
+                    case .int(let value):
+                        try container.encode(value)
+                    case .double(let value):
+                        try container.encode(value)
+                    case .bool(let value):
+                        try container.encode(value)
+                    case .array(let value):
+                        try container.encode(value)
+                    case .object(let value):
+                        try container.encode(value)
+                    case .null:
+                        try container.encodeNil()
                     }
                 }
             }
@@ -501,21 +537,67 @@ class SupabaseService: ObservableObject {
             )
             
             print("🔄 Inserting profile with manual dictionary...")
+            
+            // 尝试编码 insertData 以验证格式
+            do {
+                let testEncoder = JSONEncoder()
+                testEncoder.outputFormatting = .prettyPrinted
+                let testData = try testEncoder.encode(insertData)
+                if let testString = String(data: testData, encoding: .utf8) {
+                    print("📤 Insert data preview: \(testString.prefix(500))...")
+                }
+            } catch {
+                print("⚠️ Failed to encode insert data for preview: \(error)")
+            }
                 
+            do {
                 let response = try await client
                     .from(SupabaseTable.profiles.rawValue)
-                .insert(insertData)
+                    .insert(insertData)
                     .select()
                     .single()
                     .execute()
                 
+                print("📊 Response status: \(response.response.statusCode)")
+                print("📦 Response data size: \(response.data.count) bytes")
+                
                 let data = response.data
+                
+                // 打印原始响应用于调试
+                if let responseString = String(data: data, encoding: .utf8) {
+                    print("📄 Response JSON: \(responseString.prefix(1000))")
+                }
+                
                 let createdProfile = try JSONDecoder().decode(SupabaseProfile.self, from: data)
                 print("✅ Profile created successfully: \(createdProfile.id)")
                 return createdProfile
+            } catch let encodingError {
+                print("❌ Failed to create profile: \(encodingError.localizedDescription)")
                 
+                // 如果是 DecodingError，打印更详细的信息
+                if let decodingError = encodingError as? DecodingError {
+                    print("🔍 Decoding error details:")
+                    switch decodingError {
+                    case .typeMismatch(let type, let context):
+                        print("   Type mismatch: expected \(type), path: \(context.codingPath)")
+                    case .valueNotFound(let type, let context):
+                        print("   Value not found: \(type), path: \(context.codingPath)")
+                    case .keyNotFound(let key, let context):
+                        print("   Key not found: \(key.stringValue), path: \(context.codingPath)")
+                    case .dataCorrupted(let context):
+                        print("   Data corrupted: \(context.debugDescription), path: \(context.codingPath)")
+                    @unknown default:
+                        print("   Unknown decoding error")
+                    }
+                }
+                
+                // 重新抛出错误以便外层处理
+                throw encodingError
+            }
+            
             } catch {
-            print("❌ Failed to create profile: \(error.localizedDescription)")
+            print("❌ Failed to create profile (outer catch): \(error.localizedDescription)")
+            print("🔍 Error type: \(type(of: error))")
                 
                 // 如果是重复键错误，尝试更新
                 if error.localizedDescription.contains("duplicate key value violates unique constraint") {

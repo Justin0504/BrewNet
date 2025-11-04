@@ -1,1 +1,41 @@
 .build/
+
+# Xcode
+*.xcuserstate
+*.xcuserdatad
+*.xcworkspace/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcscmblueprint
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# CocoaPods
+Pods/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# API Keys and Secrets (重要：不要提交敏感信息)
+*.secrets
+*.apikey
+Info-local.plist
+**/Info-local.plist
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# 临时文件
+*.swp
+*.swo
+*~
