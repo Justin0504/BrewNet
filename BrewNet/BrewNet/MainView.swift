@@ -73,6 +73,10 @@ struct MainView: View {
             // 当收到导航到 Chat 的通知时，切换到 Chat tab
             selectedTab = 3
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToMatches"))) { _ in
+            // 当收到导航到 Matches 的通知时，切换到 Matches tab
+            selectedTab = 0
+        }
     }
     
     // 预加载 Matches 数据

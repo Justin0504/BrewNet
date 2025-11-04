@@ -301,58 +301,57 @@ struct ProfileHeaderView: View {
                             .clipShape(Circle())
                     }
                     
-                    // Company/School and Title button (在图标下面，白色背景，可点击编辑)
-                    Button(action: {
-                        onEditProfile?()
-                    }) {
-                        HStack {
-                            Image(systemName: "pencil")
-                                .foregroundColor(BrewTheme.primaryBrown)
-                                .font(.system(size: 14))
-                            
-                            // 优先显示公司，如果没有则显示学校
-                            if let company = profile.professionalBackground.currentCompany, !company.isEmpty {
+                    // Company/School and Title display (仅显示，不可点击)
+                    HStack {
+                        // 优先显示公司，如果没有则显示学校
+                        if let company = profile.professionalBackground.currentCompany, !company.isEmpty {
+                            if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
+                                Text("\(company) · \(jobTitle)")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.black)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            } else {
                                 Text(company)
                                     .font(.system(size: 16, weight: .medium))
                                     .foregroundColor(.black)
-                                
-                                // 如果有 title，显示在后面
-                                if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
-                                    Text(" · \(jobTitle)")
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(.gray)
-                                }
-                            } else if let education = profile.professionalBackground.education, !education.isEmpty {
-                                // 如果没有公司，显示学校
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                        } else if let education = profile.professionalBackground.education, !education.isEmpty {
+                            // 如果没有公司，显示学校
+                            if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
+                                Text("\(education) · \(jobTitle)")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.black)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            } else {
                                 Text(education)
                                     .font(.system(size: 16, weight: .medium))
                                     .foregroundColor(.black)
-                                
-                                // 如果有 title，显示在后面
-                                if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
-                                    Text(" · \(jobTitle)")
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(.gray)
-                                }
-                            } else {
-                                // 如果都没有，显示占位符
-                                Text("Complete Your Profile")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.gray)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
                             }
-                            
-                            Spacer()
+                        } else {
+                            // 如果都没有，显示占位符
+                            Text("Complete Your Profile")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundColor(.gray)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(Color.white)
-                        .cornerRadius(12)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-                        )
+                        
+                        Spacer()
                     }
-                    .buttonStyle(PlainButtonStyle())
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color.white)
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                    )
                 }
                 
                 Spacer()
