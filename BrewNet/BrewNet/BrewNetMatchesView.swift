@@ -120,33 +120,60 @@ struct BrewNetMatchesView: View {
             if !cachedProfiles.isEmpty && isCacheFromRecommendation, let lastLoad = lastLoadTime, Date().timeIntervalSince(lastLoad) < 300 {
                 // 如果之前已经显示过（切换tab回来），恢复上次切走时的索引
                 if hasAppearedBefore {
-                    // 立即显示缓存，恢复上次切走时的索引
+                    // 先显示缓存，但立即启动异步验证过滤
                     profiles = cachedProfiles
                     currentIndex = restoreCurrentIndex() // 恢复切换tab时的索引
-                    isLoading = false
-                    if currentIndex < profiles.count {
-                        let profile = profiles[currentIndex]
-                        print("⚡ Instant display: showing profile at index \(currentIndex) (\(profile.coreIdentity.name)) from tab switch")
+                    
+                    // 确保索引有效
+                    if currentIndex >= profiles.count && !profiles.isEmpty {
+                        currentIndex = 0
                     }
                     
-                    // 后台验证并更新
+                    isLoading = false
+                    
+                    // 立即进行快速验证和过滤（异步，但会尽快更新显示）
+                    Task {
+                        await quickValidateAndFilterCache()
+                    }
+                    
+                    // 后台完整验证并更新（会进一步过滤并更新缓存）
                     Task {
                         await validateAndDisplayCache()
                     }
                 } else {
-                    // 首次加载（登录时），显示加载状态，但保持已恢复的索引
+                    // 首次加载（登录时），先显示加载状态，然后快速验证过滤后再显示
                     isLoading = true
-                    profiles = cachedProfiles // 先显示缓存，使用已恢复的索引
-                    isLoading = false // 立即显示，不等待验证
                     
-                    if currentIndex < profiles.count {
-                        let profile = profiles[currentIndex]
-                        print("⚡ Instant display: showing profile at index \(currentIndex) (\(profile.coreIdentity.name)) from last session")
-                    }
-                    
-                    // 后台验证并更新
-                    Task {
-                        await validateAndDisplayCache()
+                    // 如果缓存为空，直接加载新数据
+                    if cachedProfiles.isEmpty {
+                        loadProfiles()
+                    } else {
+                        // 立即进行快速验证和过滤（等待完成后再显示，避免显示错误的用户）
+                        Task {
+                            await quickValidateAndFilterCache()
+                            
+                            // 快速验证完成后，检查是否还有有效数据
+                            await MainActor.run {
+                                if profiles.isEmpty && cachedProfiles.isEmpty {
+                                    // 如果过滤后没有数据，加载新数据
+                                    print("⚠️ No valid profiles after quick filter, loading new profiles...")
+                                    loadProfiles()
+                                } else {
+                                    // 有有效数据，更新显示
+                                    isLoading = false
+                                    if currentIndex < profiles.count {
+                                        let profile = profiles[currentIndex]
+                                        print("⚡ Display after quick validation: showing profile at index \(currentIndex) (\(profile.coreIdentity.name)) from last session")
+                                    } else if !profiles.isEmpty {
+                                        currentIndex = 0
+                                        isLoading = false
+                                    }
+                                }
+                            }
+                            
+                            // 后台完整验证并更新（会进一步过滤并更新缓存）
+                            await validateAndDisplayCache()
+                        }
                     }
                 }
             } else {
@@ -326,6 +353,9 @@ struct BrewNetMatchesView: View {
         // 立即从列表中移除已拒绝的 profile，避免连续闪过
         profiles.remove(at: currentIndex)
         
+        // 同时从缓存中移除，确保切换 tab 后不会再次显示
+        cachedProfiles.removeAll { $0.userId == profile.userId }
+        
         // 如果移除后当前索引超出范围，调整索引
         if currentIndex >= profiles.count && !profiles.isEmpty {
             currentIndex = 0
@@ -339,6 +369,9 @@ struct BrewNetMatchesView: View {
         // 重置动画状态
         dragOffset = .zero
         rotationAngle = 0
+        
+        // 立即更新持久化缓存，确保切换 tab 后不会显示已拒绝的用户
+        saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
         
         // 记录 Pass 交互（异步，不阻塞UI）
         Task {
@@ -628,6 +661,76 @@ struct BrewNetMatchesView: View {
             cachedProfiles = []
             isCacheFromRecommendation = false
             currentIndex = 0
+        }
+    }
+    
+    // 快速验证和过滤缓存（用于切换 tab 回来时立即过滤）
+    private func quickValidateAndFilterCache() async {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        // 保存原始缓存数量（用于日志）
+        let originalCount = await MainActor.run { cachedProfiles.count }
+        
+        // 快速获取已排除的用户ID（包括已 pass 的用户）
+        do {
+            let excludedUserIds = try await supabaseService.getExcludedUserIds(userId: currentUser.id)
+            
+            // 立即过滤掉已排除的用户
+            let filteredProfiles = await MainActor.run {
+                cachedProfiles.filter { profile in
+                    !excludedUserIds.contains(profile.userId) &&
+                    isValidProfileName(profile.coreIdentity.name)
+                }
+            }
+            
+            await MainActor.run {
+                // 如果过滤后还有数据，立即更新显示
+                if !filteredProfiles.isEmpty {
+                    let previousIndex = currentIndex
+                    let previousProfileId = currentIndex < profiles.count ? profiles[currentIndex].userId : nil
+                    
+                    profiles = filteredProfiles
+                    cachedProfiles = filteredProfiles
+                    
+                    // 尝试保持当前索引（如果对应的profile仍然有效）
+                    if let previousId = previousProfileId, let newIndex = filteredProfiles.firstIndex(where: { $0.userId == previousId }) {
+                        currentIndex = newIndex
+                    } else if previousIndex < filteredProfiles.count {
+                        currentIndex = previousIndex
+                    } else {
+                        currentIndex = 0
+                    }
+                    
+                    // 如果当前显示的用户在排除列表中，切换到下一个有效的
+                    if currentIndex < profiles.count {
+                        let currentProfile = profiles[currentIndex]
+                        if excludedUserIds.contains(currentProfile.userId) {
+                            if let nextValidIndex = filteredProfiles.firstIndex(where: { !excludedUserIds.contains($0.userId) }) {
+                                currentIndex = nextValidIndex
+                            } else {
+                                currentIndex = 0
+                            }
+                        }
+                    }
+                    
+                    print("⚡ Quick filtered cache: \(filteredProfiles.count)/\(originalCount) profiles remain, showing at index \(currentIndex)")
+                } else {
+                    // 如果过滤后没有数据，清空 profiles 和 cachedProfiles，等待完整验证或重新加载
+                    profiles = []
+                    cachedProfiles = []
+                    currentIndex = 0
+                    print("⚠️ Quick filter removed all profiles (from \(originalCount)), cleared cache")
+                }
+            }
+        } catch {
+            print("⚠️ Failed to quick validate cache: \(error.localizedDescription)")
+            // 失败时，如果有缓存数据，先显示缓存（稍后完整验证会修正）
+            // 如果失败且没有缓存，等待完整验证或重新加载
+            await MainActor.run {
+                if cachedProfiles.isEmpty {
+                    profiles = []
+                }
+            }
         }
     }
     

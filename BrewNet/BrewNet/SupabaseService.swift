@@ -526,7 +526,7 @@ class SupabaseService: ObservableObject {
                 return dict.mapValues { AnyCodableValue($0) }
             }
             
-            var insertData = ProfileInsert(
+            let insertData = ProfileInsert(
                 user_id: profile.userId,
                 core_identity: convertDict(coreIdentity),
                 professional_background: convertDict(professionalBackground),
