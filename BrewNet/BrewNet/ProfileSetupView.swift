@@ -124,20 +124,27 @@ struct ProfileSetupView: View {
                 }
                 
                 Button(action: {
-                    guard !isNavigating else { return }
+                    guard !isNavigating && !isLoading else {
+                        print("⚠️ Button clicked but isNavigating=\(isNavigating) or isLoading=\(isLoading)")
+                        return
+                    }
+                    
+                    print("🔘 Button clicked: currentStep=\(currentStep), totalSteps=\(totalSteps)")
                     isNavigating = true
                     
                     if currentStep == totalSteps {
+                        print("✅ Calling completeProfileSetup()...")
                         completeProfileSetup()
+                        // 注意：completeProfileSetup 是异步的，isLoading 会在内部设置
+                        // 不需要在这里重置 isNavigating，因为 completeProfileSetup 会处理状态
                     } else {
                         withAnimation(.easeInOut(duration: 0.3)) {
                             currentStep += 1
                         }
-                    }
-                    
-                    // Reset navigation state after animation
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        isNavigating = false
+                        // Reset navigation state after animation
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            isNavigating = false
+                        }
                     }
                 }) {
                     Text(currentStep == totalSteps ? "Complete Setup" : "Next")
@@ -205,95 +212,117 @@ struct ProfileSetupView: View {
                         Spacer()
                     }
                 } else {
-                    VStack(spacing: 0) {
-                        // Header with progress
-                        progressHeaderView
-                        .padding(.top, 20)
-                        
-                        // Content
-                        ScrollViewReader { proxy in
-                            GeometryReader { scrollGeometry in
-                                ScrollView {
-                                    VStack(spacing: 24) {
-                                        switch currentStep {
-                                        case 1:
-                                            CoreIdentityStep(profileData: $profileData)
-                                                .id("step-1")
-                                        case 2:
-                                            ProfessionalBackgroundStep(profileData: $profileData)
-                                                .id("step-2")
-                                        case 3:
-                                            NetworkingIntentionStep(profileData: $profileData)
-                                                .id("step-3")
-                                        case 4:
-                                            NetworkingPreferencesStep(profileData: $profileData)
-                                                .id("step-4")
-                                        case 5:
-                                            PersonalitySocialStep(profileData: $profileData)
-                                                .id("step-5")
-                                        case 6:
-                                            PrivacyTrustStep(profileData: $profileData)
-                                                .id("step-6")
-                                        default:
-                                            EmptyView()
+                    // 添加加载覆盖层
+                    ZStack {
+                        VStack(spacing: 0) {
+                            // Header with progress
+                            progressHeaderView
+                            .padding(.top, 20)
+                            
+                            // Content
+                            ScrollViewReader { proxy in
+                                GeometryReader { scrollGeometry in
+                                    ScrollView {
+                                        VStack(spacing: 24) {
+                                            switch currentStep {
+                                            case 1:
+                                                CoreIdentityStep(profileData: $profileData)
+                                                    .id("step-1")
+                                            case 2:
+                                                ProfessionalBackgroundStep(profileData: $profileData)
+                                                    .id("step-2")
+                                            case 3:
+                                                NetworkingIntentionStep(profileData: $profileData)
+                                                    .id("step-3")
+                                            case 4:
+                                                NetworkingPreferencesStep(profileData: $profileData)
+                                                    .id("step-4")
+                                            case 5:
+                                                PersonalitySocialStep(profileData: $profileData)
+                                                    .id("step-5")
+                                            case 6:
+                                                PrivacyTrustStep(profileData: $profileData)
+                                                    .id("step-6")
+                                            default:
+                                                EmptyView()
+                                            }
                                         }
-                                    }
-                                    .padding(.horizontal, 32)
-                                    .padding(.top, 32)
-                                    .background(
-                                        GeometryReader { contentGeometry in
-                                            Color.clear
-                                                .preference(key: ScrollOffsetPreferenceKey.self, value: contentGeometry.frame(in: .named("scroll")).minY)
-                                                .preference(key: ContentHeightPreferenceKey.self, value: contentGeometry.size.height)
-                                        }
-                                    )
-                                    .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
-                                        scrollOffset = -value
-                                        checkIfReachedBottom()
-                                    }
-                                    .onPreferenceChange(ContentHeightPreferenceKey.self) { value in
-                                        contentHeight = value
-                                        // Delay check to allow layout to settle
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                        .padding(.horizontal, 32)
+                                        .padding(.top, 32)
+                                        .background(
+                                            GeometryReader { contentGeometry in
+                                                Color.clear
+                                                    .preference(key: ScrollOffsetPreferenceKey.self, value: contentGeometry.frame(in: .named("scroll")).minY)
+                                                    .preference(key: ContentHeightPreferenceKey.self, value: contentGeometry.size.height)
+                                            }
+                                        )
+                                        .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+                                            scrollOffset = -value
                                             checkIfReachedBottom()
                                         }
-                                    }
-                                    .onChange(of: currentStep) { newStep in
-                                        // Reset bottom state when step changes
-                                        hasReachedBottom[newStep] = false
-                                        // Only scroll to top when step actually changes, not during picker interactions
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                            withAnimation(.easeInOut(duration: 0.3)) {
-                                                proxy.scrollTo("step-\(newStep)", anchor: .top)
-                                            }
-                                            // Check if bottom reached after scroll animation
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                        .onPreferenceChange(ContentHeightPreferenceKey.self) { value in
+                                            contentHeight = value
+                                            // Delay check to allow layout to settle
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                                                 checkIfReachedBottom()
                                             }
                                         }
+                                        .onChange(of: currentStep) { newStep in
+                                            // Reset bottom state when step changes
+                                            hasReachedBottom[newStep] = false
+                                            // Only scroll to top when step actually changes, not during picker interactions
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                                withAnimation(.easeInOut(duration: 0.3)) {
+                                                    proxy.scrollTo("step-\(newStep)", anchor: .top)
+                                                }
+                                                // Check if bottom reached after scroll animation
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                                    checkIfReachedBottom()
+                                                }
+                                            }
+                                        }
                                     }
-                                }
-                                .coordinateSpace(name: "scroll")
-                                .onAppear {
-                                    scrollViewHeight = scrollGeometry.size.height
-                                    // Check if bottom reached after layout completes
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                        checkIfReachedBottom()
+                                    .coordinateSpace(name: "scroll")
+                                    .onAppear {
+                                        scrollViewHeight = scrollGeometry.size.height
+                                        // Check if bottom reached after layout completes
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                            checkIfReachedBottom()
+                                        }
                                     }
-                                }
-                                .onChange(of: scrollGeometry.size.height) { newHeight in
-                                    scrollViewHeight = newHeight
-                                    // Delay check to allow layout to settle
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                        checkIfReachedBottom()
+                                    .onChange(of: scrollGeometry.size.height) { newHeight in
+                                        scrollViewHeight = newHeight
+                                        // Delay check to allow layout to settle
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                            checkIfReachedBottom()
+                                        }
                                     }
                                 }
                             }
+                            
+                            // Navigation buttons
+                            navigationButtonsView
+                            .padding(.bottom, 50)
                         }
                         
-                        // Navigation buttons
-                        navigationButtonsView
-                        .padding(.bottom, 50)
+                        // 加载覆盖层 - 当保存 profile 时显示
+                        if isLoading {
+                            Color.black.opacity(0.3)
+                                .ignoresSafeArea()
+                            
+                            VStack(spacing: 24) {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(1.5)
+                                
+                                Text("Saving Profile...")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundColor(.white)
+                            }
+                            .padding(32)
+                            .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .cornerRadius(16)
+                        }
                     }
                 }
             }
@@ -339,12 +368,18 @@ struct ProfileSetupView: View {
     
     // MARK: - Profile Completion
     private func completeProfileSetup() {
+        print("🚀 completeProfileSetup() called")
+        
         guard let currentUser = authManager.currentUser else {
+            print("❌ No current user found")
             showAlert(message: "User not found. Please log in again.")
+            isNavigating = false
             return
         }
         
+        print("✅ Current user found: \(currentUser.id)")
         isLoading = true
+        isNavigating = false // 重置导航状态，因为我们将显示加载指示器
         
         Task {
             do {
@@ -421,20 +456,27 @@ struct ProfileSetupView: View {
                 await MainActor.run {
                     isLoading = false
                     
-                    // 无论是编辑还是首次设置，保存后都直接关闭 sheet 并跳转到 Profile 页面
+                    // 无论是编辑还是首次设置，保存后都直接关闭 sheet
                     print("✅ Profile saved successfully, closing setup view...")
                     
-                    // 先关闭 sheet，避免触发重新加载
+                    // 只在首次设置时更新 auth manager（在 dismiss 之前，避免触发 ContentView 重新渲染）
+                    if isFirstTimeSetup {
+                        authManager.updateProfileSetupCompleted(true)
+                    }
+                    
+                    // 先关闭 sheet
                     dismiss()
                     
-                    // 延迟发送通知，确保 sheet 已完全关闭后再刷新数据
+                    // 延迟发送通知，确保 sheet 已完全关闭后再处理
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        // 只在首次设置时更新 auth manager，避免触发重新加载
                         if isFirstTimeSetup {
-                            authManager.updateProfileSetupCompleted(true)
+                            // 首次设置：发送通知显示启动画面，然后进入主界面
+                            print("🎬 首次设置完成，发送显示启动画面通知...")
+                            NotificationCenter.default.post(name: NSNotification.Name("ShowSplashScreen"), object: nil)
+                        } else {
+                            // 编辑模式：只发送通知刷新 profile 数据
+                            NotificationCenter.default.post(name: NSNotification.Name("ProfileUpdated"), object: nil)
                         }
-                        // 发送通知刷新 profile 数据
-                        NotificationCenter.default.post(name: NSNotification.Name("ProfileUpdated"), object: nil)
                     }
                 }
                 
@@ -922,8 +964,7 @@ struct CoreIdentityStep: View {
             personalWebsite: personalWebsite.isEmpty ? nil : personalWebsite,
             githubUrl: nil,
             linkedinUrl: nil,
-            timeZone: TimeZone.current.identifier,
-            availableTimeslot: AvailableTimeslot.createDefault()
+            timeZone: TimeZone.current.identifier
         )
         profileData.coreIdentity = coreIdentity
     }

@@ -53,7 +53,7 @@ struct CoreIdentity: Codable {
     let githubUrl: String?
     let linkedinUrl: String?
     let timeZone: String
-    let availableTimeslot: AvailableTimeslot
+    // 注意：available_timeslot 已移动到 NetworkingPreferences 中
     
     enum CodingKeys: String, CodingKey {
         case name
@@ -67,10 +67,10 @@ struct CoreIdentity: Codable {
         case githubUrl = "github_url"
         case linkedinUrl = "linkedin_url"
         case timeZone = "time_zone"
-        case availableTimeslot = "available_timeslot"
+        // available_timeslot 已移除，现在在 networking_preferences 中
     }
     
-    init(name: String, email: String, phoneNumber: String?, profileImage: String?, bio: String?, pronouns: String?, location: String?, personalWebsite: String?, githubUrl: String?, linkedinUrl: String?, timeZone: String, availableTimeslot: AvailableTimeslot) {
+    init(name: String, email: String, phoneNumber: String?, profileImage: String?, bio: String?, pronouns: String?, location: String?, personalWebsite: String?, githubUrl: String?, linkedinUrl: String?, timeZone: String) {
         self.name = name
         self.email = email
         self.phoneNumber = phoneNumber
@@ -82,7 +82,26 @@ struct CoreIdentity: Codable {
         self.githubUrl = githubUrl
         self.linkedinUrl = linkedinUrl
         self.timeZone = timeZone
-        self.availableTimeslot = availableTimeslot
+    }
+    
+    // 自定义解码器：忽略 core_identity 中的 available_timeslot（如果存在）
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        self.name = try container.decode(String.self, forKey: .name)
+        self.email = try container.decode(String.self, forKey: .email)
+        self.phoneNumber = try container.decodeIfPresent(String.self, forKey: .phoneNumber)
+        self.profileImage = try container.decodeIfPresent(String.self, forKey: .profileImage)
+        self.bio = try container.decodeIfPresent(String.self, forKey: .bio)
+        self.pronouns = try container.decodeIfPresent(String.self, forKey: .pronouns)
+        self.location = try container.decodeIfPresent(String.self, forKey: .location)
+        self.personalWebsite = try container.decodeIfPresent(String.self, forKey: .personalWebsite)
+        self.githubUrl = try container.decodeIfPresent(String.self, forKey: .githubUrl)
+        self.linkedinUrl = try container.decodeIfPresent(String.self, forKey: .linkedinUrl)
+        self.timeZone = try container.decode(String.self, forKey: .timeZone)
+        
+        // 忽略 available_timeslot（如果存在），因为现在它应该在 networking_preferences 中
+        // 这样即使数据库中的 core_identity 包含 available_timeslot，也不会解码错误
     }
 }
 
@@ -662,8 +681,7 @@ extension BrewNetProfile {
                 personalWebsite: nil,
                 githubUrl: nil,
                 linkedinUrl: nil,
-                timeZone: TimeZone.current.identifier,
-                availableTimeslot: AvailableTimeslot.createDefault()
+                timeZone: TimeZone.current.identifier
             ),
             professionalBackground: ProfessionalBackground(
                 currentCompany: nil,

@@ -335,6 +335,32 @@ struct BrewNetMatchesView: View {
                 
                 print("✅ Invitation sent successfully: \(invitation.id)")
                 
+                // 清除推荐缓存，确保已发送邀请的用户不再出现在推荐列表中
+                await MainActor.run {
+                    // 1. 清除本地缓存
+                    cachedProfiles.removeAll()
+                    profiles.removeAll { $0.userId == profile.userId }
+                    
+                    // 2. 清除持久化缓存
+                    if let currentUser = authManager.currentUser {
+                        let cacheKey = "matches_cache_\(currentUser.id)"
+                        let timeKey = "matches_cache_time_\(currentUser.id)"
+                        UserDefaults.standard.removeObject(forKey: cacheKey)
+                        UserDefaults.standard.removeObject(forKey: timeKey)
+                        print("🗑️ Cleared local cache for recommendations")
+                    }
+                    
+                    // 3. 清除服务器端的推荐缓存（异步）
+                    Task {
+                        do {
+                            try await supabaseService.clearRecommendationCache(userId: currentUser.id)
+                            print("🗑️ Cleared server-side recommendation cache")
+                        } catch {
+                            print("⚠️ Failed to clear server-side cache: \(error.localizedDescription)")
+                        }
+                    }
+                }
+                
                 // 检查对方是否也给我发了邀请（双向邀请）
                 let receivedInvitations = try? await supabaseService.getPendingInvitations(userId: currentUser.id)
                 let existingInvitationFromThem = receivedInvitations?.first { $0.senderId == profile.userId }
@@ -428,6 +454,7 @@ struct BrewNetMatchesView: View {
         errorMessage = nil
         currentIndex = 0
         // 如果有缓存，先显示缓存（提供即时反馈）
+        // 注意：缓存应该已经按推荐分数排序，不需要重新排序
         if !cachedProfiles.isEmpty {
             // 过滤掉已pass和已like的用户
             let passedUserIds = Set(passedProfiles.map { $0.userId })
@@ -435,10 +462,11 @@ struct BrewNetMatchesView: View {
             let filteredCache = cachedProfiles.filter { profile in
                 !passedUserIds.contains(profile.userId) && !likedUserIds.contains(profile.userId)
             }
+            // 保持缓存中的顺序（推荐分数从高到低）
             profiles = filteredCache
             cachedProfiles = filteredCache
             isLoading = false // 允许用户立即看到数据
-            print("✅ Displaying cached profiles immediately: \(filteredCache.count) profiles (filtered from \(cachedProfiles.count))")
+            print("✅ Displaying cached profiles immediately: \(filteredCache.count) profiles (filtered from \(cachedProfiles.count), maintaining recommendation order)")
         } else {
             // 没有缓存时才显示加载状态
             isLoading = true
@@ -555,9 +583,13 @@ struct BrewNetMatchesView: View {
                     limit: 20
                 )
                 
-                let brewNetProfiles = recommendations.map { $0.profile }
+                // 确保按照推荐分数排序（从高到低）
+                let sortedRecommendations = recommendations.sorted { $0.score > $1.score }
+                
+                let brewNetProfiles = sortedRecommendations.map { $0.profile }
                 
                 await MainActor.run {
+                    // 确保按照推荐分数排序显示
                     profiles = brewNetProfiles
                     cachedProfiles = brewNetProfiles
                     lastLoadTime = Date()
@@ -566,7 +598,8 @@ struct BrewNetMatchesView: View {
                     hasMoreProfiles = false // Two-Tower 返回固定数量
                     
                     print("✅ Two-Tower recommendations loaded: \(brewNetProfiles.count) profiles")
-                    print("📊 Scores: \(recommendations.map { String(format: "%.3f", $0.score) }.joined(separator: ", "))")
+                    print("📊 Top 5 Scores: \(sortedRecommendations.prefix(5).map { String(format: "%.3f", $0.score) }.joined(separator: ", "))")
+                    print("📊 First profile: \(brewNetProfiles.first?.coreIdentity.name ?? "N/A") (score: \(sortedRecommendations.first?.score ?? 0.0))")
                 }
                 return
             }
@@ -678,16 +711,7 @@ struct BrewNetMatchesView: View {
                 personalWebsite: "https://sarahchen.com",
                 githubUrl: nil,
                 linkedinUrl: nil,
-                timeZone: "America/Los_Angeles",
-                availableTimeslot: AvailableTimeslot(
-                    sunday: DayTimeslots(morning: false, noon: false, afternoon: true, evening: false, night: false),
-                    monday: DayTimeslots(morning: false, noon: true, afternoon: false, evening: false, night: false),
-                    tuesday: DayTimeslots(morning: false, noon: true, afternoon: false, evening: false, night: false),
-                    wednesday: DayTimeslots(morning: false, noon: false, afternoon: true, evening: false, night: false),
-                    thursday: DayTimeslots(morning: false, noon: false, afternoon: false, evening: false, night: false),
-                    friday: DayTimeslots(morning: false, noon: false, afternoon: false, evening: false, night: false),
-                    saturday: DayTimeslots(morning: true, noon: false, afternoon: false, evening: false, night: false)
-                )
+                timeZone: "America/Los_Angeles"
             ),
             professionalBackground: ProfessionalBackground(
                 currentCompany: "Google",
@@ -773,16 +797,7 @@ struct BrewNetMatchesView: View {
                 personalWebsite: nil,
                 githubUrl: nil,
                 linkedinUrl: nil,
-                timeZone: "America/New_York",
-                availableTimeslot: AvailableTimeslot(
-                    sunday: DayTimeslots(morning: false, noon: false, afternoon: false, evening: true, night: false),
-                    monday: DayTimeslots(morning: false, noon: false, afternoon: false, evening: true, night: false),
-                    tuesday: DayTimeslots(morning: false, noon: false, afternoon: false, evening: true, night: false),
-                    wednesday: DayTimeslots(morning: false, noon: false, afternoon: false, evening: true, night: false),
-                    thursday: DayTimeslots(morning: false, noon: false, afternoon: false, evening: true, night: false),
-                    friday: DayTimeslots(morning: false, noon: false, afternoon: false, evening: true, night: false),
-                    saturday: DayTimeslots(morning: true, noon: false, afternoon: false, evening: false, night: false)
-                )
+                timeZone: "America/New_York"
             ),
             professionalBackground: ProfessionalBackground(
                 currentCompany: "StartupXYZ",

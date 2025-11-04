@@ -396,8 +396,7 @@ struct ProfileHeaderView: View {
                                 personalWebsite: profile.coreIdentity.personalWebsite,
                                 githubUrl: profile.coreIdentity.githubUrl,
                                 linkedinUrl: profile.coreIdentity.linkedinUrl,
-                                timeZone: profile.coreIdentity.timeZone,
-                                availableTimeslot: profile.coreIdentity.availableTimeslot
+                                timeZone: profile.coreIdentity.timeZone
                             )
                             
                             // Create updated profile

@@ -975,8 +975,7 @@ struct ChatInterfaceView: View {
                 personalWebsite: nil,
                 githubUrl: nil,
                 linkedinUrl: nil,
-                timeZone: TimeZone.current.identifier,
-                availableTimeslot: AvailableTimeslot.createDefault()
+                timeZone: TimeZone.current.identifier
             ),
             professionalBackground: ProfessionalBackground(
                 currentCompany: nil,

@@ -606,9 +606,16 @@ class SupabaseService: ObservableObject {
                         let existingProfile = try await getProfile(userId: profile.userId)
                         if let existing = existingProfile {
                             return try await updateProfile(profileId: existing.id, profile: profile)
+                        } else {
+                            print("⚠️ Profile exists but couldn't be fetched, trying to update directly...")
+                            // 如果获取失败，尝试直接更新（使用 userId 查询）
+                            // 注意：这需要知道 profile ID，如果没有，我们需要先查询
+                            throw ProfileError.creationFailed("Profile exists but couldn't be fetched for update")
                         }
-                    } catch {
-                        print("❌ Failed to update existing profile: \(error.localizedDescription)")
+                    } catch let fetchError {
+                        print("❌ Failed to fetch existing profile for update: \(fetchError.localizedDescription)")
+                        // 不要在这里重新抛出，让外层处理
+                        throw ProfileError.creationFailed("Profile creation failed: \(error.localizedDescription). Also failed to fetch existing profile: \(fetchError.localizedDescription)")
                     }
                 }
                 
@@ -648,20 +655,79 @@ class SupabaseService: ObservableObject {
                 print("📄 Response JSON: \(jsonString)")
             }
             
-            let profiles = try JSONDecoder().decode([SupabaseProfile].self, from: data)
-            
-            if profiles.isEmpty {
-                print("ℹ️ No profile found for user: \(userId)")
-                return nil
-            } else if profiles.count == 1 {
-                let profile = profiles.first!
-                print("✅ Profile fetched successfully: \(profile.id)")
-                return profile
-            } else {
-                print("⚠️ Multiple profiles found for user: \(userId), returning the first one")
-                let profile = profiles.first!
-                print("✅ Profile fetched successfully: \(profile.id)")
-                return profile
+            // 尝试解码前，先验证 JSON 结构
+            do {
+                let profiles = try JSONDecoder().decode([SupabaseProfile].self, from: data)
+                
+                if profiles.isEmpty {
+                    print("ℹ️ No profile found for user: \(userId)")
+                    return nil
+                } else if profiles.count == 1 {
+                    let profile = profiles.first!
+                    print("✅ Profile fetched successfully: \(profile.id)")
+                    return profile
+                } else {
+                    print("⚠️ Multiple profiles found for user: \(userId), returning the first one")
+                    let profile = profiles.first!
+                    print("✅ Profile fetched successfully: \(profile.id)")
+                    return profile
+                }
+            } catch let decodeError {
+                // 解码失败，尝试打印原始 JSON 以诊断问题
+                print("❌ Failed to decode profile data")
+                
+                // 尝试解析为通用字典，查看实际返回的数据结构
+                if let jsonObject = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+                   let firstProfile = jsonObject.first {
+                    print("🔍 原始 JSON 结构分析:")
+                    print("   - 包含的键: \(firstProfile.keys.sorted())")
+                    
+                    // 检查必需字段是否存在
+                    let requiredKeys = ["id", "user_id", "core_identity", "professional_background", 
+                                       "networking_intention", "networking_preferences", 
+                                       "personality_social", "privacy_trust", "created_at", "updated_at"]
+                    for key in requiredKeys {
+                        if firstProfile[key] == nil {
+                            print("   ⚠️ 缺少必需字段: \(key)")
+                        }
+                    }
+                    
+                    // 打印缺失字段的详细信息
+                    if let decodingError = decodeError as? DecodingError {
+                        print("🔍 DecodingError 详情:")
+                        switch decodingError {
+                        case .dataCorrupted(let context):
+                            print("   - 数据损坏: \(context.debugDescription)")
+                            print("   - 原因: \(context.underlyingError?.localizedDescription ?? "unknown")")
+                        case .keyNotFound(let key, let context):
+                            print("   - 缺少键: \(key.stringValue)")
+                            print("   - 路径: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+                            print("   - 上下文: \(context.debugDescription)")
+                        case .typeMismatch(let type, let context):
+                            print("   - 类型不匹配: 期望 \(type)")
+                            print("   - 路径: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+                            print("   - 上下文: \(context.debugDescription)")
+                        case .valueNotFound(let type, let context):
+                            print("   - 值不存在: \(type)")
+                            print("   - 路径: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+                            print("   - 上下文: \(context.debugDescription)")
+                            // 检查该路径对应的实际值
+                            var currentDict = firstProfile
+                            for pathKey in context.codingPath {
+                                if let key = pathKey.stringValue as String?,
+                                   let nestedDict = currentDict[key] as? [String: Any] {
+                                    currentDict = nestedDict
+                                }
+                            }
+                            print("   - 实际值: \(currentDict)")
+                        @unknown default:
+                            print("   - 未知错误")
+                        }
+                    }
+                }
+                
+                // 重新抛出解码错误
+                throw decodeError
             }
             
         } catch {
@@ -676,12 +742,15 @@ class SupabaseService: ObservableObject {
                     print("   - 原因: \(context.underlyingError?.localizedDescription ?? "unknown")")
                 case .keyNotFound(let key, let context):
                     print("   - 缺少键: \(key.stringValue)")
+                    print("   - 路径: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
                     print("   - 上下文: \(context.debugDescription)")
                 case .typeMismatch(let type, let context):
                     print("   - 类型不匹配: \(type)")
+                    print("   - 路径: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
                     print("   - 上下文: \(context.debugDescription)")
                 case .valueNotFound(let type, let context):
                     print("   - 值不存在: \(type)")
+                    print("   - 路径: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
                     print("   - 上下文: \(context.debugDescription)")
                 @unknown default:
                     print("   - 未知错误")
@@ -1165,11 +1234,15 @@ class SupabaseService: ObservableObject {
             // 构建查询（Supabase PostgREST 使用 range header 进行分页）
             // 注意：由于 Supabase Swift 客户端限制，无法在查询中直接排除多个用户ID
             // 我们只在查询时排除当前用户，然后在客户端过滤其他需要排除的用户
+            // 注意：这里不使用 created_at 排序，因为推荐系统会按推荐分数排序
+            // 如果推荐系统没有结果，才使用默认排序
             let query = client
                 .from(SupabaseTable.profiles.rawValue)
                 .select()
                 .neq("user_id", value: userId)
-                .order("created_at", ascending: false)
+                // 移除 created_at 排序，让推荐系统控制排序
+                // 如果推荐系统不可用，可以按随机或其他方式排序
+                .order("updated_at", ascending: false) // 使用 updated_at 作为备用排序，而不是 created_at
                 .range(from: offset, to: offset + limit * 3 - 1) // 多获取一些，以便过滤后仍有足够的结果
             
             if !excludedUserIds.isEmpty {
@@ -2550,6 +2623,20 @@ extension SupabaseService {
             .execute()
         
         print("✅ Recommendations cached")
+    }
+    
+    /// 清除推荐缓存
+    func clearRecommendationCache(userId: String) async throws {
+        print("🗑️ Clearing recommendation cache for: \(userId)")
+        
+        // 删除该用户的所有推荐缓存记录
+        try await client
+            .from("recommendation_cache")
+            .delete()
+            .eq("user_id", value: userId)
+            .execute()
+        
+        print("✅ Recommendation cache cleared")
     }
     
     /// 获取缓存的推荐结果
