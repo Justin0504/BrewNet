@@ -748,10 +748,17 @@ class AuthManager: ObservableObject {
         // Update current user
         currentUser = user
         
-        // Update authentication state
-        authState = .authenticated(user)
+        // 只有当 authState 不是 authenticated 状态时才更新
+        // 避免在编辑 profile 时触发 ContentView 重新渲染
+        if case .authenticated = authState {
+            // 已经认证，只更新 currentUser，不改变 authState
+            print("✅ User updated (already authenticated)")
+        } else {
+            // 更新认证状态
+            authState = .authenticated(user)
+            print("✅ Authentication state updated to: authenticated")
+        }
         
-        print("✅ Authentication state updated to: authenticated")
         print("👤 Current user: \(user.name)")
         
         // Save to local storage

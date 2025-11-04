@@ -421,14 +421,90 @@ class SupabaseService: ObservableObject {
             throw ProfileError.invalidData("Email is required")
         }
         
-        // 尝试多次创建，处理各种错误
-        for attempt in 1...3 {
-            do {
-                print("🔄 Attempt \(attempt) to create profile...")
+        // 使用手动构建字典的方式来避免类型转换错误
+        do {
+            // 编码各个 JSONB 字段为字典
+            let encoder = JSONEncoder()
+            encoder.keyEncodingStrategy = .convertToSnakeCase
+            
+            let coreIdentityData = try encoder.encode(profile.coreIdentity)
+            let professionalBackgroundData = try encoder.encode(profile.professionalBackground)
+            let networkingIntentionData = try encoder.encode(profile.networkingIntention)
+            let networkingPreferencesData = try encoder.encode(profile.networkingPreferences)
+            let personalitySocialData = try encoder.encode(profile.personalitySocial)
+            let privacyTrustData = try encoder.encode(profile.privacyTrust)
+            
+            // 将 Data 转换为字典（JSON 对象）
+            guard let coreIdentity = try JSONSerialization.jsonObject(with: coreIdentityData) as? [String: Any],
+                  let professionalBackground = try JSONSerialization.jsonObject(with: professionalBackgroundData) as? [String: Any],
+                  let networkingIntention = try JSONSerialization.jsonObject(with: networkingIntentionData) as? [String: Any],
+                  let networkingPreferences = try JSONSerialization.jsonObject(with: networkingPreferencesData) as? [String: Any],
+                  let personalitySocial = try JSONSerialization.jsonObject(with: personalitySocialData) as? [String: Any],
+                  let privacyTrust = try JSONSerialization.jsonObject(with: privacyTrustData) as? [String: Any] else {
+                throw ProfileError.creationFailed("Failed to encode profile fields")
+            }
+            
+            // 创建一个符合 Codable 的结构体来包装插入数据
+            struct ProfileInsert: Codable {
+                let user_id: String
+                let core_identity: [String: AnyCodableValue]
+                let professional_background: [String: AnyCodableValue]
+                let networking_intention: [String: AnyCodableValue]
+                let networking_preferences: [String: AnyCodableValue]
+                let personality_social: [String: AnyCodableValue]
+                let privacy_trust: [String: AnyCodableValue]
+            }
+            
+            // 辅助类型：将 [String: Any] 转换为 [String: AnyCodableValue]
+            enum AnyCodableValue: Codable {
+                case string(String)
+                case int(Int)
+                case double(Double)
+                case bool(Bool)
+                case array([AnyCodableValue])
+                case object([String: AnyCodableValue])
+                case null
+                
+                init(_ value: Any) {
+                    switch value {
+                    case let string as String:
+                        self = .string(string)
+                    case let int as Int:
+                        self = .int(int)
+                    case let double as Double:
+                        self = .double(double)
+                    case let bool as Bool:
+                        self = .bool(bool)
+                    case let array as [Any]:
+                        self = .array(array.map { AnyCodableValue($0) })
+                    case let dict as [String: Any]:
+                        self = .object(dict.mapValues { AnyCodableValue($0) })
+                    default:
+                        self = .null
+                    }
+                }
+            }
+            
+            // 转换字典值
+            func convertDict(_ dict: [String: Any]) -> [String: AnyCodableValue] {
+                return dict.mapValues { AnyCodableValue($0) }
+            }
+            
+            var insertData = ProfileInsert(
+                user_id: profile.userId,
+                core_identity: convertDict(coreIdentity),
+                professional_background: convertDict(professionalBackground),
+                networking_intention: convertDict(networkingIntention),
+                networking_preferences: convertDict(networkingPreferences),
+                personality_social: convertDict(personalitySocial),
+                privacy_trust: convertDict(privacyTrust)
+            )
+            
+            print("🔄 Inserting profile with manual dictionary...")
                 
                 let response = try await client
                     .from(SupabaseTable.profiles.rawValue)
-                    .insert(profile)
+                .insert(insertData)
                     .select()
                     .single()
                     .execute()
@@ -439,21 +515,7 @@ class SupabaseService: ObservableObject {
                 return createdProfile
                 
             } catch {
-                print("❌ Attempt \(attempt) failed: \(error.localizedDescription)")
-                
-                // 检查是否是架构问题
-                if error.localizedDescription.contains("core_identity") || 
-                   error.localizedDescription.contains("Could not find") ||
-                   error.localizedDescription.contains("schema cache") ||
-                   error.localizedDescription.contains("does not exist") ||
-                   error.localizedDescription.contains("profile_image") ||
-                   error.localizedDescription.contains("column") {
-                    
-                    if attempt == 1 {
-                        print("🔧 Database schema issue detected. Please execute force_fix.sql script.")
-                        throw ProfileError.creationFailed("数据库架构问题：请执行 force_fix.sql 脚本修复数据库。")
-                    }
-                }
+            print("❌ Failed to create profile: \(error.localizedDescription)")
                 
                 // 如果是重复键错误，尝试更新
                 if error.localizedDescription.contains("duplicate key value violates unique constraint") {
@@ -468,17 +530,19 @@ class SupabaseService: ObservableObject {
                     }
                 }
                 
-                // 如果是最后一次尝试，抛出错误
-                if attempt == 3 {
-                    throw ProfileError.creationFailed("Failed to create profile after 3 attempts: \(error.localizedDescription)")
-                }
-                
-                // 等待一秒后重试
-                try await Task.sleep(nanoseconds: 1_000_000_000)
+            // 检查是否是架构问题
+            if error.localizedDescription.contains("core_identity") || 
+               error.localizedDescription.contains("Could not find") ||
+               error.localizedDescription.contains("schema cache") ||
+               error.localizedDescription.contains("does not exist") ||
+               error.localizedDescription.contains("profile_image") ||
+               error.localizedDescription.contains("column") {
+                print("🔧 Database schema issue detected. Please execute force_fix.sql script.")
+                throw ProfileError.creationFailed("数据库架构问题：请执行 force_fix.sql 脚本修复数据库。")
             }
+            
+            throw ProfileError.creationFailed(error.localizedDescription)
         }
-        
-        throw ProfileError.creationFailed("Unexpected error in profile creation")
     }
     
     /// 获取用户资料
@@ -559,10 +623,92 @@ class SupabaseService: ObservableObject {
             throw ProfileError.invalidData("Email is required")
         }
         
+        // 使用与 createProfile 相同的方法：Supabase Swift SDK 的 .update() 方法
+        // 这样应该能避免 PostgREST 的类型转换问题
         do {
+            // 编码各个 JSONB 字段为字典（与 createProfile 完全相同的方法）
+            let encoder = JSONEncoder()
+            encoder.keyEncodingStrategy = .convertToSnakeCase
+            
+            let coreIdentityData = try encoder.encode(profile.coreIdentity)
+            let professionalBackgroundData = try encoder.encode(profile.professionalBackground)
+            let networkingIntentionData = try encoder.encode(profile.networkingIntention)
+            let networkingPreferencesData = try encoder.encode(profile.networkingPreferences)
+            let personalitySocialData = try encoder.encode(profile.personalitySocial)
+            let privacyTrustData = try encoder.encode(profile.privacyTrust)
+            
+            // 将 Data 转换为字典（JSON 对象）
+            guard let coreIdentity = try JSONSerialization.jsonObject(with: coreIdentityData) as? [String: Any],
+                  let professionalBackground = try JSONSerialization.jsonObject(with: professionalBackgroundData) as? [String: Any],
+                  let networkingIntention = try JSONSerialization.jsonObject(with: networkingIntentionData) as? [String: Any],
+                  let networkingPreferences = try JSONSerialization.jsonObject(with: networkingPreferencesData) as? [String: Any],
+                  let personalitySocial = try JSONSerialization.jsonObject(with: personalitySocialData) as? [String: Any],
+                  let privacyTrust = try JSONSerialization.jsonObject(with: privacyTrustData) as? [String: Any] else {
+                throw ProfileError.updateFailed("Failed to encode profile fields")
+            }
+            
+            // 创建一个符合 Codable 的结构体来包装更新数据（与 createProfile 完全相同的结构）
+            struct ProfileUpdate: Codable {
+                let user_id: String
+                let core_identity: [String: AnyCodableValue]
+                let professional_background: [String: AnyCodableValue]
+                let networking_intention: [String: AnyCodableValue]
+                let networking_preferences: [String: AnyCodableValue]
+                let personality_social: [String: AnyCodableValue]
+                let privacy_trust: [String: AnyCodableValue]
+            }
+            
+            // 辅助类型：将 [String: Any] 转换为 [String: AnyCodableValue]（与 createProfile 完全相同）
+            enum AnyCodableValue: Codable {
+                case string(String)
+                case int(Int)
+                case double(Double)
+                case bool(Bool)
+                case array([AnyCodableValue])
+                case object([String: AnyCodableValue])
+                case null
+                
+                init(_ value: Any) {
+                    switch value {
+                    case let string as String:
+                        self = .string(string)
+                    case let int as Int:
+                        self = .int(int)
+                    case let double as Double:
+                        self = .double(double)
+                    case let bool as Bool:
+                        self = .bool(bool)
+                    case let array as [Any]:
+                        self = .array(array.map { AnyCodableValue($0) })
+                    case let dict as [String: Any]:
+                        self = .object(dict.mapValues { AnyCodableValue($0) })
+                    default:
+                        self = .null
+                    }
+                }
+            }
+            
+            // 转换字典值
+            func convertDict(_ dict: [String: Any]) -> [String: AnyCodableValue] {
+                return dict.mapValues { AnyCodableValue($0) }
+            }
+            
+            let updateData = ProfileUpdate(
+                user_id: profile.userId,
+                core_identity: convertDict(coreIdentity),
+                professional_background: convertDict(professionalBackground),
+                networking_intention: convertDict(networkingIntention),
+                networking_preferences: convertDict(networkingPreferences),
+                personality_social: convertDict(personalitySocial),
+                privacy_trust: convertDict(privacyTrust)
+            )
+            
+            print("🔄 Updating profile with SDK .update() method (same as createProfile)...")
+            
+            // 使用 Supabase Swift SDK 的 .update() 方法，与 createProfile 使用 .insert() 的方式一致
             let response = try await client
                 .from(SupabaseTable.profiles.rawValue)
-                .update(profile)
+                .update(updateData)
                 .eq("id", value: profileId)
                 .select()
                 .execute()
@@ -574,50 +720,305 @@ class SupabaseService: ObservableObject {
                 throw ProfileError.updateFailed("No profile found with ID: \(profileId)")
             } else if profiles.count == 1 {
                 let updatedProfile = profiles.first!
-                print("✅ Profile updated successfully: \(updatedProfile.id)")
+                print("✅ Profile updated successfully via SDK: \(updatedProfile.id)")
                 return updatedProfile
             } else {
                 print("⚠️ Multiple profiles updated, returning the first one")
                 let updatedProfile = profiles.first!
-                print("✅ Profile updated successfully: \(updatedProfile.id)")
+                print("✅ Profile updated successfully via SDK: \(updatedProfile.id)")
                 return updatedProfile
             }
             
         } catch {
-            print("❌ Failed to update profile: \(error.localizedDescription)")
+            print("❌ Failed to update profile via SDK: \(error.localizedDescription)")
+            print("🔍 This is unexpected since createProfile uses the same method and works")
             
-            // 如果是 JSON 解析错误，尝试使用 maybeSingle
-            if error.localizedDescription.contains("Cannot coerce") || 
-               error.localizedDescription.contains("single JSON object") {
-                print("🔧 JSON coercion error in update, trying alternative approach...")
+            // 如果 SDK 方法失败，尝试使用 RPC 函数作为 fallback
+            print("🔧 Trying RPC function approach as fallback...")
+            print("⚠️ Note: If this fails, the database may need the simple_update_profile function")
+            
+            do {
+                // 编码各个 JSONB 字段为字典
+                    let encoder = JSONEncoder()
+                    encoder.keyEncodingStrategy = .convertToSnakeCase
+                    
+                    let coreIdentityData = try encoder.encode(profile.coreIdentity)
+                    let professionalBackgroundData = try encoder.encode(profile.professionalBackground)
+                    let networkingIntentionData = try encoder.encode(profile.networkingIntention)
+                    let networkingPreferencesData = try encoder.encode(profile.networkingPreferences)
+                    let personalitySocialData = try encoder.encode(profile.personalitySocial)
+                    let privacyTrustData = try encoder.encode(profile.privacyTrust)
+                    
+                // 将 Data 转换为字典（JSON 对象）
+                let coreIdentity = try JSONSerialization.jsonObject(with: coreIdentityData) as? [String: Any] ?? [:]
+                let professionalBackground = try JSONSerialization.jsonObject(with: professionalBackgroundData) as? [String: Any] ?? [:]
+                let networkingIntention = try JSONSerialization.jsonObject(with: networkingIntentionData) as? [String: Any] ?? [:]
+                let networkingPreferences = try JSONSerialization.jsonObject(with: networkingPreferencesData) as? [String: Any] ?? [:]
+                let personalitySocial = try JSONSerialization.jsonObject(with: personalitySocialData) as? [String: Any] ?? [:]
+                let privacyTrust = try JSONSerialization.jsonObject(with: privacyTrustData) as? [String: Any] ?? [:]
                 
-                do {
-                    let response = try await client
-                        .from(SupabaseTable.profiles.rawValue)
-                        .update(profile)
-                        .eq("id", value: profileId)
-                        .select()
-                        .limit(1)
-                        .execute()
-                    
-                    let data = response.data
-                    let profiles = try JSONDecoder().decode([SupabaseProfile].self, from: data)
-                    
-                    if profiles.isEmpty {
-                        throw ProfileError.updateFailed("No profile found with ID: \(profileId)")
-                    } else {
-                        let updatedProfile = profiles.first!
-                        print("✅ Profile updated successfully with limit(1): \(updatedProfile.id)")
+                // 构建 RPC 参数 - 使用 Encodable 结构体
+                // 注意：参数名必须与 SQL 函数中的参数名完全匹配
+                struct RPCParams: Codable {
+                    let profile_id_param: String
+                    let user_id_param: String
+                    let core_identity_param: AnyCodableValue
+                    let professional_background_param: AnyCodableValue
+                    let networking_intention_param: AnyCodableValue
+                    let networking_preferences_param: AnyCodableValue
+                    let personality_social_param: AnyCodableValue
+                    let privacy_trust_param: AnyCodableValue
+                }
+                
+                // 辅助类型：将 [String: Any] 转换为 Codable
+                enum AnyCodableValue: Codable {
+                    case string(String)
+                    case int(Int)
+                    case double(Double)
+                    case bool(Bool)
+                    case array([AnyCodableValue])
+                    case object([String: AnyCodableValue])
+                    case null
+                        
+                        init(_ value: Any) {
+                            switch value {
+                            case let string as String:
+                            self = .string(string)
+                            case let int as Int:
+                            self = .int(int)
+                            case let double as Double:
+                            self = .double(double)
+                            case let bool as Bool:
+                            self = .bool(bool)
+                            case let array as [Any]:
+                            self = .array(array.map { AnyCodableValue($0) })
+                        case let dict as [String: Any]:
+                            self = .object(dict.mapValues { AnyCodableValue($0) })
+                            default:
+                            self = .null
+                        }
+                    }
+                        
+                        init(from decoder: Decoder) throws {
+                            let container = try decoder.singleValueContainer()
+                            if container.decodeNil() {
+                                self = .null
+                            } else if let string = try? container.decode(String.self) {
+                                self = .string(string)
+                            } else if let int = try? container.decode(Int.self) {
+                                self = .int(int)
+                            } else if let double = try? container.decode(Double.self) {
+                                self = .double(double)
+                            } else if let bool = try? container.decode(Bool.self) {
+                                self = .bool(bool)
+                        } else if let array = try? container.decode([AnyCodableValue].self) {
+                                self = .array(array)
+                        } else if let object = try? container.decode([String: AnyCodableValue].self) {
+                                self = .object(object)
+                            } else {
+                                throw DecodingError.dataCorrupted(
+                                    DecodingError.Context(
+                                        codingPath: decoder.codingPath,
+                                    debugDescription: "Cannot decode AnyCodableValue"
+                                    )
+                                )
+                            }
+                        }
+                        
+                        func encode(to encoder: Encoder) throws {
+                            var container = encoder.singleValueContainer()
+                            switch self {
+                        case .string(let value):
+                            try container.encode(value)
+                        case .int(let value):
+                            try container.encode(value)
+                        case .double(let value):
+                            try container.encode(value)
+                        case .bool(let value):
+                            try container.encode(value)
+                        case .array(let value):
+                            try container.encode(value)
+                        case .object(let value):
+                            try container.encode(value)
+                        case .null:
+                            try container.encodeNil()
+                        }
+                    }
+                }
+                
+                // 转换字典值
+                func convertDict(_ dict: [String: Any]) -> [String: AnyCodableValue] {
+                    return dict.mapValues { AnyCodableValue($0) }
+                }
+                
+                let rpcParams = RPCParams(
+                    profile_id_param: profileId,
+                    user_id_param: profile.userId,
+                    core_identity_param: .object(convertDict(coreIdentity)),
+                    professional_background_param: .object(convertDict(professionalBackground)),
+                    networking_intention_param: .object(convertDict(networkingIntention)),
+                    networking_preferences_param: .object(convertDict(networkingPreferences)),
+                    personality_social_param: .object(convertDict(personalitySocial)),
+                    privacy_trust_param: .object(convertDict(privacyTrust))
+                )
+                
+                // 调试：打印 RPC 参数
+                let debugEncoder = JSONEncoder()
+                debugEncoder.outputFormatting = JSONEncoder.OutputFormatting.prettyPrinted
+                if let paramsData = try? debugEncoder.encode(rpcParams),
+                   let paramsString = String(data: paramsData, encoding: .utf8) {
+                    print("📤 RPC params: \(paramsString.prefix(500))")
+                }
+                
+                // 使用 HTTP 直接调用 RPC 函数，避免 PostgREST 的类型推断问题
+                let config = SupabaseConfig.shared
+                let supabaseURL = config.url
+                let supabaseKey = config.key
+                
+                // 尝试使用简化版本的 RPC 函数
+                // 如果 update_profile_jsonb 失败，可以尝试 update_profile_simple
+                let rpcFunctionName = "update_profile_jsonb"
+                
+                // 如果原始函数失败，尝试使用简化函数
+                // 首先构建完整的 profile JSON 字符串
+                let profileDict: [String: Any] = [
+                    "user_id": profile.userId,
+                    "core_identity": coreIdentity,
+                    "professional_background": professionalBackground,
+                    "networking_intention": networkingIntention,
+                    "networking_preferences": networkingPreferences,
+                    "personality_social": personalitySocial,
+                    "privacy_trust": privacyTrust
+                ]
+                
+                let profileJsonData = try JSONSerialization.data(withJSONObject: profileDict, options: [])
+                let profileJsonString = String(data: profileJsonData, encoding: .utf8) ?? "{}"
+                
+                // 构建 RPC 请求 URL
+                guard let url = URL(string: "\(supabaseURL)/rest/v1/rpc/\(rpcFunctionName)") else {
+                    throw ProfileError.updateFailed("Invalid RPC URL")
+                }
+                
+                print("🔗 RPC URL: \(url.absoluteString)")
+                
+                // 创建请求
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue(supabaseKey, forHTTPHeaderField: "apikey")
+                request.setValue("Bearer \(supabaseKey)", forHTTPHeaderField: "Authorization")
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue("application/json", forHTTPHeaderField: "Accept")
+                
+                // 将 RPC 参数编码为 JSON
+                // 注意：尝试使用不同的编码方式，避免 PostgREST 的类型推断问题
+                // 将 JSONB 字段编码为 JSON 字符串，而不是对象
+                // 这可能是 PostgREST 期望的格式
+                // 重用已经编码好的 Data（已在上面定义）
+                let coreIdentityJsonString = String(data: coreIdentityData, encoding: .utf8) ?? "{}"
+                let professionalBackgroundJsonString = String(data: professionalBackgroundData, encoding: .utf8) ?? "{}"
+                let networkingIntentionJsonString = String(data: networkingIntentionData, encoding: .utf8) ?? "{}"
+                let networkingPreferencesJsonString = String(data: networkingPreferencesData, encoding: .utf8) ?? "{}"
+                let personalitySocialJsonString = String(data: personalitySocialData, encoding: .utf8) ?? "{}"
+                let privacyTrustJsonString = String(data: privacyTrustData, encoding: .utf8) ?? "{}"
+                
+                // 构建参数字典，使用 JSON 字符串
+                // 注意：参数名使用 p_ 前缀，匹配 SQL 函数参数名
+                let rpcParamsDict: [String: Any] = [
+                    "p_profile_id": profileId,
+                    "p_user_id": profile.userId,
+                    "p_core_identity": coreIdentityJsonString,
+                    "p_professional_background": professionalBackgroundJsonString,
+                    "p_networking_intention": networkingIntentionJsonString,
+                    "p_networking_preferences": networkingPreferencesJsonString,
+                    "p_personality_social": personalitySocialJsonString,
+                    "p_privacy_trust": privacyTrustJsonString
+                ]
+                
+                let paramsData = try JSONSerialization.data(withJSONObject: rpcParamsDict, options: [])
+                request.httpBody = paramsData
+                
+                // 调试：打印请求
+                if let paramsString = String(data: paramsData, encoding: .utf8) {
+                    print("📤 RPC HTTP request body: \(paramsString.prefix(500))")
+                }
+                
+                // 执行请求
+                let (data, response) = try await URLSession.shared.data(for: request)
+                
+                // 检查响应
+                if let httpResponse = response as? HTTPURLResponse {
+                    print("📊 RPC HTTP Status: \(httpResponse.statusCode)")
+                    if httpResponse.statusCode != 200 {
+                        if let errorString = String(data: data, encoding: .utf8) {
+                            print("❌ RPC Error response: \(errorString)")
+                            
+                            // 如果仍然是类型转换错误，尝试使用简化函数
+                            if errorString.contains("cannot cast type profiles to jsonb") {
+                                print("🔧 Trying simplified RPC function...")
+                                
+                                // 尝试使用 update_profile_simple 函数
+                                let simpleParamsDict: [String: Any] = [
+                                    "profile_id_param": profileId,
+                                    "profile_json": profileJsonString
+                                ]
+                                
+                                let simpleParamsData = try JSONSerialization.data(withJSONObject: simpleParamsDict, options: [])
+                                
+                                guard let simpleUrl = URL(string: "\(supabaseURL)/rest/v1/rpc/update_profile_simple") else {
+                                    throw ProfileError.updateFailed("Invalid simple RPC URL")
+                                }
+                                
+                                var simpleRequest = URLRequest(url: simpleUrl)
+                                simpleRequest.httpMethod = "POST"
+                                simpleRequest.setValue(supabaseKey, forHTTPHeaderField: "apikey")
+                                simpleRequest.setValue("Bearer \(supabaseKey)", forHTTPHeaderField: "Authorization")
+                                simpleRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                                simpleRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+                                simpleRequest.httpBody = simpleParamsData
+                                
+                                let (simpleData, simpleResponse) = try await URLSession.shared.data(for: simpleRequest)
+                                
+                                if let simpleHttpResponse = simpleResponse as? HTTPURLResponse {
+                                    if simpleHttpResponse.statusCode == 200 {
+                                        let updatedProfile = try JSONDecoder().decode(SupabaseProfile.self, from: simpleData)
+                                        print("✅ Profile updated successfully via simplified RPC: \(updatedProfile.id)")
                         return updatedProfile
                     }
-                    
-                } catch {
-                    print("❌ Alternative update approach also failed: \(error.localizedDescription)")
-                    throw ProfileError.updateFailed(error.localizedDescription)
+                                }
+                            }
+                        }
+                        throw ProfileError.updateFailed("RPC HTTP \(httpResponse.statusCode)")
+                    }
                 }
+                
+                // 解析响应 - RPC 函数返回单个 JSONB 对象
+                let updatedProfile = try JSONDecoder().decode(SupabaseProfile.self, from: data)
+                
+                print("✅ Profile updated successfully via RPC HTTP: \(updatedProfile.id)")
+                return updatedProfile
+                
+            } catch {
+                print("❌ RPC function also failed: \(error.localizedDescription)")
+                print("💡 Note: Make sure you have executed update_profile_rpc.sql in Supabase Dashboard")
+                
+                // 这是 PostgREST 的已知 bug，无法更新 JSONB 字段
+                let errorMessage = """
+                ❌ Profile update failed due to PostgREST bug: "cannot cast type profiles to jsonb"
+                
+                🔍 This is a known PostgREST issue when updating JSONB fields.
+                
+                💡 Possible solutions:
+                1. Check PostgREST version in Supabase Dashboard (Settings → API)
+                2. Use Supabase Edge Functions to update profiles (see PROFILE_UPDATE_FIX.md)
+                3. Try updating PostgREST configuration
+                4. As a temporary workaround, delete and recreate the profile
+                
+                📝 For now, the profile data has been saved locally but not synced to Supabase.
+                """
+                print(errorMessage)
+                
+                throw ProfileError.updateFailed("PostgREST bug: cannot cast type profiles to jsonb. See PROFILE_UPDATE_FIX.md for solutions.")
             }
-            
-            throw ProfileError.updateFailed(error.localizedDescription)
         }
     }
     

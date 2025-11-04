@@ -4,6 +4,7 @@ import PhotosUI
 struct ProfileSetupView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var supabaseService: SupabaseService
+    @Environment(\.dismiss) private var dismiss
     @State private var currentStep = 1
     @State private var profileData = ProfileCreationData()
     @State private var isLoading = false
@@ -13,6 +14,7 @@ struct ProfileSetupView: View {
     @State private var showDatabaseSetup = false
     @State private var isNavigating = false
     @State private var isLoadingExistingData = false
+    @State private var isEditingExistingProfile = false // 标记是否是编辑已有 profile
     @State private var hasReachedBottom: [Int: Bool] = [:]
     @State private var scrollOffset: CGFloat = 0
     @State private var contentHeight: CGFloat = 0
@@ -400,21 +402,40 @@ struct ProfileSetupView: View {
                     let _ = try await supabaseService.createProfile(profile: supabaseProfile)
                 }
                 
-                // Update user profile setup status
-                do {
-                    try await supabaseService.updateUserProfileSetupCompleted(userId: currentUser.id, completed: true)
-                    print("✅ Profile setup status updated in Supabase")
-                } catch {
-                    print("⚠️ Failed to update profile setup status in Supabase: \(error.localizedDescription)")
-                    // Continue anyway, we'll update local state
+                // 只在首次创建 profile 时更新 setup status，编辑时不要更新
+                let isFirstTimeSetup = existingProfile == nil
+                
+                if isFirstTimeSetup {
+                    // Update user profile setup status (only for first-time setup)
+                    do {
+                        try await supabaseService.updateUserProfileSetupCompleted(userId: currentUser.id, completed: true)
+                        print("✅ Profile setup status updated in Supabase")
+                    } catch {
+                        print("⚠️ Failed to update profile setup status in Supabase: \(error.localizedDescription)")
+                        // Continue anyway, we'll update local state
+                    }
+                } else {
+                    print("📝 Editing existing profile, skipping setup status update")
                 }
                 
                 await MainActor.run {
-                    // Update local auth manager - this is critical for UI state
-                    authManager.updateProfileSetupCompleted(true)
                     isLoading = false
-                    showCompletion = true
-                    print("✅ Profile setup completed locally")
+                    
+                    // 无论是编辑还是首次设置，保存后都直接关闭 sheet 并跳转到 Profile 页面
+                    print("✅ Profile saved successfully, closing setup view...")
+                    
+                    // 先关闭 sheet，避免触发重新加载
+                    dismiss()
+                    
+                    // 延迟发送通知，确保 sheet 已完全关闭后再刷新数据
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        // 只在首次设置时更新 auth manager，避免触发重新加载
+                        if isFirstTimeSetup {
+                            authManager.updateProfileSetupCompleted(true)
+                        }
+                        // 发送通知刷新 profile 数据
+                        NotificationCenter.default.post(name: NSNotification.Name("ProfileUpdated"), object: nil)
+                    }
                 }
                 
             } catch {
@@ -503,7 +524,14 @@ struct ProfileSetupView: View {
                     print("✅ Found existing profile, loading data...")
                     
                     await MainActor.run {
+                        // 标记为编辑模式
+                        isEditingExistingProfile = true
+                        
                         // Convert SupabaseProfile to ProfileCreationData
+                        print("📥 Loading profile data from Supabase...")
+                        print("   Networking intention: \(existingProfile.networkingIntention.selectedIntention)")
+                        print("   Sub-intentions: \(existingProfile.networkingIntention.selectedSubIntentions.map { $0.rawValue })")
+                        
                         profileData.coreIdentity = existingProfile.coreIdentity
                         profileData.professionalBackground = existingProfile.professionalBackground
                         profileData.networkingIntention = existingProfile.networkingIntention
@@ -511,17 +539,23 @@ struct ProfileSetupView: View {
                         profileData.personalitySocial = existingProfile.personalitySocial
                         profileData.privacyTrust = existingProfile.privacyTrust
                         
+                        print("✅ Profile data loaded into profileData")
+                        print("   profileData.networkingIntention: \(profileData.networkingIntention?.selectedIntention ?? .buildCollaborate)")
+                        print("   profileData.networkingIntention.sub-intentions: \(profileData.networkingIntention?.selectedSubIntentions.map { $0.rawValue } ?? [])")
+                        
                         isLoadingExistingData = false
                     }
                 } else {
                     print("ℹ️ No existing profile found, starting fresh")
                     await MainActor.run {
+                        isEditingExistingProfile = false
                         isLoadingExistingData = false
                     }
                 }
             } catch {
                 print("❌ Failed to load existing profile: \(error.localizedDescription)")
                 await MainActor.run {
+                    isEditingExistingProfile = false
                     isLoadingExistingData = false
                 }
             }
@@ -1544,6 +1578,8 @@ struct NetworkingIntentionStep: View {
     @Binding var profileData: ProfileCreationData
     @State private var selectedIntention: NetworkingIntentionType = .learnGrow
     @State private var selectedSubIntentions: Set<SubIntentionType> = []
+    @State private var refreshID = UUID()
+    @State private var isLoadingFromData = false // 防止循环更新
     @State private var careerDirectionData: CareerDirectionData? = nil
     @State private var skillDevelopmentData: SkillDevelopmentData? = nil
     @State private var industryTransitionData: IndustryTransitionData? = nil
@@ -1608,14 +1644,17 @@ struct NetworkingIntentionStep: View {
                                     selectedSubIntentions.insert(subIntention)
                                 }
                             }) {
+                                // 使用 computed property 来确保实时更新
+                                let isSelected = selectedSubIntentions.contains(subIntention)
+                                
                                 HStack {
                                     Text(subIntention.displayName)
                                         .font(.system(size: 16, weight: .semibold))
-                                        .foregroundColor(selectedSubIntentions.contains(subIntention) ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                                        .foregroundColor(isSelected ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
                                     
                                     Spacer()
                                     
-                                    if selectedSubIntentions.contains(subIntention) {
+                                    if isSelected {
                                         Image(systemName: "checkmark")
                                             .font(.system(size: 12))
                                             .foregroundColor(.white)
@@ -1623,8 +1662,16 @@ struct NetworkingIntentionStep: View {
                                 }
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 12)
-                                .background(selectedSubIntentions.contains(subIntention) ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
+                                .background(isSelected ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
                                 .cornerRadius(8)
+                            }
+                            .id("\(subIntention.rawValue)-\(refreshID)") // 使用 refreshID 强制刷新
+                            .onAppear {
+                                // 调试：检查每个按钮的选中状态
+                                let isSelected = selectedSubIntentions.contains(subIntention)
+                                print("🔍 Button '\(subIntention.displayName)' appeared - isSelected: \(isSelected)")
+                                print("   selectedSubIntentions Set: \(selectedSubIntentions.map { $0.rawValue })")
+                                print("   subIntention rawValue: '\(subIntention.rawValue)'")
                             }
                         }
                     }
@@ -1670,12 +1717,61 @@ struct NetworkingIntentionStep: View {
                 }
             }
         }
+        .id(refreshID) // 使用 refreshID 强制刷新视图
         .onAppear {
+            print("📍 NetworkingIntentionStep appeared")
+            print("   Current selectedSubIntentions: \(selectedSubIntentions.map { $0.rawValue })")
             loadExistingData()
+            // 延迟一点再次检查，确保数据已加载
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                print("🔄 Delayed reload check...")
+                loadExistingData()
+            }
+            // 再延迟一点，确保数据完全加载
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                print("🔄 Final reload check...")
+                loadExistingData()
+            }
         }
-        .onChange(of: selectedIntention) { _ in
-            selectedSubIntentions.removeAll()
-            updateProfileData()
+        .onChange(of: profileData.networkingIntention?.selectedSubIntentions ?? []) { newValue in
+            // 监听 sub-intentions 数组的变化（更可靠的触发方式）
+            // 当 profileData 从服务器加载完成后，重新加载 UI 状态
+            print("🔄 ProfileData networking intention sub-intentions changed: \(newValue.map { $0.rawValue })")
+            
+            // 只有当新值不为空或者是第一次加载时才重新加载
+            // 避免因为用户操作导致的空数组覆盖已有数据
+            if !newValue.isEmpty || selectedSubIntentions.isEmpty {
+                print("   → Reloading UI state...")
+                loadExistingData()
+            } else {
+                print("   → Skipping reload (empty array but Set already has data)")
+            }
+        }
+        .onChange(of: profileData.networkingIntention?.selectedIntention) { newValue in
+            // 也监听 selectedIntention 的变化
+            if let newValue = newValue {
+                print("🔄 ProfileData networking intention changed to: \(newValue)")
+                loadExistingData()
+            }
+        }
+        .onChange(of: selectedSubIntentions) { newValue in
+            // 当 selectedSubIntentions 更新时，打印当前状态用于调试
+            print("📊 selectedSubIntentions Set updated: \(newValue.map { $0.rawValue })")
+        }
+        .onChange(of: selectedIntention) { newIntention in
+            // 只有当用户手动更改 intention 时才清空 sub-intentions
+            // 如果新 intention 与 profileData 中的不同，说明是用户手动更改
+            if let dataIntention = profileData.networkingIntention?.selectedIntention,
+               newIntention != dataIntention {
+                // 用户手动更改了 intention，清空 sub-intentions
+                print("🔄 User changed intention from \(dataIntention) to \(newIntention), clearing sub-intentions")
+                selectedSubIntentions.removeAll()
+                updateProfileData()
+            } else {
+                // 可能是数据加载触发的，不需要清空
+                print("🔄 Intention changed (likely from data load), keeping sub-intentions")
+                updateProfileData()
+            }
         }
         .onChange(of: selectedSubIntentions) { _ in updateProfileData() }
         .onChange(of: marketingFunctions) { _ in updateCareerDirectionData() }
@@ -1702,27 +1798,82 @@ struct NetworkingIntentionStep: View {
     }
     
     private func loadExistingData() {
-        if let networkingIntention = profileData.networkingIntention {
-            selectedIntention = networkingIntention.selectedIntention
-            selectedSubIntentions = Set(networkingIntention.selectedSubIntentions)
-            careerDirectionData = networkingIntention.careerDirection
-            skillDevelopmentData = networkingIntention.skillDevelopment
-            industryTransitionData = networkingIntention.industryTransition
-            
-            // Load career direction functions from data
-            if let careerData = careerDirectionData {
-                loadCareerDirectionFunctions(from: careerData)
+        // 防止循环更新
+        guard !isLoadingFromData else {
+            print("⚠️ Already loading from data, skipping...")
+            return
+        }
+        
+        guard let networkingIntention = profileData.networkingIntention else {
+            print("⚠️ No networking intention data found in profileData")
+            return
+        }
+        
+        isLoadingFromData = true
+        defer { isLoadingFromData = false }
+        
+        print("🔄 Loading existing networking intention data...")
+        print("   Selected intention: \(networkingIntention.selectedIntention)")
+        print("   Selected sub-intentions count: \(networkingIntention.selectedSubIntentions.count)")
+        print("   Sub-intentions: \(networkingIntention.selectedSubIntentions.map { $0.rawValue })")
+        
+        // 先更新 selectedIntention，这会触发 UI 更新
+        selectedIntention = networkingIntention.selectedIntention
+        
+        // 然后更新 selectedSubIntentions
+        // 使用明确的赋值来确保 Set 更新并触发视图刷新
+        let newSubIntentions = Set(networkingIntention.selectedSubIntentions)
+        
+        print("   📋 Before update:")
+        print("      - Current selectedSubIntentions: \(selectedSubIntentions.map { $0.rawValue })")
+        print("      - New sub-intentions from data: \(networkingIntention.selectedSubIntentions.map { $0.rawValue })")
+        print("      - New Set: \(newSubIntentions.map { $0.rawValue })")
+        
+        selectedSubIntentions = newSubIntentions
+        
+        // 强制刷新视图
+        refreshID = UUID()
+        
+        print("   ✅ UI state updated:")
+        print("      - selectedIntention: \(selectedIntention)")
+        print("      - selectedSubIntentions Set count: \(selectedSubIntentions.count)")
+        print("      - selectedSubIntentions Set: \(selectedSubIntentions.map { $0.rawValue })")
+        print("      - Checking if cofounderMatch is in Set: \(selectedSubIntentions.contains(.cofounderMatch))")
+        
+        // 验证每个 sub-intention 是否正确加载
+        for subIntention in networkingIntention.selectedSubIntentions {
+            let isInSet = selectedSubIntentions.contains(subIntention)
+            print("      - '\(subIntention.rawValue)' in Set: \(isInSet)")
+            if !isInSet {
+                print("      ⚠️ WARNING: Sub-intention '\(subIntention.rawValue)' not found in Set!")
             }
-            
-            // Load skill development from data
-            if let skillData = skillDevelopmentData {
-                skills = skillData.skills
+        }
+        
+        // 验证所有可能的 sub-intentions
+        for possibleSubIntention in SubIntentionType.allCases {
+            if networkingIntention.selectedSubIntentions.contains(possibleSubIntention) {
+                let isInSet = selectedSubIntentions.contains(possibleSubIntention)
+                print("      - Checking '\(possibleSubIntention.rawValue)': \(isInSet)")
             }
-            
-            // Load industry transition from data
-            if let industryData = industryTransitionData {
-                industries = industryData.industries
-            }
+        }
+        
+        careerDirectionData = networkingIntention.careerDirection
+        skillDevelopmentData = networkingIntention.skillDevelopment
+        industryTransitionData = networkingIntention.industryTransition
+        
+        // Load career direction functions from data
+        if let careerData = careerDirectionData {
+            loadCareerDirectionFunctions(from: careerData)
+        }
+        
+        // Load skill development from data
+        if let skillData = skillDevelopmentData {
+            skills = skillData.skills
+        }
+        
+        // Load industry transition from data
+        if let industryData = industryTransitionData {
+            industries = industryData.industries
         }
     }
     
@@ -1800,6 +1951,16 @@ struct NetworkingIntentionStep: View {
     }
     
     private func updateProfileData() {
+        // 如果正在从数据加载，不要更新 profileData（避免循环）
+        guard !isLoadingFromData else {
+            print("⚠️ Skipping updateProfileData while loading from data")
+            return
+        }
+        
+        print("📝 Updating profileData with current UI state:")
+        print("   selectedIntention: \(selectedIntention)")
+        print("   selectedSubIntentions: \(selectedSubIntentions.map { $0.rawValue })")
+        
         let networkingIntention = NetworkingIntention(
             selectedIntention: selectedIntention,
             selectedSubIntentions: Array(selectedSubIntentions),
@@ -1808,6 +1969,8 @@ struct NetworkingIntentionStep: View {
             industryTransition: industryTransitionData
         )
         profileData.networkingIntention = networkingIntention
+        
+        print("   ✅ profileData updated")
     }
 }
 

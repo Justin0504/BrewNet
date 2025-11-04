@@ -207,7 +207,16 @@ BEGIN
         extract_functions_from_direction(NEW.networking_intention->'career_direction', 'learn_in'),
         extract_functions_from_direction(NEW.networking_intention->'career_direction', 'guide_in'),
         COALESCE((NEW.professional_background->>'years_of_experience')::FLOAT, 0),
-        calculate_profile_completion(NEW::jsonb),
+        calculate_profile_completion(
+            jsonb_build_object(
+                'core_identity', NEW.core_identity,
+                'professional_background', NEW.professional_background,
+                'personality_social', NEW.personality_social,
+                'networking_intention', NEW.networking_intention,
+                'networking_preferences', NEW.networking_preferences,
+                'privacy_trust', NEW.privacy_trust
+            )
+        ),
         CASE 
             WHEN NEW.privacy_trust->'verified_status' = '"verified_professional"' THEN 1 
             WHEN NEW.privacy_trust->'verified_status' = '"verified"' THEN 1 

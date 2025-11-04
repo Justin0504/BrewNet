@@ -32,14 +32,14 @@ struct ProfileView: View {
                 }
             } else if let profile = userProfile {
                 // Show profile display
+                // 使用 userProfile 作为 binding 的 source of truth，确保更新时自动刷新
                 ProfileDisplayView(profile: profile) {
                     showingEditProfile = true
                 }
                 .environmentObject(supabaseService)
                 .environmentObject(authManager)
-                .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ProfileUpdated"))) { _ in
-                    loadUserProfile()
-                }
+                // 使用 profile 的 id 和 updatedAt 作为视图 ID，当 profile 更新时会强制刷新
+                .id("\(profile.id)-\(profile.updatedAt)")
             } else {
                 // Show setup prompt
                 VStack(spacing: 24) {
@@ -88,8 +88,20 @@ struct ProfileView: View {
         .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            loadUserData()
-            loadUserProfile()
+            // 只在首次加载时显示加载动画
+            if userProfile == nil {
+                loadUserData()
+                loadUserProfile()
+            } else {
+                // 如果已有数据，只刷新数据，不显示加载动画
+                loadUserData()
+                refreshUserProfile(showLoading: false)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ProfileUpdated"))) { _ in
+            // 监听 ProfileUpdated 通知，无论是首次创建还是编辑都会触发
+            print("📨 ProfileView 收到 ProfileUpdated 通知 - 刷新 profile 数据")
+            refreshUserProfile(showLoading: false)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PostCreated"))) { _ in
             print("📨 ProfileView 收到 PostCreated 通知 - 重新加载数据")
@@ -314,6 +326,8 @@ struct ProfileView: View {
             return
         }
         
+        isLoadingProfile = true
+        
         Task {
             do {
                 if let supabaseProfile = try await supabaseService.getProfile(userId: currentUser.id) {
@@ -332,6 +346,45 @@ struct ProfileView: View {
                 await MainActor.run {
                     self.userProfile = nil
                     self.isLoadingProfile = false
+                }
+            }
+        }
+    }
+    
+    // 静默刷新 profile 数据，不显示加载动画
+    private func refreshUserProfile(showLoading: Bool = false) {
+        guard let currentUser = authManager.currentUser else {
+            return
+        }
+        
+        if showLoading {
+            isLoadingProfile = true
+        }
+        
+        Task {
+            do {
+                if let supabaseProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                    await MainActor.run {
+                        self.userProfile = supabaseProfile.toBrewNetProfile()
+                        if showLoading {
+                            self.isLoadingProfile = false
+                        }
+                        print("✅ Profile refreshed silently")
+                    }
+                } else {
+                    await MainActor.run {
+                        self.userProfile = nil
+                        if showLoading {
+                            self.isLoadingProfile = false
+                        }
+                    }
+                }
+            } catch {
+                print("❌ Failed to refresh user profile: \(error)")
+                await MainActor.run {
+                    if showLoading {
+                        self.isLoadingProfile = false
+                    }
                 }
             }
         }

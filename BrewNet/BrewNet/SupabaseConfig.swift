@@ -9,6 +9,10 @@ class SupabaseConfig {
     private let supabaseURL = "https://jcxvdolcdifdghaibspy.supabase.co"
     private let supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjeHZkb2xjZGlmZGdoYWlic3B5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA5ODIzNjksImV4cCI6MjA3NjU1ODM2OX0.z_Fa8XDp7S_oP3_Aqx2jjuGcE3tuwYRQ3DOEvdNCkX0"
     
+    // 公共访问器
+    var url: String { supabaseURL }
+    var key: String { supabaseKey }
+    
     lazy var client: SupabaseClient = {
         return SupabaseClient(
             supabaseURL: URL(string: supabaseURL)!,

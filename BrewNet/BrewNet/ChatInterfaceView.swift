@@ -140,10 +140,12 @@ struct ChatInterfaceView: View {
         }
         .sheet(isPresented: $showingAISuggestions) {
             if let session = selectedSession {
+                let isAnalysisMode = !session.messages.isEmpty && session.messages.count >= 3
                 AISuggestionsView(
                     user: session.user,
                     suggestions: currentAISuggestions,
                     isLoading: isLoadingSuggestions,
+                    isAnalysisMode: isAnalysisMode,
                     onSuggestionSelected: { suggestion in
                         sendMessage(suggestion.content)
                         showingAISuggestions = false
@@ -794,7 +796,38 @@ struct ChatInterfaceView: View {
         isLoadingSuggestions = true
         
         Task {
-            let suggestions = await aiService.generateIceBreakerTopics(for: user)
+            var suggestions: [AISuggestion] = []
+            
+            // 检查是否有聊天历史
+            if let session = selectedSession, !session.messages.isEmpty {
+                // 如果有聊天历史（>= 3条消息），使用对话分析功能
+                if session.messages.count >= 3 {
+                    print("📊 Analyzing conversation (\(session.messages.count) messages) to generate smart suggestions...")
+                    
+                    // 获取当前用户的兴趣列表（可选，用于更好的分析）
+                    var userInterests: [String] = []
+                    if let currentUser = authManager.currentUser,
+                       let currentUserProfile = try? await supabaseService.getProfile(userId: currentUser.id) {
+                        let brewNetProfile = currentUserProfile.toBrewNetProfile()
+                        userInterests = brewNetProfile.personalitySocial.hobbies
+                    }
+                    
+                    // 使用对话分析功能
+                    suggestions = await aiService.analyzeConversationAndSuggest(
+                        for: user,
+                        messages: session.messages,
+                        userInterests: userInterests
+                    )
+                } else {
+                    // 如果消息较少（< 3条），仍然使用 ice breaker
+                    print("💬 Using ice breaker (few messages: \(session.messages.count))")
+                    suggestions = await aiService.generateIceBreakerTopics(for: user)
+                }
+            } else {
+                // 没有聊天历史，使用 ice breaker
+                print("💬 Using ice breaker (no conversation history)")
+                suggestions = await aiService.generateIceBreakerTopics(for: user)
+            }
             
             await MainActor.run {
                 currentAISuggestions = suggestions
@@ -1232,6 +1265,7 @@ struct AISuggestionsView: View {
     let user: ChatUser
     let suggestions: [AISuggestion]
     let isLoading: Bool
+    let isAnalysisMode: Bool // 是否处于对话分析模式
     let onSuggestionSelected: (AISuggestion) -> Void
     let onRefresh: () -> Void
     
@@ -1249,7 +1283,7 @@ struct AISuggestionsView: View {
                     
                     Spacer()
                     
-                    Text("AI Ice Breaker")
+                    Text(isAnalysisMode ? "AI Conversation Analysis" : "AI Ice Breaker")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                     
@@ -1282,7 +1316,7 @@ struct AISuggestionsView: View {
                 .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.4, green: 0.2, blue: 0.1)))
                 .scaleEffect(1.2)
             
-            Text("AI is generating ice breaker topics...")
+            Text(isAnalysisMode ? "AI is analyzing conversation and generating suggestions..." : "AI is generating ice breaker topics...")
                 .font(.system(size: 16))
                 .foregroundColor(.gray)
         }

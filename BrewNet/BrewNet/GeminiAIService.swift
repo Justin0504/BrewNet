@@ -58,6 +58,22 @@ class GeminiAIService: ObservableObject {
         return await generateSuggestions(prompt: prompt, category: .sharedInterest)
     }
     
+    // MARK: - Analyze Conversation and Generate Smart Suggestions
+    /// 分析聊天内容并生成智能提示语
+    /// - Parameters:
+    ///   - user: 聊天对象
+    ///   - messages: 聊天消息列表
+    ///   - userInterests: 当前用户的兴趣列表（可选）
+    /// - Returns: 基于聊天内容分析生成的提示语列表
+    func analyzeConversationAndSuggest(
+        for user: ChatUser,
+        messages: [ChatMessage],
+        userInterests: [String] = []
+    ) async -> [AISuggestion] {
+        let prompt = createConversationAnalysisPrompt(for: user, messages: messages, userInterests: userInterests)
+        return await generateSuggestions(prompt: prompt, category: .followUp)
+    }
+    
     // MARK: - Generate General Questions
     func generateQuestions(for user: ChatUser) async -> [AISuggestion] {
         let prompt = createQuestionPrompt(for: user)
@@ -167,6 +183,46 @@ class GeminiAIService: ObservableObject {
         5. 每个问题用中文表达，长度在15-40字之间
         
         请直接返回5个问题，每行一个。
+        """
+    }
+    
+    private func createConversationAnalysisPrompt(for user: ChatUser, messages: [ChatMessage], userInterests: [String]) -> String {
+        // 构建聊天历史记录
+        let conversationHistory = messages.map { message in
+            let sender = message.isFromUser ? "Me" : user.name
+            return "\(sender): \(message.content)"
+        }.joined(separator: "\n")
+        
+        // 获取最近的几条消息作为上下文（最多10条）
+        let recentMessages = messages.suffix(10)
+        let recentConversation = recentMessages.map { message in
+            let sender = message.isFromUser ? "Me" : user.name
+            return "\(sender): \(message.content)"
+        }.joined(separator: "\n")
+        
+        return """
+        Analyze the following conversation and generate 5 smart, contextually relevant suggestions to continue the conversation naturally.
+        
+        User Information:
+        - Name: \(user.name)
+        - Profession: \(user.bio)
+        - Interests: \(user.interests.joined(separator: ", "))
+        
+        My Interests: \(userInterests.joined(separator: ", "))
+        
+        Recent Conversation History:
+        \(recentConversation.isEmpty ? "No previous messages" : recentConversation)
+        
+        Requirements:
+        1. Analyze the conversation context and topics discussed
+        2. Generate suggestions that are relevant to what has been said
+        3. Can be follow-up questions, shared interests, or new related topics
+        4. Avoid repeating what has already been discussed unless it's a natural continuation
+        5. Suggestions should feel natural and show genuine interest
+        6. Each suggestion should be expressed in English, 15-50 words long
+        7. Mix different types: questions, shared interests, compliments, or follow-ups
+        
+        Please return 5 suggestions directly, one per line, without numbering or other formatting.
         """
     }
     
