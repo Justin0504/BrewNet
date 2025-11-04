@@ -2666,12 +2666,69 @@ extension SupabaseService {
         
         if let results = try? JSONDecoder().decode([CacheResult].self, from: data),
            let result = results.first {
-            print("✅ Found cached recommendations")
+            print("✅ Found cached recommendations: \(result.recommendedUserIds.count) users")
             return (result.recommendedUserIds, result.scores)
         }
         
         print("ℹ️ No cached recommendations found")
         return nil
+    }
+    
+    /// 批量获取多个用户的 profiles（优化性能：使用并行请求）
+    /// - Parameter userIds: 用户ID列表
+    /// - Returns: Profile 字典，key 为 userId
+    func getProfilesBatch(userIds: [String]) async throws -> [String: SupabaseProfile] {
+        guard !userIds.isEmpty else {
+            return [:]
+        }
+        
+        print("📦 Batch fetching \(userIds.count) profiles (parallel requests)...")
+        
+        // 使用并行任务批量获取（大幅提升速度）
+        // 使用 TaskGroup 进行并行请求，最多同时 10 个并发
+        return await withTaskGroup(of: [String: SupabaseProfile].self, returning: [String: SupabaseProfile].self) { group in
+            var allResults: [String: SupabaseProfile] = [:]
+            let concurrencyLimit = 10
+            
+            // 分批处理，每批最多 10 个并发
+            for i in stride(from: 0, to: userIds.count, by: concurrencyLimit) {
+                let batch = Array(userIds[i..<min(i + concurrencyLimit, userIds.count)])
+                
+                group.addTask {
+                    await withTaskGroup(of: (String, SupabaseProfile?).self, returning: [String: SupabaseProfile].self) { batchGroup in
+                        var batchResults: [String: SupabaseProfile] = [:]
+                        
+                        for userId in batch {
+                            batchGroup.addTask {
+                                do {
+                                    let profile = try await self.getProfile(userId: userId)
+                                    return (userId, profile)
+                                } catch {
+                                    print("⚠️ Failed to fetch profile for \(userId): \(error.localizedDescription)")
+                                    return (userId, nil)
+                                }
+                            }
+                        }
+                        
+                        for await (id, profile) in batchGroup {
+                            if let profile = profile {
+                                batchResults[id] = profile
+                            }
+                        }
+                        
+                        return batchResults
+                    }
+                }
+            }
+            
+            // 收集所有批次的结果
+            for await batchResults in group {
+                allResults.merge(batchResults) { (_, new) in new }
+            }
+            
+            print("✅ Batch fetch complete: \(allResults.count)/\(userIds.count) profiles retrieved")
+            return allResults
+        }
     }
 }
 

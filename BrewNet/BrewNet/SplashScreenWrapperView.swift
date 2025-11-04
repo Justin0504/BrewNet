@@ -10,14 +10,21 @@ struct SplashScreenWrapperView: View {
     @EnvironmentObject var authManager: AuthManager
     @State private var showSplash = true
     @State private var hasLoaded = false
+    @State private var shouldShowSplashAgain = false // 用于重新显示启动画面
     
     var body: some View {
         Group {
-            if showSplash && !hasLoaded {
+            if (showSplash && !hasLoaded) || shouldShowSplashAgain {
                 // 显示启动画面
                 SplashScreenView()
                     .onAppear {
                         // 启动画面显示完成后，检查 profile 状态
+                        if shouldShowSplashAgain {
+                            // 如果是重新显示的启动画面，重置状态并开始导航
+                            shouldShowSplashAgain = false
+                            hasLoaded = false
+                            showSplash = true
+                        }
                         checkProfileAndNavigate()
                     }
             } else if isCheckingProfile {
@@ -38,8 +45,9 @@ struct SplashScreenWrapperView: View {
                 .onAppear {
                     onProfileCheck()
                 }
-            } else if user.profileSetupCompleted {
+            } else if user.profileSetupCompleted || authManager.currentUser?.profileSetupCompleted == true {
                 // 显示主界面
+                // 使用 authManager.currentUser 作为源，因为它在编辑 profile 后会更新
                 MainView()
                     .onAppear {
                         print("🏠 主界面已显示，用户: \(user.name)")
@@ -51,6 +59,13 @@ struct SplashScreenWrapperView: View {
                         print("📝 资料设置界面已显示，用户: \(user.name)")
                     }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ShowSplashScreen"))) { _ in
+            // 收到显示启动画面的通知，重置状态并显示启动画面
+            print("🎬 收到显示启动画面通知，重新显示启动画面...")
+            shouldShowSplashAgain = true
+            hasLoaded = false
+            showSplash = true
         }
     }
     

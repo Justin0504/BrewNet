@@ -5,56 +5,84 @@ import SwiftUI
 class GeminiAIService: ObservableObject {
     static let shared = GeminiAIService()
     
+    // MARK: - 配置选项
+    /// 是否使用 Supabase Edge Function（推荐用于生产环境）
+    /// 设置为 true 时，API Key 将存储在后端，更安全
+    /// 设置为 false 时，使用客户端 API Key（仅用于开发测试）
+    /// 
+    /// ⚠️ 注意：如果 Edge Function 未部署，会回退到模拟模式
+    /// 部署函数后，将这里改为 true
+    private let useSupabaseEdgeFunction = true // 临时改为 false，等函数部署后改为 true
+    
     // Note: In a real application, you need to get the API key from a secure place
     private var apiKey: String {
-        // 首先尝试从环境变量读取
-        if let key = ProcessInfo.processInfo.environment["GEMINI_API_KEY"], !key.isEmpty {
-            print("🔑 从环境变量读取 API Key")
-            return key
-        }
-        // 其次尝试从 Info.plist 读取
+        // 只从 Info.plist 读取（不从环境变量读取）
+        // 首先尝试从 Info.plist 读取
         if let key = Bundle.main.object(forInfoDictionaryKey: "GEMINI_API_KEY") as? String, !key.isEmpty, key != "YOUR_GEMINI_API_KEY" {
-            print("🔑 从 Info.plist 读取 API Key: \(key.prefix(10))...")
             return key
         }
         // 尝试从 Info.plist 的根字典读取（备用方法）
         if let infoDict = Bundle.main.infoDictionary,
            let key = infoDict["GEMINI_API_KEY"] as? String, !key.isEmpty, key != "YOUR_GEMINI_API_KEY" {
-            print("🔑 从 Info.plist (infoDictionary) 读取 API Key: \(key.prefix(10))...")
             return key
         }
         // 返回占位符（如果没有配置，将使用模拟模式）
-        print("⚠️ 未找到有效的 API Key")
         return "YOUR_GEMINI_API_KEY"
     }
+    
     // 使用 Gemini 2.0 Flash 模型（稳定版）
     private let baseURL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
     private let useRealAPI: Bool // 是否使用真实 API
     
+    // Supabase Edge Function URL（计算属性，在所有存储属性初始化后使用）
+    private var edgeFunctionURL: String {
+        let supabaseURL = SupabaseConfig.shared.url
+        return "\(supabaseURL)/functions/v1/gemini-ai"
+    }
+    
     private init() {
-        // 检查是否有有效的 API Key
-        let envKey = ProcessInfo.processInfo.environment["GEMINI_API_KEY"]
-        let plistKey1 = Bundle.main.object(forInfoDictionaryKey: "GEMINI_API_KEY") as? String
-        let plistKey2 = Bundle.main.infoDictionary?["GEMINI_API_KEY"] as? String
-        
-        // 检查是否有任何有效的 Key
-        let hasValidKey = (envKey != nil && !envKey!.isEmpty) ||
-                         (plistKey1 != nil && !plistKey1!.isEmpty && plistKey1 != "YOUR_GEMINI_API_KEY") ||
-                         (plistKey2 != nil && !plistKey2!.isEmpty && plistKey2 != "YOUR_GEMINI_API_KEY")
-        
-        self.useRealAPI = hasValidKey
-        
-        if useRealAPI {
-            print("✅ Gemini API Key 已配置，将使用真实 AI 响应")
-            // 打印 API Key 的前几个字符用于调试（不打印完整 Key）
-            let actualKey = self.apiKey
-            if actualKey != "YOUR_GEMINI_API_KEY" {
-                print("🔑 API Key 长度: \(actualKey.count) 字符")
-            }
+        // 先初始化所有存储属性
+        if useSupabaseEdgeFunction {
+            // 使用 Supabase Edge Function（推荐用于生产环境）
+            self.useRealAPI = true // Edge Function 总是可用的
         } else {
-            print("ℹ️ Gemini API Key 未配置，将使用模拟响应")
-            print("   - 环境变量 GEMINI_API_KEY: \(envKey != nil ? "存在" : "不存在")")
-            print("   - Info.plist GEMINI_API_KEY: \(plistKey1 ?? "未找到")")
+            // 使用客户端 API Key（仅用于开发测试）
+            let plistKey1 = Bundle.main.object(forInfoDictionaryKey: "GEMINI_API_KEY") as? String
+            let plistKey2 = Bundle.main.infoDictionary?["GEMINI_API_KEY"] as? String
+            
+            // 检查是否有任何有效的 Key（只检查 Info.plist）
+            let hasValidKey = (plistKey1 != nil && !plistKey1!.isEmpty && plistKey1 != "YOUR_GEMINI_API_KEY") ||
+                             (plistKey2 != nil && !plistKey2!.isEmpty && plistKey2 != "YOUR_GEMINI_API_KEY")
+            
+            self.useRealAPI = hasValidKey
+        }
+        
+        // 在所有存储属性初始化后，打印日志
+        if useSupabaseEdgeFunction {
+            // 使用 Supabase Edge Function（推荐用于生产环境）
+            print("✅ 使用 Supabase Edge Function 模式（API Key 存储在后端）")
+            print("🌐 Edge Function URL: \(edgeFunctionURL)")
+        } else {
+            // 使用客户端 API Key（仅用于开发测试）
+            let plistKey1 = Bundle.main.object(forInfoDictionaryKey: "GEMINI_API_KEY") as? String
+            let plistKey2 = Bundle.main.infoDictionary?["GEMINI_API_KEY"] as? String
+            
+            print("⚠️ 使用客户端 API Key 模式（仅用于开发测试）")
+            print("🔍 API Key 检查（仅从 Info.plist 读取）:")
+            print("   - Info.plist (object): \(plistKey1 != nil ? "存在 (长度: \(plistKey1!.count), 值: \(plistKey1!.prefix(10))...)" : "不存在")")
+            print("   - Info.plist (infoDictionary): \(plistKey2 != nil ? "存在 (长度: \(plistKey2!.count), 值: \(plistKey2!.prefix(10))...)" : "不存在")")
+            
+            // 获取实际使用的 API Key
+            let actualKey = self.apiKey
+            
+            if useRealAPI && actualKey != "YOUR_GEMINI_API_KEY" {
+                print("✅ Gemini API Key 已配置，将使用真实 AI 响应")
+                print("🔑 使用的 API Key: \(actualKey.prefix(15))... (长度: \(actualKey.count))")
+            } else {
+                print("⚠️ Gemini API Key 未配置或无效，将使用模拟响应")
+                print("   - useRealAPI: \(useRealAPI)")
+                print("   - actualKey: \(actualKey == "YOUR_GEMINI_API_KEY" ? "占位符" : "\(actualKey.prefix(15))...")")
+            }
         }
     }
     
@@ -251,8 +279,19 @@ class GeminiAIService: ObservableObject {
     }
     
     private func generateSuggestions(prompt: String, category: SuggestionCategory) async -> [AISuggestion] {
-        // 如果配置了真实的 API Key，使用真实 API；否则使用模拟响应
-        if useRealAPI && apiKey != "YOUR_GEMINI_API_KEY" {
+        // 如果使用 Supabase Edge Function
+        if useSupabaseEdgeFunction {
+            do {
+                let response = try await callSupabaseEdgeFunction(prompt: prompt, category: category)
+                return parseAIResponse(response: response, category: category)
+            } catch {
+                print("⚠️ Supabase Edge Function 调用失败: \(error.localizedDescription)")
+                print("⚠️ 回退到模拟模式")
+                return await simulateAIResponse(prompt: prompt, category: category)
+            }
+        }
+        // 如果使用客户端 API Key（仅用于开发测试）
+        else if useRealAPI && apiKey != "YOUR_GEMINI_API_KEY" {
             do {
                 let response = try await callGeminiAPI(prompt: prompt)
                 return parseAIResponse(response: response, category: category)
@@ -322,9 +361,91 @@ class GeminiAIService: ObservableObject {
         }
     }
     
-    // MARK: - Real API Call (需要配置API密钥)
+    // MARK: - Supabase Edge Function Call (推荐用于生产环境)
+    private func callSupabaseEdgeFunction(prompt: String, category: SuggestionCategory) async throws -> String {
+        guard let url = URL(string: edgeFunctionURL) else {
+            print("❌ 无法构建 Edge Function URL")
+            throw AIError.invalidURL
+        }
+        
+        // 获取 Supabase 认证 token
+        let supabaseClient = SupabaseConfig.shared.client
+        let session = try? await supabaseClient.auth.session
+        guard let accessToken = session?.accessToken else {
+            print("❌ 未找到 Supabase 认证 token")
+            throw AIError.networkError
+        }
+        
+        // 构建请求体
+        let requestBody: [String: Any] = [
+            "prompt": prompt,
+            "category": category.rawValue,
+            "generationConfig": [
+                "temperature": 0.7,
+                "topK": 40,
+                "topP": 0.95,
+                "maxOutputTokens": 1024
+            ]
+        ]
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(SupabaseConfig.shared.key, forHTTPHeaderField: "apikey")
+        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        
+        print("🚀 调用 Supabase Edge Function: \(edgeFunctionURL)")
+        print("🔑 使用认证 token: \(accessToken.prefix(20))...")
+        print("🔑 使用 API Key: \(SupabaseConfig.shared.key.prefix(20))...")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        // 检查响应状态
+        if let httpResponse = response as? HTTPURLResponse {
+            print("🔍 Edge Function 响应状态码: \(httpResponse.statusCode)")
+            
+            if httpResponse.statusCode == 404 {
+                print("❌ 函数未找到！请检查：")
+                print("   1. 函数名称是否正确：'gemini-ai'（小写，带连字符）")
+                print("   2. 函数是否已成功部署到 Supabase Dashboard")
+                print("   3. 项目 ID 是否正确：jcxvdolcdifdghaibspy")
+                print("   4. 函数 URL: \(edgeFunctionURL)")
+                if let errorString = String(data: data, encoding: .utf8) {
+                    print("❌ Edge Function 错误详情: \(errorString)")
+                }
+                throw AIError.networkError
+            } else if httpResponse.statusCode != 200 {
+                if let errorString = String(data: data, encoding: .utf8) {
+                    print("❌ Edge Function 错误: \(errorString)")
+                }
+                throw AIError.networkError
+            }
+        }
+        
+        // 解析响应
+        if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let text = json["text"] as? String {
+            print("✅ Edge Function 成功返回: \(text.prefix(100))...")
+            return text
+        }
+        
+        throw AIError.invalidResponse
+    }
+    
+    // MARK: - Real API Call (需要配置API密钥，仅用于开发测试)
     private func callGeminiAPI(prompt: String) async throws -> String {
-        guard let url = URL(string: "\(baseURL)?key=\(apiKey)") else {
+        // 确保 API Key 被正确 URL 编码
+        let encodedKey = apiKey.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? apiKey
+        
+        // 检查 API Key 有效性
+        if apiKey.isEmpty || apiKey == "YOUR_GEMINI_API_KEY" {
+            print("❌ API Key 无效或未配置")
+            throw AIError.networkError
+        }
+        
+        guard let url = URL(string: "\(baseURL)?key=\(encodedKey)") else {
+            print("❌ 无法构建 URL，baseURL: \(baseURL)")
             throw AIError.invalidURL
         }
         

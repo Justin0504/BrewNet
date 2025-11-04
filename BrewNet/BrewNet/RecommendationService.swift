@@ -24,10 +24,21 @@ class RecommendationService: ObservableObject {
         
         print("🔍 Getting recommendations for user: \(userId), limit: \(limit)")
         
-        // 1. 检查缓存
+        // 1. 检查缓存（确保缓存来自推荐系统）
         if let cached = try await supabaseService.getCachedRecommendations(userId: userId) {
-            print("✅ Using cached recommendations")
-            return try await loadProfilesWithCache(cached, userId: userId)
+            let (cachedUserIds, cachedScores) = cached
+            
+            // 验证缓存数据的有效性：确保有 userIds 和 scores，且数量匹配
+            if !cachedUserIds.isEmpty && cachedUserIds.count == cachedScores.count && cachedScores.count > 0 {
+                // 缓存有效，使用缓存
+                print("✅ Using cached recommendations (validated: \(cachedUserIds.count) users)")
+                return try await loadProfilesWithCache(cached, userId: userId)
+            } else {
+                // 缓存无效，清除并继续生成新的推荐
+                print("⚠️ Invalid cache data, regenerating recommendations...")
+                try? await supabaseService.clearRecommendationCache(userId: userId)
+                // 继续执行下面的代码生成新的推荐
+            }
         }
         
         // 2. 获取用户特征
@@ -37,11 +48,7 @@ class RecommendationService: ObservableObject {
         
         print("📊 User features loaded: \(userFeatures.summary)")
         
-        // 3. 编码用户
-        let userVector = encoder.computeEmbedding(encoder.encodeUser(userFeatures))
-        print("✅ User encoded to embedding vector (64 dimensions)")
-        
-        // 3.5. 获取需要排除的用户ID集合（包括 Invitations、Matches、Interactions）
+        // 3. 获取需要排除的用户ID集合（包括 Invitations、Matches、Interactions）
         let excludedUserIds = try await supabaseService.getExcludedUserIds(userId: userId)
         print("🚫 Will exclude \(excludedUserIds.count) users from recommendations")
         
@@ -62,12 +69,15 @@ class RecommendationService: ObservableObject {
             throw RecommendationError.noCandidates
         }
         
-        // 5. 批量计算相似度
+        // 5. 批量计算相似度（使用新的综合匹配算法）
         var scoredCandidates: [(userId: String, features: UserTowerFeatures, score: Double)] = []
         
         for (candidateUserId, candidateFeatures) in candidates {
-            let candidateVector = encoder.computeEmbedding(encoder.encodeUser(candidateFeatures))
-            let score = encoder.cosineSimilarity(userVector, candidateVector)
+            // 使用新的综合匹配算法（包含互补匹配和相似匹配）
+            let score = encoder.calculateSimilarity(
+                userFeatures: userFeatures,
+                candidateFeatures: candidateFeatures
+            )
             scoredCandidates.append((candidateUserId, candidateFeatures, score))
         }
         
@@ -79,61 +89,87 @@ class RecommendationService: ObservableObject {
         // 7. 获取 Top-K
         let topK = Array(scoredCandidates.prefix(limit))
         
-        // 8. 转换为 BrewNetProfile
+        // 8. 批量获取所有 Top-K 用户的 profiles（优化性能）
+        let topKUserIds = topK.map { $0.userId }
+        let profilesDict = try await supabaseService.getProfilesBatch(userIds: topKUserIds)
+        
+        // 9. 构建结果，保持推荐分数顺序
         var results: [(userId: String, score: Double, profile: BrewNetProfile)] = []
         for item in topK {
-            // 获取完整 profile
-            if let supabaseProfile = try? await supabaseService.getProfile(userId: item.userId) {
+            if let supabaseProfile = profilesDict[item.userId] {
                 let brewNetProfile = supabaseProfile.toBrewNetProfile()
                 results.append((item.userId, item.score, brewNetProfile))
             } else {
-                print("⚠️ Failed to load profile for user: \(item.userId)")
+                print("⚠️ Profile not found for recommended user: \(item.userId)")
             }
         }
         
-        // 9. 缓存结果
+        // 10. 缓存结果（确保只缓存推荐系统的结果）
         let userIds = results.map { $0.userId }
         let scores = results.map { $0.score }
+        
+        // 验证结果：确保每个结果都有有效的分数和用户ID
+        guard userIds.count == scores.count, !userIds.isEmpty else {
+            print("⚠️ Invalid results for caching, skipping cache")
+            return results
+        }
         
         try await supabaseService.cacheRecommendations(
             userId: userId,
             recommendations: userIds,
             scores: scores,
-            modelVersion: "two_tower_simple_v1"
+            modelVersion: "two_tower_enhanced_v1" // 更新版本号以标识新算法
         )
+        
+        print("💾 Cached \(userIds.count) recommendations from Two-Tower system")
         
         print("✅ Recommendations generated: \(results.count) profiles")
         return results
     }
     
-    /// 从缓存加载推荐结果
+    /// 从缓存加载推荐结果（优化版：批量获取，确保只使用推荐系统中的用户）
     private func loadProfilesWithCache(
         _ cached: ([String], [Double]),
         userId: String
     ) async throws -> [(userId: String, score: Double, profile: BrewNetProfile)] {
         let (userIds, scores) = cached
         
+        print("📦 Loading \(userIds.count) profiles from cache...")
+        
         // 获取需要排除的用户ID集合（包括 Invitations、Matches、Interactions）
         let excludedUserIds = try await supabaseService.getExcludedUserIds(userId: userId)
         print("🚫 Filtering cache: excluding \(excludedUserIds.count) users")
         
-        var results: [(userId: String, score: Double, profile: BrewNetProfile)] = []
-        
+        // 过滤掉需要排除的用户，同时保留分数索引
+        var validUserIds: [(userId: String, scoreIndex: Int)] = []
         for (index, cachedUserId) in userIds.enumerated() {
-            // 跳过需要排除的用户
-            if excludedUserIds.contains(cachedUserId) {
-                print("⚠️ Skipping cached user \(cachedUserId) - already interacted/invited/matched")
-                continue
-            }
-            
-            if index < scores.count,
-               let supabaseProfile = try? await supabaseService.getProfile(userId: cachedUserId) {
-                let brewNetProfile = supabaseProfile.toBrewNetProfile()
-                results.append((cachedUserId, scores[index], brewNetProfile))
+            if !excludedUserIds.contains(cachedUserId) && index < scores.count {
+                validUserIds.append((cachedUserId, index))
             }
         }
         
-        print("✅ Loaded \(results.count) profiles from cache (filtered from \(userIds.count))")
+        print("✅ \(validUserIds.count) valid users after filtering (from \(userIds.count) cached)")
+        
+        // 批量获取所有有效的 profiles（大幅提升速度）
+        let userIdsToFetch = validUserIds.map { $0.userId }
+        let profilesDict = try await supabaseService.getProfilesBatch(userIds: userIdsToFetch)
+        
+        // 构建结果，保持推荐分数顺序
+        var results: [(userId: String, score: Double, profile: BrewNetProfile)] = []
+        for (cachedUserId, scoreIndex) in validUserIds {
+            if let supabaseProfile = profilesDict[cachedUserId] {
+                let brewNetProfile = supabaseProfile.toBrewNetProfile()
+                let score = scores[scoreIndex]
+                results.append((cachedUserId, score, brewNetProfile))
+            } else {
+                print("⚠️ Profile not found for cached user: \(cachedUserId)")
+            }
+        }
+        
+        // 按推荐分数排序（确保顺序正确）
+        results.sort { $0.score > $1.score }
+        
+        print("✅ Loaded \(results.count) profiles from cache (batch fetched, filtered from \(userIds.count))")
         return results
     }
     

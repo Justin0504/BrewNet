@@ -1,9 +1,54 @@
 import Foundation
 
+// MARK: - Recommendation Weights Configuration
+
+/// 推荐系统权重配置 - 针对职场社交场景优化
+struct RecommendationWeights {
+    // ========== 互补匹配权重（高优先级） ==========
+    /// 技能互补匹配权重：用户想学的技能 vs 对方会教的技能
+    static let skillComplementWeight: Double = 0.35
+    
+    /// 职能互补匹配权重：用户想学的职能 vs 对方会指导的职能
+    static let functionComplementWeight: Double = 0.25
+    
+    // ========== 相似匹配权重（中等优先级） ==========
+    /// 意图匹配权重：相同的 networking intention
+    static let intentionWeight: Double = 0.15
+    
+    /// 行业匹配权重：相同或相关行业
+    static let industryWeight: Double = 0.10
+    
+    /// 技能相似度权重：共同技能
+    static let skillSimilarityWeight: Double = 0.05
+    
+    /// 价值观匹配权重：共同价值观
+    static let valuesWeight: Double = 0.05
+    
+    /// 兴趣匹配权重：共同爱好
+    static let hobbiesWeight: Double = 0.03
+    
+    // ========== 辅助权重（低优先级） ==========
+    /// 经验水平匹配权重：相似的经验水平
+    static let experienceLevelWeight: Double = 0.01
+    
+    /// 职业阶段匹配权重：相似的职业阶段
+    static let careerStageWeight: Double = 0.01
+    
+    /// 资料完整度权重：鼓励完整资料
+    static let profileCompletionWeight: Double = 0.01
+    
+    /// 认证状态权重：优先推荐认证用户
+    static let verifiedWeight: Double = 0.01
+    
+    // ========== 多样性权重 ==========
+    /// 多样性惩罚：避免过度推荐同一类型用户
+    static let diversityPenalty: Double = 0.1
+}
+
 // MARK: - Simple Two-Tower Encoder
 
 /// 简单 Two-Tower 编码器
-/// 不使用深度学习，仅使用特征向量化和降维
+/// 针对职场社交场景优化，支持互补匹配和相似匹配
 class SimpleTwoTowerEncoder {
     
     // MARK: - User Encoding
@@ -96,18 +141,231 @@ class SimpleTwoTowerEncoder {
     
     // MARK: - Similarity Computation
     
-    /// 计算两个用户之间的余弦相似度
+    /// 计算两个用户之间的综合匹配分数（职场社交优化版）
     /// - Parameters:
     ///   - userFeatures: 用户 A 的特征
     ///   - candidateFeatures: 用户 B 的特征
-    /// - Returns: 相似度分数 [0, 1]
+    /// - Returns: 综合匹配分数 [0, 1]
     static func calculateSimilarity(
         userFeatures: UserTowerFeatures,
         candidateFeatures: UserTowerFeatures
     ) -> Double {
-        let userEmbedding = computeEmbedding(encodeUser(userFeatures))
-        let candidateEmbedding = computeEmbedding(encodeUser(candidateFeatures))
-        return cosineSimilarity(userEmbedding, candidateEmbedding)
+        // 1. 互补匹配分数（高优先级）
+        let skillComplementScore = calculateSkillComplement(
+            userWantToLearn: userFeatures.skillsToLearn,
+            candidateCanTeach: candidateFeatures.skillsToTeach
+        )
+        
+        let functionComplementScore = calculateFunctionComplement(
+            userWantToLearn: userFeatures.functionsToLearn,
+            candidateCanTeach: candidateFeatures.functionsToTeach
+        )
+        
+        // 2. 反向互补匹配（候选用户想学 vs 用户会教）
+        let reverseSkillComplement = calculateSkillComplement(
+            userWantToLearn: candidateFeatures.skillsToLearn,
+            candidateCanTeach: userFeatures.skillsToTeach
+        )
+        
+        let reverseFunctionComplement = calculateFunctionComplement(
+            userWantToLearn: candidateFeatures.functionsToLearn,
+            candidateCanTeach: userFeatures.functionsToTeach
+        )
+        
+        // 双向互补取平均值
+        let avgSkillComplement = (skillComplementScore + reverseSkillComplement) / 2.0
+        let avgFunctionComplement = (functionComplementScore + reverseFunctionComplement) / 2.0
+        
+        // 3. 相似匹配分数
+        let intentionScore = userFeatures.mainIntention == candidateFeatures.mainIntention ? 1.0 : 0.0
+        let industryScore = calculateIndustrySimilarity(
+            userIndustry: userFeatures.industry,
+            candidateIndustry: candidateFeatures.industry
+        )
+        let skillSimilarityScore = calculateSkillSimilarity(
+            userSkills: userFeatures.skills,
+            candidateSkills: candidateFeatures.skills
+        )
+        let valuesScore = calculateValuesSimilarity(
+            userValues: userFeatures.values,
+            candidateValues: candidateFeatures.values
+        )
+        let hobbiesScore = calculateHobbiesSimilarity(
+            userHobbies: userFeatures.hobbies,
+            candidateHobbies: candidateFeatures.hobbies
+        )
+        
+        // 4. 经验水平匹配
+        let experienceScore = calculateExperienceSimilarity(
+            userLevel: userFeatures.experienceLevel,
+            candidateLevel: candidateFeatures.experienceLevel
+        )
+        
+        // 5. 职业阶段匹配
+        let careerStageScore = userFeatures.careerStage == candidateFeatures.careerStage ? 1.0 : 0.0
+        
+        // 6. 辅助分数
+        let profileCompletionScore = (userFeatures.profileCompletion + candidateFeatures.profileCompletion) / 2.0
+        let verifiedScore = (Double(userFeatures.isVerified) + Double(candidateFeatures.isVerified)) / 2.0
+        
+        // 7. 加权综合分数
+        var finalScore = 0.0
+        finalScore += avgSkillComplement * RecommendationWeights.skillComplementWeight
+        finalScore += avgFunctionComplement * RecommendationWeights.functionComplementWeight
+        finalScore += intentionScore * RecommendationWeights.intentionWeight
+        finalScore += industryScore * RecommendationWeights.industryWeight
+        finalScore += skillSimilarityScore * RecommendationWeights.skillSimilarityWeight
+        finalScore += valuesScore * RecommendationWeights.valuesWeight
+        finalScore += hobbiesScore * RecommendationWeights.hobbiesWeight
+        finalScore += experienceScore * RecommendationWeights.experienceLevelWeight
+        finalScore += careerStageScore * RecommendationWeights.careerStageWeight
+        finalScore += profileCompletionScore * RecommendationWeights.profileCompletionWeight
+        finalScore += verifiedScore * RecommendationWeights.verifiedWeight
+        
+        // 确保分数在 [0, 1] 范围内
+        return min(max(finalScore, 0.0), 1.0)
+    }
+    
+    // MARK: - Complementary Matching Functions
+    
+    /// 计算技能互补分数：用户想学的技能 vs 对方会教的技能
+    private static func calculateSkillComplement(
+        userWantToLearn: [String],
+        candidateCanTeach: [String]
+    ) -> Double {
+        guard !userWantToLearn.isEmpty && !candidateCanTeach.isEmpty else {
+            return 0.0
+        }
+        
+        let intersection = Set(userWantToLearn).intersection(Set(candidateCanTeach))
+        let union = Set(userWantToLearn).union(Set(candidateCanTeach))
+        
+        // 使用 Jaccard 相似度
+        guard !union.isEmpty else { return 0.0 }
+        return Double(intersection.count) / Double(union.count)
+    }
+    
+    /// 计算职能互补分数
+    private static func calculateFunctionComplement(
+        userWantToLearn: [String],
+        candidateCanTeach: [String]
+    ) -> Double {
+        guard !userWantToLearn.isEmpty && !candidateCanTeach.isEmpty else {
+            return 0.0
+        }
+        
+        let intersection = Set(userWantToLearn).intersection(Set(candidateCanTeach))
+        let union = Set(userWantToLearn).union(Set(candidateCanTeach))
+        
+        guard !union.isEmpty else { return 0.0 }
+        return Double(intersection.count) / Double(union.count)
+    }
+    
+    // MARK: - Similarity Matching Functions
+    
+    /// 计算行业相似度
+    private static func calculateIndustrySimilarity(
+        userIndustry: String?,
+        candidateIndustry: String?
+    ) -> Double {
+        guard let user = userIndustry, let candidate = candidateIndustry,
+              !user.isEmpty, !candidate.isEmpty else {
+            return 0.0
+        }
+        
+        if user == candidate {
+            return 1.0
+        }
+        
+        // 相关行业（简单判断，可以扩展）
+        let relatedIndustries: [String: [String]] = [
+            "Technology": ["Software", "SaaS"],
+            "Finance": ["FinTech", "Banking", "Investments"],
+            "Healthcare": ["Medical Devices", "Biotech", "Pharma"],
+            "Education": ["EdTech", "Training"]
+        ]
+        
+        for (key, related) in relatedIndustries {
+            if (user == key && related.contains(candidate)) ||
+               (candidate == key && related.contains(user)) {
+                return 0.7
+            }
+        }
+        
+        return 0.0
+    }
+    
+    /// 计算技能相似度（Jaccard）
+    private static func calculateSkillSimilarity(
+        userSkills: [String],
+        candidateSkills: [String]
+    ) -> Double {
+        guard !userSkills.isEmpty && !candidateSkills.isEmpty else {
+            return 0.0
+        }
+        
+        let intersection = Set(userSkills).intersection(Set(candidateSkills))
+        let union = Set(userSkills).union(Set(candidateSkills))
+        
+        guard !union.isEmpty else { return 0.0 }
+        return Double(intersection.count) / Double(union.count)
+    }
+    
+    /// 计算价值观相似度
+    private static func calculateValuesSimilarity(
+        userValues: [String],
+        candidateValues: [String]
+    ) -> Double {
+        guard !userValues.isEmpty && !candidateValues.isEmpty else {
+            return 0.0
+        }
+        
+        let intersection = Set(userValues).intersection(Set(candidateValues))
+        let union = Set(userValues).union(Set(candidateValues))
+        
+        guard !union.isEmpty else { return 0.0 }
+        return Double(intersection.count) / Double(union.count)
+    }
+    
+    /// 计算兴趣爱好相似度
+    private static func calculateHobbiesSimilarity(
+        userHobbies: [String],
+        candidateHobbies: [String]
+    ) -> Double {
+        guard !userHobbies.isEmpty && !candidateHobbies.isEmpty else {
+            return 0.0
+        }
+        
+        let intersection = Set(userHobbies).intersection(Set(candidateHobbies))
+        let union = Set(userHobbies).union(Set(candidateHobbies))
+        
+        guard !union.isEmpty else { return 0.0 }
+        return Double(intersection.count) / Double(union.count)
+    }
+    
+    /// 计算经验水平相似度
+    private static func calculateExperienceSimilarity(
+        userLevel: String?,
+        candidateLevel: String?
+    ) -> Double {
+        guard let user = userLevel, let candidate = candidateLevel else {
+            return 0.0
+        }
+        
+        if user == candidate {
+            return 1.0
+        }
+        
+        // 定义经验水平层次
+        let levels = ["Intern", "Entry", "Mid", "Senior", "Executive"]
+        guard let userIndex = levels.firstIndex(of: user),
+              let candidateIndex = levels.firstIndex(of: candidate) else {
+            return 0.0
+        }
+        
+        let distance = abs(userIndex - candidateIndex)
+        // 距离越近，相似度越高
+        return 1.0 - (Double(distance) / Double(levels.count - 1))
     }
     
     /// 余弦相似度计算
@@ -192,7 +450,7 @@ class SimpleTwoTowerEncoder {
         return features.map { computeEmbedding(encodeUser($0)) }
     }
     
-    /// 批量计算相似度
+    /// 批量计算相似度（使用新的综合匹配算法）
     /// - Parameters:
     ///   - userFeatures: 查询用户特征
     ///   - candidateFeaturesList: 候选用户特征列表
@@ -201,11 +459,8 @@ class SimpleTwoTowerEncoder {
         userFeatures: UserTowerFeatures,
         candidateFeaturesList: [UserTowerFeatures]
     ) -> [Double] {
-        let userEmbedding = computeEmbedding(encodeUser(userFeatures))
-        
         return candidateFeaturesList.map { candidate in
-            let candidateEmbedding = computeEmbedding(encodeUser(candidate))
-            return cosineSimilarity(userEmbedding, candidateEmbedding)
+            calculateSimilarity(userFeatures: userFeatures, candidateFeatures: candidate)
         }
     }
 }

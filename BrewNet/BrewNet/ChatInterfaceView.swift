@@ -39,10 +39,12 @@ struct ChatInterfaceView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button("AI Assistant") {
-                    showingAISuggestions.toggle()
+                Button(action: {
+                    // 暂时不添加任何功能
+                }) {
+                    Image(systemName: "ellipsis")
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 }
-                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
             }
         }
         .onAppear {
@@ -332,47 +334,12 @@ struct ChatInterfaceView: View {
                 loadProfile(for: session.user)
             }) {
                 HStack(spacing: 12) {
-                    ZStack(alignment: .bottomTrailing) {
-                        AvatarView(avatarString: session.user.avatar, size: 40)
-                        
-                        // Match indicator
-                        if session.user.isMatched {
-                            ZStack {
-                                Circle()
-                                    .fill(session.user.matchType.gradient)
-                                    .frame(width: 16, height: 16)
-                                
-                                Image(systemName: session.user.matchType.icon)
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundColor(.white)
-                            }
-                            .offset(x: 3, y: 3)
-                        }
-                    }
+                    AvatarView(avatarString: session.user.avatar, size: 40)
                     
                     VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 8) {
-                            Text(session.user.name)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                            
-                            // Match type indicator
-                            if session.user.isMatched {
-                                HStack(spacing: 4) {
-                                    Image(systemName: session.user.matchType.icon)
-                                        .font(.system(size: 12))
-                                        .foregroundColor(session.user.matchType.color)
-                                    
-                                    Text(session.user.matchType.displayName)
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(session.user.matchType.color)
-                                }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2)
-                                .background(session.user.matchType.color.opacity(0.1))
-                                .cornerRadius(10)
-                            }
-                        }
+                        Text(session.user.name)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                         
                         HStack(spacing: 4) {
                             Circle()
@@ -385,9 +352,13 @@ struct ChatInterfaceView: View {
                             
                             // Match date
                             if session.user.isMatched, let matchDate = session.user.matchDate {
-                                Text("• Matched on \(formatMatchDate(matchDate))")
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 4, height: 4)
+                                
+                                Text("Matched on \(formatMatchDate(matchDate))")
                                     .font(.system(size: 12))
-                                    .foregroundColor(session.user.matchType.color)
+                                    .foregroundColor(.red)
                             }
                         }
                     }
@@ -675,27 +646,61 @@ struct ChatInterfaceView: View {
             
             // 第二步：并发加载在线状态和消息（加速加载）
             let dateFormatter = ISO8601DateFormatter()
+            dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             
-            // 并发获取所有用户的在线状态
-            let onlineStatusTasks = basicSessionData.map { data -> Task<(userId: String, isOnline: Bool), Never> in
+            // 并发获取所有用户的在线状态（改进版：更准确的在线判断）
+            let onlineStatusTasks = basicSessionData.map { data -> Task<(userId: String, isOnline: Bool, lastSeen: Date), Never> in
                 Task {
                     var isOnline = false
+                    var lastSeen = Date()
+                    
                     if let user = try? await supabaseService.getUser(id: data.matchedUserId) {
-                        let dateFormatter = ISO8601DateFormatter()
-                        if let lastLoginAt = dateFormatter.date(from: user.lastLoginAt) {
+                        let formatter = ISO8601DateFormatter()
+                        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                        
+                        // 尝试解析 lastLoginAt
+                        if let lastLoginAt = formatter.date(from: user.lastLoginAt) {
+                            lastSeen = lastLoginAt
                             let timeSinceLastLogin = Date().timeIntervalSince(lastLoginAt)
-                            isOnline = timeSinceLastLogin < 300 // 5分钟内活跃视为在线
+                            // 5分钟内活跃视为在线
+                            isOnline = timeSinceLastLogin < 300
+                        } else {
+                            // 如果解析失败，尝试不带小数秒的格式
+                            formatter.formatOptions = [.withInternetDateTime]
+                            if let lastLoginAt = formatter.date(from: user.lastLoginAt) {
+                                lastSeen = lastLoginAt
+                                let timeSinceLastLogin = Date().timeIntervalSince(lastLoginAt)
+                                isOnline = timeSinceLastLogin < 300
+                            }
                         }
                     }
-                    return (data.matchedUserId, isOnline)
+                    return (data.matchedUserId, isOnline, lastSeen)
                 }
             }
             
             // 并发获取所有会话的消息
-            let messageTasks = basicSessionData.map { data -> Task<(userId: String, messages: [ChatMessage], lastMessageTime: Date), Never> in
+            let messageTasks = basicSessionData.map { data -> Task<(userId: String, messages: [ChatMessage], lastMessageTime: Date, matchDate: Date), Never> in
                 Task {
                     var messages: [ChatMessage] = []
-                    let matchDate = dateFormatter.date(from: data.match.createdAt) ?? Date()
+                    
+                    // 正确解析匹配时间（来自 Supabase 的 created_at）
+                    var matchDate = Date()
+                    let formatter = ISO8601DateFormatter()
+                    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                    
+                    if let parsedDate = formatter.date(from: data.match.createdAt) {
+                        matchDate = parsedDate
+                        print("✅ Parsed match date: \(data.match.createdAt) -> \(matchDate)")
+                    } else {
+                        // 如果解析失败，尝试不带小数秒的格式
+                        formatter.formatOptions = [.withInternetDateTime]
+                        if let parsedDate = formatter.date(from: data.match.createdAt) {
+                            matchDate = parsedDate
+                            print("✅ Parsed match date (no fractional): \(data.match.createdAt) -> \(matchDate)")
+                        } else {
+                            print("⚠️ Failed to parse match date: \(data.match.createdAt), using current time")
+                        }
+                    }
                     
                     do {
                         let supabaseMessages = try await supabaseService.getMessages(
@@ -712,21 +717,21 @@ struct ChatInterfaceView: View {
                     }
                     
                     let lastMessageTime = messages.last?.timestamp ?? matchDate
-                    return (data.matchedUserId, messages, lastMessageTime)
+                    return (data.matchedUserId, messages, lastMessageTime, matchDate)
                 }
             }
             
             // 等待所有任务完成
-            var userIdToOnlineStatus: [String: Bool] = [:]
+            var userIdToOnlineStatus: [String: (isOnline: Bool, lastSeen: Date)] = [:]
             for task in onlineStatusTasks {
                 let result = await task.value
-                userIdToOnlineStatus[result.userId] = result.isOnline
+                userIdToOnlineStatus[result.userId] = (result.isOnline, result.lastSeen)
             }
             
-            var userIdToMessages: [String: (messages: [ChatMessage], lastMessageTime: Date)] = [:]
+            var userIdToMessages: [String: (messages: [ChatMessage], lastMessageTime: Date, matchDate: Date)] = [:]
             for task in messageTasks {
                 let result = await task.value
-                userIdToMessages[result.userId] = (result.messages, result.lastMessageTime)
+                userIdToMessages[result.userId] = (result.messages, result.lastMessageTime, result.matchDate)
             }
             
             // 快速创建会话列表（使用已加载的数据）
@@ -734,22 +739,28 @@ struct ChatInterfaceView: View {
                 let match = data.match
                 let matchedUserId = data.matchedUserId
                 let matchedUserName = data.matchedUserName
-                let matchDate = dateFormatter.date(from: match.createdAt) ?? Date()
                 
-                let isOnline = userIdToOnlineStatus[matchedUserId] ?? false
+                // 使用从消息任务中解析的正确匹配时间
+                let messageData = userIdToMessages[matchedUserId] ?? ([], Date(), Date())
+                let matchDate = messageData.matchDate // 使用正确解析的匹配时间
+                
+                // 获取在线状态和最后访问时间
+                let onlineStatus = userIdToOnlineStatus[matchedUserId] ?? (false, Date())
+                let isOnline = onlineStatus.isOnline
+                let lastSeen = onlineStatus.lastSeen
+                
                 let profile = userIdToFullProfileMap[matchedUserId]
                 let avatarString = profile?.coreIdentity.profileImage ?? "person.circle.fill"
-                let messageData = userIdToMessages[matchedUserId] ?? ([], matchDate)
                 
                 let chatUser = ChatUser(
                     name: matchedUserName,
                     avatar: avatarString,
                     isOnline: isOnline,
-                    lastSeen: matchDate,
+                    lastSeen: lastSeen, // 使用真实的最后访问时间
                     interests: profile?.personalitySocial.hobbies ?? [],
                     bio: profile?.coreIdentity.bio ?? "",
                     isMatched: true,
-                    matchDate: matchDate,
+                    matchDate: matchDate, // 使用正确解析的匹配时间
                     matchType: .mutual,
                     userId: matchedUserId
                 )
@@ -760,6 +771,8 @@ struct ChatInterfaceView: View {
                     aiSuggestions: []
                 )
                 session.lastMessageAt = messageData.lastMessageTime
+                
+                print("✅ Created session for \(matchedUserName): matchDate=\(matchDate), isOnline=\(isOnline), lastSeen=\(lastSeen)")
                 
                 sessions.append(session)
             }
@@ -1176,35 +1189,14 @@ struct ChatSessionRowView: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
-                // Avatar with match indicator
-                ZStack(alignment: .bottomTrailing) {
-                    AvatarView(avatarString: session.user.avatar, size: 50)
-                    
-                    // Match indicator
-                    if session.user.isMatched {
-                        ZStack {
-                            Circle()
-                                .fill(session.user.matchType.gradient)
-                                .frame(width: 20, height: 20)
-                            
-                            Image(systemName: session.user.matchType.icon)
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(.white)
-                        }
-                        .offset(x: 5, y: 5)
-                    }
-                }
+                // Avatar
+                AvatarView(avatarString: session.user.avatar, size: 50)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text(session.user.name)
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                        
-                        // Match type badge
-                        if session.user.isMatched {
-                            matchTypeBadge
-                        }
                         
                         Spacer()
                         
@@ -1221,7 +1213,7 @@ struct ChatSessionRowView: View {
                         .foregroundColor(.gray)
                         .lineLimit(1)
                     
-                    HStack {
+                    HStack(spacing: 4) {
                         Circle()
                             .fill(session.user.isOnline ? .green : .gray)
                             .frame(width: 8, height: 8)
@@ -1232,9 +1224,13 @@ struct ChatSessionRowView: View {
                         
                         // Match date
                         if session.user.isMatched, let matchDate = session.user.matchDate {
-                            Text("• Matched on \(formatMatchDate(matchDate))")
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 4, height: 4)
+                            
+                            Text("Matched on \(formatMatchDate(matchDate))")
                                 .font(.system(size: 12))
-                                .foregroundColor(session.user.matchType.color)
+                                .foregroundColor(.red)
                         }
                         
                         Spacer()
@@ -1264,22 +1260,6 @@ struct ChatSessionRowView: View {
             }
             .tint(.red)
         }
-    }
-    
-    private var matchTypeBadge: some View {
-        HStack(spacing: 4) {
-            Image(systemName: session.user.matchType.icon)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundColor(.white)
-            
-            Text(session.user.matchType.displayName)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundColor(.white)
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(session.user.matchType.gradient)
-        .cornerRadius(8)
     }
     
     private func formatTime(_ date: Date) -> String {
@@ -1953,32 +1933,90 @@ struct ChatInterfaceView_Previews: PreviewProvider {
 struct AvatarView: View {
     let avatarString: String
     let size: CGFloat
+    @State private var cachedImage: UIImage?
+    @State private var isLoading = false
     
     init(avatarString: String, size: CGFloat = 50) {
         self.avatarString = avatarString
         self.size = size
+        
+        // 在初始化时立即尝试从缓存加载（同步）
+        if avatarString.hasPrefix("http://") || avatarString.hasPrefix("https://"),
+           let cached = ImageCacheManager.shared.loadImage(from: avatarString) {
+            // 注意：这里不能直接设置 @State，需要在 body 中处理
+            // 但我们可以通过 _cachedImage 来设置初始值
+            _cachedImage = State(initialValue: cached)
+        }
     }
     
     var body: some View {
         // 判断是 URL 还是 SF Symbol
         if avatarString.hasPrefix("http://") || avatarString.hasPrefix("https://") {
-            // 如果是 URL，使用 AsyncImage
-            AsyncImage(url: URL(string: avatarString)) { image in
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } placeholder: {
-                Image(systemName: "person.circle.fill")
-                    .font(.system(size: size))
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+            // 如果是 URL，先尝试从缓存加载
+            Group {
+                if let cachedImage = cachedImage {
+                    Image(uiImage: cachedImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    // 占位符，同时触发加载
+                    Image(systemName: "person.circle.fill")
+                        .font(.system(size: size))
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                }
             }
             .frame(width: size, height: size)
             .clipShape(Circle())
+            .onAppear {
+                // 视图出现时立即尝试加载
+                loadImage()
+            }
         } else {
             // 如果是 SF Symbol
             Image(systemName: avatarString)
                 .font(.system(size: size))
                 .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+        }
+    }
+    
+    private func loadImage() {
+        // 如果已经有缓存图片，不再重复加载
+        if cachedImage != nil {
+            return
+        }
+        
+        // 先尝试从缓存加载（同步，立即返回）
+        if let cached = ImageCacheManager.shared.loadImage(from: avatarString) {
+            self.cachedImage = cached
+            return
+        }
+        
+        // 缓存中没有，从网络加载
+        isLoading = true
+        
+        guard let url = URL(string: avatarString) else {
+            isLoading = false
+            return
+        }
+        
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                
+                await MainActor.run {
+                    if let image = UIImage(data: data) {
+                        // 保存到缓存
+                        ImageCacheManager.shared.saveImage(image, for: avatarString)
+                        self.cachedImage = image
+                    }
+                    self.isLoading = false
+                }
+            } catch {
+                print("⚠️ Failed to load avatar: \(error.localizedDescription)")
+                await MainActor.run {
+                    self.isLoading = false
+                }
+            }
         }
     }
 }
