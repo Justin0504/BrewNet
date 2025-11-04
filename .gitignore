@@ -25,10 +25,9 @@ Package.resolved
 Info-local.plist
 **/Info-local.plist
 
-# Info.plist 包含敏感 API Key，不应提交到 Git
-BrewNet/BrewNet/Info.plist
-**/Info.plist
-!**/Info.plist.example
+# Info.plist 现在可以提交（使用占位符 API Key）
+# 注意：提交到 Git 的 Info.plist 应使用占位符，不要提交真实的 API Key
+# !**/Info.plist
 
 # macOS
 .DS_Store
