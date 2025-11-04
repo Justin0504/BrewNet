@@ -23,6 +23,9 @@ struct BrewNetMatchesView: View {
     @State private var totalFetched = 0
     @State private var totalFiltered = 0
     @State private var lastLoadTime: Date? = nil // 记录上次加载时间
+    @State private var isCacheFromRecommendation = false // 标记缓存是否来自推荐系统
+    @State private var savedFirstProfile: BrewNetProfile? = nil // 保存切换前的第一个profile
+    @State private var hasAppearedBefore = false // 标记是否已经显示过
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -40,8 +43,8 @@ struct BrewNetMatchesView: View {
                     ProgressView()
                         .frame(height: screenHeight * 0.6)
                 }
-                // Cards Stack
-                else if currentIndex < profiles.count {
+                // Cards Stack（确保 profiles 不为空且当前索引有效）
+                else if !profiles.isEmpty && currentIndex < profiles.count {
                     ZStack {
                         // Next card (background)
                         if currentIndex + 1 < profiles.count {
@@ -110,24 +113,57 @@ struct BrewNetMatchesView: View {
             }
         }
         .onAppear {
-            // 先尝试从持久化缓存加载
+            // 先尝试从持久化缓存加载（包括索引）
             loadCachedProfilesFromStorage()
             
-            // 如果有缓存数据且距离上次加载不到5分钟，先显示缓存，然后后台刷新
-            if !cachedProfiles.isEmpty, let lastLoad = lastLoadTime, Date().timeIntervalSince(lastLoad) < 300 {
-                // 显示缓存数据（立即显示，无延迟）
-                profiles = cachedProfiles
-                isLoading = false
-                currentIndex = 0 // 重置到第一张卡片
-                print("✅ Using cached profiles: \(cachedProfiles.count) profiles")
-                // 后台静默刷新
-                Task {
-                    await refreshProfilesSilently()
+            // 如果有缓存数据且来自推荐系统，且距离上次加载不到5分钟
+            if !cachedProfiles.isEmpty && isCacheFromRecommendation, let lastLoad = lastLoadTime, Date().timeIntervalSince(lastLoad) < 300 {
+                // 如果之前已经显示过（切换tab回来），恢复上次切走时的索引
+                if hasAppearedBefore {
+                    // 立即显示缓存，恢复上次切走时的索引
+                    profiles = cachedProfiles
+                    currentIndex = restoreCurrentIndex() // 恢复切换tab时的索引
+                    isLoading = false
+                    if currentIndex < profiles.count {
+                        let profile = profiles[currentIndex]
+                        print("⚡ Instant display: showing profile at index \(currentIndex) (\(profile.coreIdentity.name)) from tab switch")
+                    }
+                    
+                    // 后台验证并更新
+                    Task {
+                        await validateAndDisplayCache()
+                    }
+                } else {
+                    // 首次加载（登录时），显示加载状态，但保持已恢复的索引
+                    isLoading = true
+                    profiles = cachedProfiles // 先显示缓存，使用已恢复的索引
+                    isLoading = false // 立即显示，不等待验证
+                    
+                    if currentIndex < profiles.count {
+                        let profile = profiles[currentIndex]
+                        print("⚡ Instant display: showing profile at index \(currentIndex) (\(profile.coreIdentity.name)) from last session")
+                    }
+                    
+                    // 后台验证并更新
+                    Task {
+                        await validateAndDisplayCache()
+                    }
                 }
             } else {
-                // 首次加载或缓存过期，正常加载
+                // 首次加载、缓存过期或缓存不是来自推荐系统，清除并重新加载
+                if !cachedProfiles.isEmpty {
+                    print("⚠️ Clearing invalid cache (not from recommendation system or expired)")
+                    clearInvalidCache()
+                }
                 loadProfiles()
             }
+            
+            // 标记已显示过
+            hasAppearedBefore = true
+        }
+        .onDisappear {
+            // 保存当前索引（用于切换tab或退出登录时恢复）
+            saveCurrentIndex()
         }
         .alert("It's a Match! 🎉", isPresented: $showingMatchAlert) {
             Button("Keep Swiping") {
@@ -278,23 +314,41 @@ struct BrewNetMatchesView: View {
     }
     
     private func passProfile() {
-        if currentIndex < profiles.count {
-            let profile = profiles[currentIndex]
-            passedProfiles.append(profile)
-            
-            // 记录 Pass 交互
-            if let currentUser = authManager.currentUser {
-                Task {
-                    await recommendationService.recordPass(
-                        userId: currentUser.id,
-                        targetUserId: profile.userId
-                    )
-                }
-            }
-            
-            print("❌ Passed profile: \(profile.coreIdentity.name)")
-            moveToNextProfile()
+        guard currentIndex < profiles.count else { return }
+        guard let currentUser = authManager.currentUser else {
+            print("❌ No current user found")
+            return
         }
+        
+        let profile = profiles[currentIndex]
+        passedProfiles.append(profile)
+        
+        // 立即从列表中移除已拒绝的 profile，避免连续闪过
+        profiles.remove(at: currentIndex)
+        
+        // 如果移除后当前索引超出范围，调整索引
+        if currentIndex >= profiles.count && !profiles.isEmpty {
+            currentIndex = 0
+        } else if profiles.isEmpty {
+            // 如果列表为空，尝试加载更多
+            if hasMoreProfiles {
+                loadMoreProfiles()
+            }
+        }
+        
+        // 重置动画状态
+        dragOffset = .zero
+        rotationAngle = 0
+        
+        // 记录 Pass 交互（异步，不阻塞UI）
+        Task {
+            await recommendationService.recordPass(
+                userId: currentUser.id,
+                targetUserId: profile.userId
+            )
+        }
+        
+        print("❌ Passed profile: \(profile.coreIdentity.name)")
     }
     
     private func likeProfile() {
@@ -341,12 +395,15 @@ struct BrewNetMatchesView: View {
                     cachedProfiles.removeAll()
                     profiles.removeAll { $0.userId == profile.userId }
                     
-                    // 2. 清除持久化缓存
+                    // 2. 清除持久化缓存（包括来源标记）
                     if let currentUser = authManager.currentUser {
                         let cacheKey = "matches_cache_\(currentUser.id)"
                         let timeKey = "matches_cache_time_\(currentUser.id)"
+                        let sourceKey = "matches_cache_source_\(currentUser.id)"
                         UserDefaults.standard.removeObject(forKey: cacheKey)
                         UserDefaults.standard.removeObject(forKey: timeKey)
+                        UserDefaults.standard.removeObject(forKey: sourceKey)
+                        isCacheFromRecommendation = false
                         print("🗑️ Cleared local cache for recommendations")
                     }
                     
@@ -448,30 +505,28 @@ struct BrewNetMatchesView: View {
         currentIndex += 1
         dragOffset = .zero
         rotationAngle = 0
+        
+        // 每次移动到下一个时保存索引
+        saveCurrentIndex()
+        
+        // 如果已经到达最后一个，检查是否需要加载更多
+        if currentIndex >= profiles.count {
+            print("📄 Reached end of profiles, may need to load more")
+        }
     }
     
     private func loadProfiles() {
         errorMessage = nil
-        currentIndex = 0
-        // 如果有缓存，先显示缓存（提供即时反馈）
-        // 注意：缓存应该已经按推荐分数排序，不需要重新排序
-        if !cachedProfiles.isEmpty {
-            // 过滤掉已pass和已like的用户
-            let passedUserIds = Set(passedProfiles.map { $0.userId })
-            let likedUserIds = Set(likedProfiles.map { $0.userId })
-            let filteredCache = cachedProfiles.filter { profile in
-                !passedUserIds.contains(profile.userId) && !likedUserIds.contains(profile.userId)
-            }
-            // 保持缓存中的顺序（推荐分数从高到低）
-            profiles = filteredCache
-            cachedProfiles = filteredCache
-            isLoading = false // 允许用户立即看到数据
-            print("✅ Displaying cached profiles immediately: \(filteredCache.count) profiles (filtered from \(cachedProfiles.count), maintaining recommendation order)")
-        } else {
-            // 没有缓存时才显示加载状态
-            isLoading = true
-            profiles.removeAll()
+        // 不重置索引，保持恢复的索引（如果已恢复）
+        // 只有在没有缓存时才重置为0
+        if cachedProfiles.isEmpty {
+            currentIndex = 0
         }
+        
+        // 注意：不再从本地缓存加载，因为缓存加载已在 onAppear 中处理
+        // 这里直接显示加载状态，然后从推荐系统加载
+        isLoading = true
+        profiles.removeAll()
         totalFetched = 0
         totalFiltered = 0
         
@@ -480,10 +535,53 @@ struct BrewNetMatchesView: View {
         }
     }
     
-    // 后台静默刷新，不显示加载状态
+    // 后台静默刷新，不显示加载状态（只使用推荐系统）
     private func refreshProfilesSilently() async {
+        guard let currentUser = authManager.currentUser else { return }
+        
         isRefreshing = true
-        await loadProfilesBatch(offset: 0, limit: 20, isInitial: true)
+        
+        do {
+            // 只使用推荐系统刷新，确保数据一致性
+            let recommendations = try await recommendationService.getRecommendations(
+                for: currentUser.id,
+                limit: 20
+            )
+            
+            // 获取需要排除的用户ID集合
+            let excludedUserIds = try await supabaseService.getExcludedUserIds(userId: currentUser.id)
+            
+            // 确保按照推荐分数排序（从高到低）
+            let sortedRecommendations = recommendations.sorted { $0.score > $1.score }
+            
+            // 过滤掉已交互的用户和无效测试用户
+            let validRecommendations = sortedRecommendations.filter { rec in
+                !excludedUserIds.contains(rec.userId) &&
+                !passedProfiles.contains(where: { $0.userId == rec.userId }) &&
+                !likedProfiles.contains(where: { $0.userId == rec.userId }) &&
+                isValidProfileName(rec.profile.coreIdentity.name) // 排除无效测试用户
+            }
+            
+            let brewNetProfiles = validRecommendations.map { $0.profile }
+            
+            await MainActor.run {
+                // 更新 profiles 和缓存（只保留推荐系统的结果）
+                profiles = brewNetProfiles
+                cachedProfiles = brewNetProfiles
+                lastLoadTime = Date()
+                saveCachedProfilesToStorage(isFromRecommendation: true) // 标记为来自推荐系统
+                
+                // 如果当前索引超出范围，重置
+                if currentIndex >= profiles.count && !profiles.isEmpty {
+                    currentIndex = 0
+                }
+                
+                print("✅ Silently refreshed recommendations: \(brewNetProfiles.count) profiles (filtered from \(recommendations.count))")
+            }
+        } catch {
+            print("⚠️ Failed to silently refresh profiles: \(error.localizedDescription)")
+        }
+        
         isRefreshing = false
     }
     
@@ -493,6 +591,8 @@ struct BrewNetMatchesView: View {
         
         let cacheKey = "matches_cache_\(currentUser.id)"
         let timeKey = "matches_cache_time_\(currentUser.id)"
+        let sourceKey = "matches_cache_source_\(currentUser.id)" // 缓存来源标识
+        let indexKey = "matches_current_index_\(currentUser.id)" // 当前索引
         
         // 从 UserDefaults 加载缓存
         if let data = UserDefaults.standard.data(forKey: cacheKey),
@@ -504,29 +604,213 @@ struct BrewNetMatchesView: View {
                 let cachedProfilesData = try decoder.decode([BrewNetProfile].self, from: data)
                 cachedProfiles = cachedProfilesData
                 lastLoadTime = timestamp
-                print("✅ Loaded \(cachedProfiles.count) profiles from persistent cache")
+                
+                // 检查缓存来源（是否来自推荐系统）
+                isCacheFromRecommendation = UserDefaults.standard.bool(forKey: sourceKey)
+                
+                // 恢复上次的索引位置（登录时恢复上次退出时的位置）
+                let savedIndex = UserDefaults.standard.integer(forKey: indexKey)
+                if savedIndex >= 0 && savedIndex < cachedProfilesData.count {
+                    currentIndex = savedIndex
+                    print("✅ Restored last index: \(savedIndex) from previous session")
+                } else {
+                    currentIndex = 0
+                }
+                
+                print("✅ Loaded \(cachedProfiles.count) profiles from persistent cache (from recommendation: \(isCacheFromRecommendation), index: \(currentIndex))")
             } catch {
                 print("⚠️ Failed to decode cached profiles: \(error)")
+                cachedProfiles = []
+                isCacheFromRecommendation = false
+                currentIndex = 0
+            }
+        } else {
+            cachedProfiles = []
+            isCacheFromRecommendation = false
+            currentIndex = 0
+        }
+    }
+    
+    // 验证并显示缓存（过滤掉已交互的用户）
+    private func validateAndDisplayCache() async {
+        guard let currentUser = authManager.currentUser else {
+            await MainActor.run {
+                isLoading = false
+                loadProfiles()
+            }
+            return
+        }
+        
+        // 获取需要排除的用户ID集合
+        do {
+            let excludedUserIds = try await supabaseService.getExcludedUserIds(userId: currentUser.id)
+            print("🔍 Validating cache: excluding \(excludedUserIds.count) users")
+            
+            // 获取已匹配的用户（额外防御）
+            var matchedUserIds: Set<String> = []
+            do {
+                let matches = try await supabaseService.getActiveMatches(userId: currentUser.id)
+                for match in matches {
+                    if match.userId == currentUser.id {
+                        matchedUserIds.insert(match.matchedUserId)
+                    } else if match.matchedUserId == currentUser.id {
+                        matchedUserIds.insert(match.userId)
+                    }
+                }
+            } catch {
+                print("⚠️ Failed to fetch matches for validation: \(error.localizedDescription)")
+            }
+            
+            // 合并所有需要排除的用户ID
+            let allExcludedUserIds = excludedUserIds.union(matchedUserIds)
+            
+            // 过滤掉已交互的用户（多重检查）和无效测试用户
+            let validProfiles = cachedProfiles.filter { profile in
+                !allExcludedUserIds.contains(profile.userId) &&
+                !passedProfiles.contains(where: { $0.userId == profile.userId }) &&
+                !likedProfiles.contains(where: { $0.userId == profile.userId }) &&
+                isValidProfileName(profile.coreIdentity.name) // 排除无效测试用户
+            }
+            
+            print("✅ Cache validation: \(validProfiles.count)/\(cachedProfiles.count) profiles remain valid")
+            print("   - Excluded by getExcludedUserIds: \(excludedUserIds.count)")
+            print("   - Excluded by matches: \(matchedUserIds.count)")
+            print("   - Total excluded: \(allExcludedUserIds.count)")
+            
+            await MainActor.run {
+                if validProfiles.count >= 3 {
+                    // 如果还有足够多的有效用户，更新缓存
+                    let previousIndex = currentIndex
+                    let previousProfileId = currentIndex < profiles.count ? profiles[currentIndex].userId : nil
+                    
+                    profiles = validProfiles
+                    cachedProfiles = validProfiles
+                    isLoading = false
+                    
+                    // 尝试保持当前索引（如果对应的profile仍然有效）
+                    if let previousId = previousProfileId, let newIndex = validProfiles.firstIndex(where: { $0.userId == previousId }) {
+                        currentIndex = newIndex
+                        print("✅ Validated cache: \(validProfiles.count) profiles, kept profile at index \(newIndex)")
+                    } else if previousIndex < validProfiles.count {
+                        // 如果之前的索引仍然有效，保持它
+                        currentIndex = previousIndex
+                        print("✅ Validated cache: \(validProfiles.count) profiles, kept index \(previousIndex)")
+                    } else {
+                        // 否则使用保存的索引或0
+                        currentIndex = restoreCurrentIndex()
+                        if currentIndex >= validProfiles.count {
+                            currentIndex = 0
+                        }
+                        print("✅ Validated cache: \(validProfiles.count) profiles, restored to index \(currentIndex)")
+                    }
+                    
+                    // 保存当前状态
+                    saveCachedProfilesToStorage(isFromRecommendation: true)
+                    
+                    // 实时检查：如果当前显示的用户在排除列表中，切换到下一个有效的
+                    if !profiles.isEmpty && currentIndex < profiles.count {
+                        let currentProfile = profiles[currentIndex]
+                        if allExcludedUserIds.contains(currentProfile.userId) {
+                            print("⚠️ Current profile is excluded, switching to next valid...")
+                            // 找到下一个有效的profile
+                            if let nextValidIndex = validProfiles.firstIndex(where: { !allExcludedUserIds.contains($0.userId) }) {
+                                currentIndex = nextValidIndex
+                                print("✅ Switched to valid profile at index \(nextValidIndex)")
+                            } else {
+                                // 如果没有有效的profile，重新加载
+                                print("⚠️ No valid profiles found, reloading...")
+                                clearInvalidCache()
+                                loadProfiles()
+                                return
+                            }
+                        }
+                    }
+                } else {
+                    // 如果有效用户太少，清除缓存并重新加载
+                    print("⚠️ Too few valid profiles in cache (\(validProfiles.count)), clearing and reloading")
+                    clearInvalidCache()
+                    loadProfiles()
+                    return
+                }
+            }
+            
+            // 后台静默刷新（使用推荐系统，确保数据一致）
+            await refreshProfilesSilently()
+        } catch {
+            print("⚠️ Failed to validate cache: \(error.localizedDescription)")
+            // 验证失败，清除缓存并重新加载
+            await MainActor.run {
+                clearInvalidCache()
+                loadProfiles()
             }
         }
     }
     
-    // 保存缓存到持久化存储
-    private func saveCachedProfilesToStorage() {
+    // 清除无效缓存
+    private func clearInvalidCache() {
         guard let currentUser = authManager.currentUser else { return }
         
         let cacheKey = "matches_cache_\(currentUser.id)"
         let timeKey = "matches_cache_time_\(currentUser.id)"
+        let sourceKey = "matches_cache_source_\(currentUser.id)"
+        let indexKey = "matches_current_index_\(currentUser.id)"
+        
+        UserDefaults.standard.removeObject(forKey: cacheKey)
+        UserDefaults.standard.removeObject(forKey: timeKey)
+        UserDefaults.standard.removeObject(forKey: sourceKey)
+        UserDefaults.standard.removeObject(forKey: indexKey) // 清除索引
+        
+        cachedProfiles = []
+        profiles = []
+        isCacheFromRecommendation = false
+        lastLoadTime = nil
+        savedFirstProfile = nil
+        currentIndex = 0
+        
+        print("🗑️ Cleared invalid cache")
+    }
+    
+    // 保存缓存到持久化存储
+    private func saveCachedProfilesToStorage(isFromRecommendation: Bool = false) {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        let cacheKey = "matches_cache_\(currentUser.id)"
+        let timeKey = "matches_cache_time_\(currentUser.id)"
+        let sourceKey = "matches_cache_source_\(currentUser.id)"
+        let indexKey = "matches_current_index_\(currentUser.id)"
         
         do {
             let encoder = JSONEncoder()
             let data = try encoder.encode(cachedProfiles)
             UserDefaults.standard.set(data, forKey: cacheKey)
             UserDefaults.standard.set(Date(), forKey: timeKey)
-            print("✅ Saved \(cachedProfiles.count) profiles to persistent cache")
+            UserDefaults.standard.set(isFromRecommendation, forKey: sourceKey)
+            UserDefaults.standard.set(currentIndex, forKey: indexKey) // 保存当前索引
+            isCacheFromRecommendation = isFromRecommendation
+            print("✅ Saved \(cachedProfiles.count) profiles to persistent cache (from recommendation: \(isFromRecommendation), index: \(currentIndex))")
         } catch {
             print("⚠️ Failed to save cached profiles: \(error)")
         }
+    }
+    
+    // 保存当前索引（用于切换tab时恢复）
+    private func saveCurrentIndex() {
+        guard let currentUser = authManager.currentUser else { return }
+        let indexKey = "matches_current_index_\(currentUser.id)"
+        UserDefaults.standard.set(currentIndex, forKey: indexKey)
+        print("💾 Saved current index: \(currentIndex) for tab switch")
+    }
+    
+    // 恢复当前索引（用于切换tab回来时恢复）
+    private func restoreCurrentIndex() -> Int {
+        guard let currentUser = authManager.currentUser else { return 0 }
+        let indexKey = "matches_current_index_\(currentUser.id)"
+        let savedIndex = UserDefaults.standard.integer(forKey: indexKey)
+        if savedIndex >= 0 && savedIndex < profiles.count {
+            print("📌 Restored index from tab switch: \(savedIndex)")
+            return savedIndex
+        }
+        return 0
     }
     
     private func loadMoreProfiles() {
@@ -588,24 +872,51 @@ struct BrewNetMatchesView: View {
                 
                 let brewNetProfiles = sortedRecommendations.map { $0.profile }
                 
+                // 获取需要排除的用户ID集合（在显示前进行最终验证）
+                let excludedUserIds = try await supabaseService.getExcludedUserIds(userId: currentUser.id)
+                
+                // 最终过滤：确保不包含任何已交互的用户和无效测试用户
+                let finalValidProfiles = brewNetProfiles.filter { profile in
+                    !excludedUserIds.contains(profile.userId) &&
+                    isValidProfileName(profile.coreIdentity.name)
+                }
+                
                 await MainActor.run {
-                    // 确保按照推荐分数排序显示
-                    profiles = brewNetProfiles
-                    cachedProfiles = brewNetProfiles
+                    // 确保按照推荐分数排序显示（只显示最终验证后的结果）
+                    profiles = finalValidProfiles
+                    cachedProfiles = finalValidProfiles
                     lastLoadTime = Date()
                     isLoading = false
-                    saveCachedProfilesToStorage()
+                    saveCachedProfilesToStorage(isFromRecommendation: true) // 标记为来自推荐系统
                     hasMoreProfiles = false // Two-Tower 返回固定数量
                     
-                    print("✅ Two-Tower recommendations loaded: \(brewNetProfiles.count) profiles")
+                    // 尝试保持当前索引（如果有效），否则使用保存的索引
+                    let savedIndex = restoreCurrentIndex()
+                    if savedIndex < finalValidProfiles.count {
+                        currentIndex = savedIndex
+                        print("📌 Restored index from previous session: \(savedIndex)")
+                    } else {
+                        currentIndex = 0
+                    }
+                    
+                    // 保存当前状态
+                    saveCachedProfilesToStorage(isFromRecommendation: true)
+                    
+                    print("✅ Two-Tower recommendations loaded: \(finalValidProfiles.count) profiles (filtered from \(brewNetProfiles.count))")
                     print("📊 Top 5 Scores: \(sortedRecommendations.prefix(5).map { String(format: "%.3f", $0.score) }.joined(separator: ", "))")
-                    print("📊 First profile: \(brewNetProfiles.first?.coreIdentity.name ?? "N/A") (score: \(sortedRecommendations.first?.score ?? 0.0))")
+                    if let firstProfile = finalValidProfiles.first {
+                        print("📊 First profile: \(firstProfile.coreIdentity.name) (score: \(sortedRecommendations.first?.score ?? 0.0))")
+                    }
                 }
                 return
             }
             
             // ========== 传统模式（分页加载更多）==========
-            print("📄 Using traditional pagination mode")
+            // 注意：传统模式不应该被调用，因为我们已经使用推荐系统
+            // 如果到达这里，说明有错误，应该清除缓存并重新使用推荐系统
+            print("⚠️ Traditional pagination mode should not be called when using recommendation system")
+            print("📄 Falling back to traditional pagination mode (this should be rare)")
+            
             let (supabaseProfiles, totalInBatch, filteredCount) = try await supabaseService.getRecommendedProfiles(
                 userId: currentUser.id,
                 limit: limit,
@@ -615,28 +926,30 @@ struct BrewNetMatchesView: View {
             // Convert SupabaseProfile to BrewNetProfile
             let brewNetProfiles = supabaseProfiles.map { $0.toBrewNetProfile() }
             
-            // 过滤掉已pass、已like和已匹配的用户（避免重复显示）
+            // 获取完整的排除列表（包括所有交互）
+            let excludedUserIds = try await supabaseService.getExcludedUserIds(userId: currentUser.id)
+            
+            // 过滤掉已pass、已like和已匹配的用户（避免重复显示），同时排除无效测试用户
             let filteredProfiles = brewNetProfiles.filter { profile in
+                !excludedUserIds.contains(profile.userId) &&
                 !passedUserIds.contains(profile.userId) && 
                 !likedUserIds.contains(profile.userId) &&
-                !excludedMatchedUserIds.contains(profile.userId) // 防御性过滤已匹配用户
+                !excludedMatchedUserIds.contains(profile.userId) && // 防御性过滤已匹配用户
+                isValidProfileName(profile.coreIdentity.name) // 排除无效测试用户
             }
             
             let localFilteredCount = brewNetProfiles.count - filteredProfiles.count
             if localFilteredCount > 0 {
-                print("🔍 Filtered out \(localFilteredCount) profiles that were already passed/liked/matched locally")
+                print("🔍 Filtered out \(localFilteredCount) profiles that were already interacted with")
             }
             
             await MainActor.run {
                 if isInitial {
                     profiles = filteredProfiles
-                    // 更新缓存（只缓存过滤后的）
-                    cachedProfiles = filteredProfiles
-                    lastLoadTime = Date()
+                    // 注意：传统模式不更新缓存，只使用推荐系统的缓存
+                    // 不清除缓存，但也不保存传统模式的结果
                     isLoading = false
-                    // 保存到持久化存储
-                    saveCachedProfilesToStorage()
-                    print("✅ Initially loaded \(filteredProfiles.count) profiles from Supabase")
+                    print("✅ Initially loaded \(filteredProfiles.count) profiles from Supabase (traditional mode, not cached)")
                 } else {
                     // 追加时也要过滤重复的
                     let existingUserIds = Set(profiles.map { $0.userId })
@@ -644,12 +957,9 @@ struct BrewNetMatchesView: View {
                         !existingUserIds.contains(profile.userId)
                     }
                     profiles.append(contentsOf: newProfiles)
-                    // 更新缓存
-                    cachedProfiles.append(contentsOf: newProfiles)
+                    // 注意：传统模式追加时不更新缓存
                     isLoadingMore = false
-                    // 保存到持久化存储
-                    saveCachedProfilesToStorage()
-                    print("✅ Loaded \(newProfiles.count) more profiles (total: \(profiles.count), filtered duplicates: \(filteredProfiles.count - newProfiles.count))")
+                    print("✅ Loaded \(newProfiles.count) more profiles (traditional mode, not cached)")
                 }
                 
                 totalFetched += totalInBatch
@@ -861,6 +1171,34 @@ struct BrewNetMatchesView: View {
         )
         
         return [profile1, profile2]
+    }
+    
+    // MARK: - Helper Methods
+    /// 验证 profile 名称是否有效（排除测试用户）
+    private func isValidProfileName(_ name: String) -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // 排除无效或测试用户名
+        let invalidNames: Set<String> = ["123", "test", "Test", "TEST", "测试", "demo", "Demo", "DEMO"]
+        
+        // 排除空字符串或过短的名字
+        if trimmedName.isEmpty || trimmedName.count < 2 {
+            return false
+        }
+        
+        // 排除已知的测试用户名
+        if invalidNames.contains(trimmedName) {
+            print("⚠️ Filtered out invalid test user: \(trimmedName)")
+            return false
+        }
+        
+        // 排除只包含数字的名字（如 "123", "456" 等）
+        if trimmedName.allSatisfy({ $0.isNumber }) {
+            print("⚠️ Filtered out numeric-only username: \(trimmedName)")
+            return false
+        }
+        
+        return true
     }
 }
 

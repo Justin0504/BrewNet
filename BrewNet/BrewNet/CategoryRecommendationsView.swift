@@ -282,11 +282,39 @@ struct CategoryRecommendationsView: View {
     }
     
     private func passProfile() {
-        if currentIndex < profiles.count {
-            let profile = profiles[currentIndex]
-            passedProfiles.append(profile)
-            moveToNextProfile()
+        guard currentIndex < profiles.count else { return }
+        guard let currentUser = authManager.currentUser else {
+            print("❌ No current user found")
+            return
         }
+        
+        let profile = profiles[currentIndex]
+        passedProfiles.append(profile)
+        
+        // 立即从列表中移除已拒绝的 profile，避免连续闪过
+        profiles.remove(at: currentIndex)
+        
+        // 如果移除后当前索引超出范围，调整索引
+        if currentIndex >= profiles.count && !profiles.isEmpty {
+            currentIndex = 0
+        } else if profiles.isEmpty {
+            // 如果列表为空，加载更多
+            loadMoreProfiles()
+        }
+        
+        // 重置动画状态
+        dragOffset = .zero
+        rotationAngle = 0
+        
+        // 记录 Pass 交互（异步，不阻塞UI）
+        Task {
+            await RecommendationService.shared.recordPass(
+                userId: currentUser.id,
+                targetUserId: profile.userId
+            )
+        }
+        
+        print("❌ Passed profile: \(profile.coreIdentity.name)")
     }
     
     private func likeProfile() {
@@ -377,7 +405,23 @@ struct CategoryRecommendationsView: View {
     }
     
     private func moveToNextProfile() {
+        // 确保索引有效
+        guard !profiles.isEmpty else {
+            loadMoreProfiles()
+            return
+        }
+        
         currentIndex += 1
+        
+        // 如果超出范围，尝试加载更多或重置
+        if currentIndex >= profiles.count {
+            if hasMoreProfiles {
+                loadMoreProfiles()
+            } else {
+                currentIndex = profiles.count - 1 // 保持在最后一个
+            }
+        }
+        
         dragOffset = .zero
         rotationAngle = 0
     }
@@ -481,16 +525,21 @@ struct CategoryRecommendationsView: View {
             }
             
             // Filter profiles by the selected category (intention) if applicable
+            // 同时过滤掉无效或测试用户（如名为 "123" 的用户）
             let filteredProfiles: [BrewNetProfile]
             if let category = category {
-                // Filter by networking intention
+                // Filter by networking intention and exclude invalid test users
                 filteredProfiles = profilesWithoutExcluded.filter { profile in
-                    profile.networkingIntention.selectedIntention == category
+                    let matchesCategory = profile.networkingIntention.selectedIntention == category
+                    let isValidUser = isValidProfileName(profile.coreIdentity.name)
+                    return matchesCategory && isValidUser
                 }
                 print("📊 Filtered \(filteredProfiles.count) profiles from \(profilesWithoutExcluded.count) for category \(category.rawValue)")
             } else {
-                // For "Out of Orbit" or other special categories, show all profiles
-                filteredProfiles = profilesWithoutExcluded
+                // For "Out of Orbit" or other special categories, show all profiles (excluding test users)
+                filteredProfiles = profilesWithoutExcluded.filter { profile in
+                    isValidProfileName(profile.coreIdentity.name)
+                }
             }
             
             await MainActor.run {
@@ -536,6 +585,34 @@ struct CategoryRecommendationsView: View {
                 }
             }
         }
+    }
+    
+    // MARK: - Helper Methods
+    /// 验证 profile 名称是否有效（排除测试用户）
+    private func isValidProfileName(_ name: String) -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // 排除无效或测试用户名
+        let invalidNames: Set<String> = ["123", "test", "Test", "TEST", "测试", "demo", "Demo", "DEMO"]
+        
+        // 排除空字符串或过短的名字
+        if trimmedName.isEmpty || trimmedName.count < 2 {
+            return false
+        }
+        
+        // 排除已知的测试用户名
+        if invalidNames.contains(trimmedName) {
+            print("⚠️ Filtered out invalid test user: \(trimmedName)")
+            return false
+        }
+        
+        // 排除只包含数字的名字（如 "123", "456" 等）
+        if trimmedName.allSatisfy({ $0.isNumber }) {
+            print("⚠️ Filtered out numeric-only username: \(trimmedName)")
+            return false
+        }
+        
+        return true
     }
 }
 
