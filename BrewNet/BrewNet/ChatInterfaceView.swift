@@ -86,6 +86,8 @@ struct ChatInterfaceView: View {
             }
         }
         .refreshable {
+            // 下拉刷新时，保持现有聊天列表显示，后台更新数据
+            // 不会清空 chatSessions，避免显示空状态
             await loadChatSessionsFromDatabase()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToChat"))) { notification in
@@ -227,12 +229,15 @@ struct ChatInterfaceView: View {
     
     private var chatListView: some View {
         VStack {
-            if isLoadingMatches {
+            if isLoadingMatches && chatSessions.isEmpty {
+                // 只有在首次加载且没有聊天时才显示加载动画
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if chatSessions.isEmpty {
+            } else if chatSessions.isEmpty && !isLoadingMatches {
+                // 只有在确实没有任何聊天且不在加载状态时才显示空状态
                 emptyStateView
             } else {
+                // 有聊天记录时，始终显示列表（即使正在刷新也保持显示）
                 List(chatSessions) { session in
                     ChatSessionRowView(
                         session: session,
@@ -270,7 +275,11 @@ struct ChatInterfaceView: View {
                 .padding(.horizontal, 40)
             
             Button("Start Matching") {
-                // Navigate to matches
+                // 发送通知切换到 Matches tab
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("NavigateToMatches"),
+                    object: nil
+                )
             }
             .font(.system(size: 16, weight: .semibold))
             .foregroundColor(.white)
@@ -528,11 +537,20 @@ struct ChatInterfaceView: View {
     private func loadChatSessionsFromDatabase() async {
         guard let currentUser = authManager.currentUser else {
             isLoadingMatches = false
-            chatSessions = []
+            // 只有在确实没有任何聊天时才清空
+            if chatSessions.isEmpty {
+                chatSessions = []
+            }
             return
         }
         
-        isLoadingMatches = true
+        // 保存当前聊天列表，避免刷新时显示空状态
+        let previousSessions = chatSessions
+        // 只有在首次加载（没有现有聊天记录）时才显示加载状态
+        // 如果有现有聊天记录，刷新时不显示加载状态，保持列表显示
+        if previousSessions.isEmpty {
+            isLoadingMatches = true
+        }
         
         do {
             // 从 Supabase 获取活跃的匹配
@@ -794,6 +812,7 @@ struct ChatInterfaceView: View {
             }
             
             // 显示会话列表（所有数据已加载完成）
+            // 只有在成功加载后才更新 chatSessions，确保不会在刷新时清空现有列表
             chatSessions = filteredSessions
             isLoadingMatches = false
             print("✅ Loaded \(filteredSessions.count) matched users for chat (完整信息)")
@@ -805,7 +824,14 @@ struct ChatInterfaceView: View {
         } catch {
             print("❌ Failed to load matches: \(error.localizedDescription)")
             isLoadingMatches = false
-            chatSessions = []
+            // 只有在确实没有任何匹配时才清空，否则保持现有列表
+            // 如果加载失败但有之前的聊天记录，保留它们
+            if previousSessions.isEmpty {
+                chatSessions = []
+            } else {
+                // 保持现有聊天列表，不因刷新失败而清空
+                chatSessions = previousSessions
+            }
         }
     }
     
