@@ -27,37 +27,24 @@ struct ChatInterfaceView: View {
     @State private var scrollOffset: CGFloat = 0 // 滚动偏移量
     
     var body: some View {
-        ZStack {
-            // Background - 与其他板块保持一致
-            Color(red: 0.98, green: 0.97, blue: 0.95)
-                .ignoresSafeArea()
-            
-            VStack(spacing: 0) {
-                if let session = selectedSession {
-                    chatView(for: session)
-                } else {
-                    chatListView
-                }
+        mainContent
+            .navigationTitle("Chat")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                toolbarContent
             }
-        }
-        .navigationTitle("Chat")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: {
-                    // 暂时不添加任何功能
-                }) {
-                    Image(systemName: "ellipsis")
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                }
+            .onAppear {
+                loadChatSessions()
+                startMessageRefreshTimer()
             }
-        }
-        .onAppear {
-            loadChatSessions()
-            startMessageRefreshTimer()
-        }
-        .onDisappear {
+            .onChange(of: supabaseService.userOnlineStatuses.count) { _ in
+                // 当在线状态更新时（通过字典数量变化触发），刷新聊天会话列表
+                updateChatSessionsWithOnlineStatus()
+            }
+            .onDisappear {
             stopMessageRefreshTimer()
+            // 停止在线状态监控
+            supabaseService.stopMonitoringOnlineStatus()
             // 先尝试从持久化缓存加载
             loadCachedChatSessionsFromStorage()
             
@@ -232,6 +219,33 @@ struct ChatInterfaceView: View {
         } message: {
             if let session = sessionToUnmatch {
                 Text("Are you sure you want to unmatch with \(session.user.name)? This action cannot be undone.")
+            }
+        }
+    }
+    
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button(action: {
+                // 暂时不添加任何功能
+            }) {
+                Image(systemName: "ellipsis")
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            }
+        }
+    }
+    
+    private var mainContent: some View {
+        ZStack {
+            // Background - 与其他板块保持一致
+            Color(red: 0.98, green: 0.97, blue: 0.95)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                if let session = selectedSession {
+                    chatView(for: session)
+                } else {
+                    chatListView
+                }
             }
         }
     }
@@ -497,13 +511,29 @@ struct ChatInterfaceView: View {
                             .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                         
                         HStack(spacing: 4) {
+                            // 使用实时在线状态（如果可用）
+                            let userId = session.user.userId
+                            let realtimeStatus = userId != nil ? supabaseService.userOnlineStatuses[userId!] : nil
+                            let realtimeIsOnline = realtimeStatus?.isOnline ?? session.user.isOnline
+                            
                             Circle()
-                                .fill(session.user.isOnline ? .green : .gray)
+                                .fill(realtimeIsOnline ? .green : .gray)
                                 .frame(width: 8, height: 8)
                             
-                            Text(session.user.isOnline ? "Active" : "Offline")
+                            Text(realtimeIsOnline ? "Active" : "Offline")
                                 .font(.system(size: 12))
-                                .foregroundColor(session.user.isOnline ? .green : .gray)
+                                .foregroundColor(realtimeIsOnline ? .green : .gray)
+                            
+                            // Match date
+                            if session.user.isMatched, let matchDate = session.user.matchDate {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 4, height: 4)
+                                
+                                Text("Matched on \(formatMatchDate(matchDate))")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.red)
+                            }
                         }
                     }
                     
@@ -601,6 +631,43 @@ struct ChatInterfaceView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color.white)
+    }
+    
+    /// 更新聊天会话的在线状态（当实时状态更新时调用）
+    private func updateChatSessionsWithOnlineStatus() {
+        // 由于 ChatSession 的 user 是 let，需要重新创建整个会话
+        var updatedSessions: [ChatSession] = []
+        for session in chatSessions {
+            if let userId = session.user.userId,
+               let status = supabaseService.userOnlineStatuses[userId] {
+                // 创建更新后的 ChatUser
+                let updatedChatUser = ChatUser(
+                    name: session.user.name,
+                    avatar: session.user.avatar,
+                    isOnline: status.isOnline,
+                    lastSeen: status.lastSeen,
+                    interests: session.user.interests,
+                    bio: session.user.bio,
+                    isMatched: session.user.isMatched,
+                    matchDate: session.user.matchDate,
+                    matchType: session.user.matchType,
+                    userId: session.user.userId
+                )
+                // 创建新的 ChatSession
+                var updatedSession = ChatSession(
+                    user: updatedChatUser,
+                    messages: session.messages,
+                    aiSuggestions: session.aiSuggestions,
+                    isActive: session.isActive
+                )
+                updatedSession.lastMessageAt = session.lastMessageAt
+                updatedSessions.append(updatedSession)
+            } else {
+                // 如果没有状态更新，保留原会话
+                updatedSessions.append(session)
+            }
+        }
+        chatSessions = updatedSessions
     }
     
     private func loadChatSessions() {
@@ -802,8 +869,21 @@ struct ChatInterfaceView: View {
             dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             
             // 并发获取所有用户的在线状态（改进版：更准确的在线判断）
+            // 使用新的在线状态 API 获取实时状态
             let onlineStatusTasks = basicSessionData.map { data -> Task<(userId: String, isOnline: Bool, lastSeen: Date), Never> in
-                Task {
+                Task { @MainActor in
+                    // 优先使用实时状态缓存
+                    let cachedStatus = supabaseService.userOnlineStatuses[data.matchedUserId]
+                    if let status = cachedStatus {
+                        return (data.matchedUserId, status.isOnline, status.lastSeen)
+                    }
+                    
+                    // 如果缓存中没有，从数据库获取
+                    if let status = await supabaseService.getUserOnlineStatus(userId: data.matchedUserId) {
+                        return (data.matchedUserId, status.isOnline, status.lastSeen)
+                    }
+                    
+                    // 回退到旧方法（基于 lastLoginAt）
                     var isOnline = false
                     var lastSeen = Date()
                     
@@ -811,14 +891,11 @@ struct ChatInterfaceView: View {
                         let formatter = ISO8601DateFormatter()
                         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
                         
-                        // 尝试解析 lastLoginAt
                         if let lastLoginAt = formatter.date(from: user.lastLoginAt) {
                             lastSeen = lastLoginAt
                             let timeSinceLastLogin = Date().timeIntervalSince(lastLoginAt)
-                            // 5分钟内活跃视为在线
                             isOnline = timeSinceLastLogin < 300
                         } else {
-                            // 如果解析失败，尝试不带小数秒的格式
                             formatter.formatOptions = [.withInternetDateTime]
                             if let lastLoginAt = formatter.date(from: user.lastLoginAt) {
                                 lastSeen = lastLoginAt
@@ -960,6 +1037,12 @@ struct ChatInterfaceView: View {
                     return false
                 }
                 return true
+            }
+            
+            // 启动在线状态监控（实时更新）- 使用过滤后的会话
+            let matchedUserIds = filteredSessions.compactMap { $0.user.userId }
+            if !matchedUserIds.isEmpty {
+                supabaseService.startMonitoringOnlineStatus(for: matchedUserIds)
             }
             
             // 显示会话列表（所有数据已加载完成）
@@ -1459,6 +1542,7 @@ struct ChatSessionRowView: View {
     let session: ChatSession
     let onTap: () -> Void
     let onUnmatch: () -> Void
+    @EnvironmentObject var supabaseService: SupabaseService
     
     var body: some View {
         Button(action: onTap) {
@@ -1488,13 +1572,18 @@ struct ChatSessionRowView: View {
                         .lineLimit(1)
                     
                     HStack(spacing: 4) {
+                        // 使用实时在线状态（如果可用）
+                        let userId = session.user.userId
+                        let realtimeStatus = userId != nil ? supabaseService.userOnlineStatuses[userId!] : nil
+                        let realtimeIsOnline = realtimeStatus?.isOnline ?? session.user.isOnline
+                        
                         Circle()
-                            .fill(session.user.isOnline ? .green : .gray)
+                            .fill(realtimeIsOnline ? .green : .gray)
                             .frame(width: 8, height: 8)
                         
-                        Text(session.user.isOnline ? "Active" : "Offline")
+                        Text(realtimeIsOnline ? "Active" : "Offline")
                             .font(.system(size: 12))
-                            .foregroundColor(session.user.isOnline ? .green : .gray)
+                            .foregroundColor(realtimeIsOnline ? .green : .gray)
                         
                         Spacer()
                         

@@ -257,6 +257,10 @@ class AuthManager: ObservableObject {
                     print("✅ 用户登录成功: \(finalAppUser.name), profile completed: \(finalAppUser.profileSetupCompleted)")
                 }
                 
+                // 设置用户在线状态
+                await supabaseService?.setUserOnlineStatus(userId: finalAppUser.id, isOnline: true)
+                await supabaseService?.startLastSeenHeartbeat(userId: finalAppUser.id, interval: 30)
+                
                 return .success(finalAppUser)
             } else {
                 // 如果 Supabase 中没有用户详细信息，自动创建
@@ -681,6 +685,14 @@ class AuthManager: ObservableObject {
                 print("✅ Supabase 登出成功")
             } catch {
                 print("⚠️ Supabase 登出失败: \(error.localizedDescription)")
+            }
+        }
+        
+        // 设置用户离线状态（在清除 currentUser 之前）
+        if let currentUserId = currentUser?.id {
+            Task {
+                await supabaseService?.setUserOnlineStatus(userId: currentUserId, isOnline: false)
+                await supabaseService?.stopLastSeenHeartbeat()
             }
         }
         

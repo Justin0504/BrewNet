@@ -246,6 +246,12 @@ class SupabaseService: ObservableObject {
     @Published var isOnline = true
     @Published var lastSyncTime: Date?
     
+    // MARK: - Online Status Management
+    @Published var userOnlineStatuses: [String: (isOnline: Bool, lastSeen: Date)] = [:]
+    private var onlineStatusChannel: RealtimeChannel?
+    private var lastSeenUpdateTimer: Timer?
+    private var isMonitoringOnlineStatus = false
+    
     // MARK: - User Operations
     
     /// 创建用户到 Supabase
@@ -2507,6 +2513,51 @@ extension SupabaseService {
         }
         
         print("✅ Total excluded users: \(excludedUserIds.count)")
+        
+        // 详细诊断：显示排除原因统计
+        var exclusionBreakdown: [String: Int] = [:]
+        do {
+            // 统计已发送邀请
+            let sentInvitations = try await getSentInvitations(userId: userId)
+            exclusionBreakdown["sent_invitations"] = sentInvitations.count
+            
+            // 统计已收到且被拒绝的邀请
+            let receivedInvitations = try await getReceivedInvitations(userId: userId)
+            let rejectedInvitations = receivedInvitations.filter { $0.status == .rejected }
+            exclusionBreakdown["rejected_invitations"] = rejectedInvitations.count
+            
+            // 统计已匹配
+            let allMatches = try await getMatches(userId: userId, activeOnly: false)
+            exclusionBreakdown["matches"] = allMatches.count
+            
+            // 统计交互记录
+            let response = try await client
+                .from("user_interactions")
+                .select("target_user_id,interaction_type")
+                .eq("user_id", value: userId)
+                .execute()
+            
+            if let jsonArray = try? JSONSerialization.jsonObject(with: response.data) as? [[String: Any]] {
+                let typeSet = Set(["like", "pass", "match"])
+                let interactions = jsonArray.filter { record in
+                    if let interactionType = record["interaction_type"] as? String {
+                        return typeSet.contains(interactionType)
+                    }
+                    return false
+                }
+                exclusionBreakdown["interactions"] = interactions.count
+            }
+        } catch {
+            print("⚠️ Failed to get exclusion breakdown: \(error.localizedDescription)")
+        }
+        
+        print("📊 Exclusion breakdown:")
+        print("   - Sent invitations: \(exclusionBreakdown["sent_invitations", default: 0])")
+        print("   - Rejected invitations: \(exclusionBreakdown["rejected_invitations", default: 0])")
+        print("   - Matches: \(exclusionBreakdown["matches", default: 0])")
+        print("   - Interactions: \(exclusionBreakdown["interactions", default: 0])")
+        print("   - Total unique excluded: \(excludedUserIds.count)")
+        
         return excludedUserIds
     }
     
@@ -2516,6 +2567,21 @@ extension SupabaseService {
         limit: Int = 1000
     ) async throws -> [(userId: String, features: UserTowerFeatures)] {
         print("🔍 Fetching candidate features, excluding: \(userId), limit: \(limit)")
+        
+        // 首先检查 user_features 表中的总用户数
+        do {
+            let countResponse = try await client
+                .from("user_features")
+                .select("user_id", head: true, count: .exact)
+                .neq("user_id", value: userId)
+                .execute()
+            
+            if let count = countResponse.count {
+                print("📊 Total users in user_features table (excluding current user): \(count)")
+            }
+        } catch {
+            print("⚠️ Failed to count users in user_features: \(error.localizedDescription)")
+        }
         
         let response = try await client
             .from("user_features")
@@ -2529,20 +2595,34 @@ extension SupabaseService {
         // 解析为字典，包含 user_id 和 features
         if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
             var results: [(userId: String, features: UserTowerFeatures)] = []
+            var failedDecodes = 0
             
             for record in jsonArray {
-                if let userIdStr = record["user_id"] as? String,
-                   let recordData = try? JSONSerialization.data(withJSONObject: record),
-                   let features = try? JSONDecoder().decode(UserTowerFeatures.self, from: recordData) {
-                    results.append((userIdStr, features))
+                if let userIdStr = record["user_id"] as? String {
+                    do {
+                        let recordData = try JSONSerialization.data(withJSONObject: record)
+                        let features = try JSONDecoder().decode(UserTowerFeatures.self, from: recordData)
+                        results.append((userIdStr, features))
+                    } catch {
+                        failedDecodes += 1
+                        print("⚠️ Failed to decode features for user \(userIdStr): \(error.localizedDescription)")
+                    }
                 }
             }
             
-            print("✅ Fetched \(results.count) candidate features")
+            print("✅ Fetched \(results.count) candidate features (failed to decode: \(failedDecodes), total records: \(jsonArray.count))")
+            
+            if results.count == 0 && jsonArray.count > 0 {
+                print("⚠️ Warning: All candidate features failed to decode!")
+                print("   - Total records fetched: \(jsonArray.count)")
+                print("   - Successfully decoded: \(results.count)")
+                print("   - Failed to decode: \(failedDecodes)")
+            }
+            
             return results
         }
         
-        print("⚠️ Failed to parse candidate features")
+        print("⚠️ Failed to parse candidate features - no valid JSON array")
         return []
     }
     
@@ -2729,6 +2809,235 @@ extension SupabaseService {
             print("✅ Batch fetch complete: \(allResults.count)/\(userIds.count) profiles retrieved")
             return allResults
         }
+    }
+    
+    // MARK: - Online Status Management
+    
+    /// 设置用户在线状态
+    func setUserOnlineStatus(userId: String, isOnline: Bool) async {
+        do {
+            let now = ISO8601DateFormatter().string(from: Date())
+            
+            // 尝试更新新字段（如果存在）
+            do {
+                // 分两次更新：先更新布尔字段，再更新字符串字段
+                try await client
+                    .from("users")
+                    .update(["is_online": isOnline])
+                    .eq("id", value: userId)
+                    .execute()
+                
+                // 尝试更新 last_seen_at（如果字段存在）
+                try await client
+                    .from("users")
+                    .update(["last_seen_at": now])
+                    .eq("id", value: userId)
+                    .execute()
+                
+                if isOnline {
+                    // 用户上线：更新最后登录时间
+                    try await client
+                        .from("users")
+                        .update(["last_login_at": now])
+                        .eq("id", value: userId)
+                        .execute()
+                }
+            } catch {
+                // 如果字段不存在，只更新 last_login_at（总是存在的）
+                if error.localizedDescription.contains("is_online") || error.localizedDescription.contains("last_seen_at") || error.localizedDescription.contains("does not exist") {
+                    print("⚠️ Online status fields not found, updating last_login_at only")
+                    try await client
+                        .from("users")
+                        .update(["last_login_at": now])
+                        .eq("id", value: userId)
+                        .execute()
+                } else {
+                    throw error
+                }
+            }
+            
+            // 更新本地状态
+            await MainActor.run {
+                userOnlineStatuses[userId] = (isOnline, Date())
+            }
+            
+            print("✅ Updated online status for user \(userId): \(isOnline ? "Online" : "Offline")")
+        } catch {
+            print("⚠️ Failed to update online status: \(error.localizedDescription)")
+        }
+    }
+    
+    /// 更新用户最后活跃时间（heartbeat）
+    func updateLastSeen(userId: String) async {
+        do {
+            let now = ISO8601DateFormatter().string(from: Date())
+            // 尝试更新 last_seen_at（如果字段存在）
+            try await client
+                .from("users")
+                .update(["last_seen_at": now])
+                .eq("id", value: userId)
+                .execute()
+        } catch {
+            // 如果字段不存在，静默失败（不打印错误，因为这是可选功能）
+            if error.localizedDescription.contains("last_seen_at") || error.localizedDescription.contains("does not exist") {
+                // 字段不存在，这是正常的（如果还没运行迁移脚本）
+                return
+            }
+            print("⚠️ Failed to update last seen: \(error.localizedDescription)")
+        }
+    }
+    
+    /// 获取用户在线状态
+    func getUserOnlineStatus(userId: String) async -> (isOnline: Bool, lastSeen: Date)? {
+        do {
+            // 先尝试获取包含新字段的数据
+            let response = try await client
+                .from("users")
+                .select("is_online,last_seen_at,last_login_at")
+                .eq("id", value: userId)
+                .single()
+                .execute()
+            
+            let data = response.data
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                // 尝试获取 is_online，如果字段不存在则默认为 false
+                let isOnline = json["is_online"] as? Bool ?? false
+                
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                
+                var lastSeen = Date()
+                
+                // 优先使用 last_seen_at，如果不存在则使用 last_login_at
+                if let lastSeenString = json["last_seen_at"] as? String {
+                    if let date = formatter.date(from: lastSeenString) {
+                        lastSeen = date
+                    } else {
+                        formatter.formatOptions = [.withInternetDateTime]
+                        if let date = formatter.date(from: lastSeenString) {
+                            lastSeen = date
+                        }
+                    }
+                } else if let lastLoginString = json["last_login_at"] as? String {
+                    // 回退到 last_login_at
+                    if let date = formatter.date(from: lastLoginString) {
+                        lastSeen = date
+                    } else {
+                        formatter.formatOptions = [.withInternetDateTime]
+                        if let date = formatter.date(from: lastLoginString) {
+                            lastSeen = date
+                        }
+                    }
+                }
+                
+                return (isOnline, lastSeen)
+            }
+        } catch {
+            // 如果字段不存在，尝试使用旧方法（基于 last_login_at）
+            if error.localizedDescription.contains("is_online") || error.localizedDescription.contains("does not exist") {
+                print("⚠️ Online status fields not found, using fallback method based on last_login_at")
+                // 回退到基于 last_login_at 的方法
+                do {
+                    if let user = try? await getUser(id: userId) {
+                        let formatter = ISO8601DateFormatter()
+                        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                        
+                        var lastSeen = Date()
+                        if let lastLoginAt = formatter.date(from: user.lastLoginAt) {
+                            lastSeen = lastLoginAt
+                            let timeSinceLastLogin = Date().timeIntervalSince(lastLoginAt)
+                            // 5分钟内活跃视为在线
+                            let isOnline = timeSinceLastLogin < 300
+                            return (isOnline, lastSeen)
+                        } else {
+                            formatter.formatOptions = [.withInternetDateTime]
+                            if let lastLoginAt = formatter.date(from: user.lastLoginAt) {
+                                lastSeen = lastLoginAt
+                                let timeSinceLastLogin = Date().timeIntervalSince(lastLoginAt)
+                                let isOnline = timeSinceLastLogin < 300
+                                return (isOnline, lastSeen)
+                            }
+                        }
+                    }
+                }
+            } else {
+                print("⚠️ Failed to get user online status: \(error.localizedDescription)")
+            }
+        }
+        return nil
+    }
+    
+    /// 开始监听用户在线状态变化（使用轮询方式，后续可优化为实时订阅）
+    func startMonitoringOnlineStatus(for userIds: [String]) {
+        guard !isMonitoringOnlineStatus else {
+            print("ℹ️ Online status monitoring already started")
+            return
+        }
+        
+        isMonitoringOnlineStatus = true
+        print("✅ Started monitoring online status for \(userIds.count) users (using polling)")
+        
+        // 使用轮询方式定期更新在线状态（每10秒）
+        Task {
+            while isMonitoringOnlineStatus {
+                await refreshOnlineStatuses(for: userIds)
+                try? await Task.sleep(nanoseconds: 10_000_000_000) // 10秒
+            }
+        }
+    }
+    
+    /// 刷新用户在线状态
+    private func refreshOnlineStatuses(for userIds: [String]) async {
+        guard !userIds.isEmpty else { return }
+        
+        // 批量获取用户在线状态
+        for userId in userIds {
+            if let status = await getUserOnlineStatus(userId: userId) {
+                await MainActor.run {
+                    userOnlineStatuses[userId] = status
+                }
+            }
+        }
+    }
+    
+    /// 停止监听在线状态
+    func stopMonitoringOnlineStatus() {
+        guard isMonitoringOnlineStatus else { return }
+        
+        Task {
+            if let channel = onlineStatusChannel {
+                await channel.unsubscribe()
+                onlineStatusChannel = nil
+            }
+            
+            lastSeenUpdateTimer?.invalidate()
+            lastSeenUpdateTimer = nil
+            
+            await MainActor.run {
+                isMonitoringOnlineStatus = false
+            }
+            
+            print("✅ Stopped monitoring online status")
+        }
+    }
+    
+    /// 开始定期更新最后活跃时间（heartbeat）
+    func startLastSeenHeartbeat(userId: String, interval: TimeInterval = 30) {
+        stopLastSeenHeartbeat()
+        
+        lastSeenUpdateTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task {
+                await self?.updateLastSeen(userId: userId)
+            }
+        }
+        
+        print("✅ Started last seen heartbeat for user \(userId) (interval: \(interval)s)")
+    }
+    
+    /// 停止定期更新
+    func stopLastSeenHeartbeat() {
+        lastSeenUpdateTimer?.invalidate()
+        lastSeenUpdateTimer = nil
     }
 }
 
