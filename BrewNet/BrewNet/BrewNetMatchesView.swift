@@ -424,23 +424,38 @@ struct BrewNetMatchesView: View {
                 
                 // 清除推荐缓存，确保已发送邀请的用户不再出现在推荐列表中
                 await MainActor.run {
-                    // 1. 清除本地缓存
-                    cachedProfiles.removeAll()
+                    // 1. 立即从当前显示列表中移除（如果还在显示）
                     profiles.removeAll { $0.userId == profile.userId }
                     
-                    // 2. 清除持久化缓存（包括来源标记）
-                    if let currentUser = authManager.currentUser {
-                        let cacheKey = "matches_cache_\(currentUser.id)"
-                        let timeKey = "matches_cache_time_\(currentUser.id)"
-                        let sourceKey = "matches_cache_source_\(currentUser.id)"
-                        UserDefaults.standard.removeObject(forKey: cacheKey)
-                        UserDefaults.standard.removeObject(forKey: timeKey)
-                        UserDefaults.standard.removeObject(forKey: sourceKey)
-                        isCacheFromRecommendation = false
-                        print("🗑️ Cleared local cache for recommendations")
+                    // 2. 从缓存中移除（如果还在缓存中）
+                    cachedProfiles.removeAll { $0.userId == profile.userId }
+                    
+                    // 3. 更新持久化缓存（保存移除后的缓存）
+                    if !cachedProfiles.isEmpty {
+                        saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
+                        print("✅ Updated cache after sending invitation (removed \(profile.coreIdentity.name))")
+                    } else {
+                        // 如果缓存为空，清除持久化缓存
+                        if let currentUser = authManager.currentUser {
+                            let cacheKey = "matches_cache_\(currentUser.id)"
+                            let timeKey = "matches_cache_time_\(currentUser.id)"
+                            let sourceKey = "matches_cache_source_\(currentUser.id)"
+                            UserDefaults.standard.removeObject(forKey: cacheKey)
+                            UserDefaults.standard.removeObject(forKey: timeKey)
+                            UserDefaults.standard.removeObject(forKey: sourceKey)
+                            isCacheFromRecommendation = false
+                            print("🗑️ Cleared local cache (empty after removing invited user)")
+                        }
                     }
                     
-                    // 3. 清除服务器端的推荐缓存（异步）
+                    // 4. 调整索引（如果当前索引超出范围）
+                    if currentIndex >= profiles.count && !profiles.isEmpty {
+                        currentIndex = 0
+                    } else if profiles.isEmpty {
+                        currentIndex = 0
+                    }
+                    
+                    // 5. 清除服务器端的推荐缓存（异步）
                     Task {
                         do {
                             try await supabaseService.clearRecommendationCache(userId: currentUser.id)
@@ -713,12 +728,17 @@ struct BrewNetMatchesView: View {
                         }
                     }
                     
+                    // 保存过滤后的缓存到持久化存储，确保已排除的用户不会再次出现
+                    saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
+                    
                     print("⚡ Quick filtered cache: \(filteredProfiles.count)/\(originalCount) profiles remain, showing at index \(currentIndex)")
                 } else {
                     // 如果过滤后没有数据，清空 profiles 和 cachedProfiles，等待完整验证或重新加载
                     profiles = []
                     cachedProfiles = []
                     currentIndex = 0
+                    // 清除持久化缓存，确保下次加载时不会再次出现已排除的用户
+                    clearInvalidCache()
                     print("⚠️ Quick filter removed all profiles (from \(originalCount)), cleared cache")
                 }
             }
