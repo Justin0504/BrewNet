@@ -23,6 +23,10 @@ struct ProfileDisplayView: View {
     @State private var showingPointsSystem = false
     @State private var showingRedemptionSystem = false
     
+    // 头像同步定时器
+    @State private var avatarSyncTimer: Timer?
+    @State private var lastProfileImageURL: String? = nil // 跟踪上次的头像URL
+    
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
@@ -102,6 +106,20 @@ struct ProfileDisplayView: View {
         .onAppear {
             loadMatches()
             loadSentInvitations()
+            startAvatarSyncTimer()
+            lastProfileImageURL = profile.coreIdentity.profileImage
+        }
+        .onDisappear {
+            stopAvatarSyncTimer()
+        }
+        .onChange(of: profile.coreIdentity.profileImage) { newImageURL in
+            // 当头像URL变化时，清除缓存
+            if let oldURL = lastProfileImageURL, oldURL != newImageURL,
+               oldURL.hasPrefix("http://") || oldURL.hasPrefix("https://") {
+                ImageCacheManager.shared.removeImage(for: oldURL)
+                print("🔄 [Profile] 头像URL变化，已清除旧缓存: \(oldURL)")
+            }
+            lastProfileImageURL = newImageURL
         }
         .sheet(isPresented: $showingMatches) {
             NavigationStack {
@@ -200,6 +218,98 @@ struct ProfileDisplayView: View {
                     isLoadingMatches = false
                 }
             }
+        }
+    }
+    
+    // MARK: - Avatar Sync Timer
+    /// 启动头像同步定时器（每5秒检查一次）
+    private func startAvatarSyncTimer() {
+        stopAvatarSyncTimer() // 先停止现有的定时器
+        
+        print("🔄 [Profile] 启动头像同步定时器（每5秒）")
+        
+        avatarSyncTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+            Task { @MainActor in
+                await syncProfileAvatar()
+            }
+        }
+    }
+    
+    /// 停止头像同步定时器
+    private func stopAvatarSyncTimer() {
+        avatarSyncTimer?.invalidate()
+        avatarSyncTimer = nil
+    }
+    
+    /// 同步当前用户的头像（从数据库获取最新头像）
+    @MainActor
+    private func syncProfileAvatar() async {
+        guard let currentUser = authManager.currentUser else {
+            print("⚠️ [Profile同步] 没有当前用户，跳过同步")
+            return
+        }
+        
+        print("🔄 [Profile同步] 开始同步头像...")
+        
+        do {
+            // 从数据库获取最新的 profile
+            if let latestProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                let brewNetProfile = latestProfile.toBrewNetProfile()
+                let newImageURL = brewNetProfile.coreIdentity.profileImage
+                let currentImageURL = profile.coreIdentity.profileImage
+                
+                // 检查头像是否有变化
+                if newImageURL != currentImageURL {
+                    print("🔄 [Profile同步] 检测到头像变化:")
+                    print("   - 当前头像: \(currentImageURL ?? "nil")")
+                    print("   - 新头像: \(newImageURL ?? "nil")")
+                    
+                    // 如果头像URL变化了，清除旧缓存
+                    if let oldURL = currentImageURL, oldURL != newImageURL,
+                       oldURL.hasPrefix("http://") || oldURL.hasPrefix("https://") {
+                        ImageCacheManager.shared.removeImage(for: oldURL)
+                        print("   🗑️ [Profile同步] 已清除旧头像缓存: \(oldURL)")
+                    }
+                    
+                    // 即使URL相同，也清除缓存以确保显示最新图片
+                    if newImageURL == currentImageURL && newImageURL != nil,
+                       (newImageURL?.hasPrefix("http://") == true || newImageURL?.hasPrefix("https://") == true) {
+                        ImageCacheManager.shared.removeImage(for: newImageURL!)
+                        print("   🔄 [Profile同步] 头像URL相同但强制刷新缓存: \(newImageURL!)")
+                    }
+                    
+                    // 更新 profile（创建新的实例，因为所有属性都是 let）
+                    let updatedProfile = BrewNetProfile(
+                        id: profile.id,
+                        userId: profile.userId,
+                        createdAt: profile.createdAt,
+                        updatedAt: brewNetProfile.updatedAt, // 使用最新的更新时间
+                        coreIdentity: brewNetProfile.coreIdentity, // 使用最新的 coreIdentity（包含新头像）
+                        professionalBackground: profile.professionalBackground,
+                        networkingIntention: profile.networkingIntention,
+                        networkingPreferences: profile.networkingPreferences,
+                        personalitySocial: profile.personalitySocial,
+                        privacyTrust: profile.privacyTrust
+                    )
+                    profile = updatedProfile
+                    lastProfileImageURL = newImageURL
+                    
+                    // 调用回调通知父视图
+                    onProfileUpdated?(updatedProfile)
+                    
+                    print("✅ [Profile同步] 头像已更新")
+                } else {
+                    // 即使URL相同，也清除缓存以确保显示最新图片（可能图片内容已更新）
+                    if let imageURL = newImageURL, imageURL.hasPrefix("http://") || imageURL.hasPrefix("https://") {
+                        ImageCacheManager.shared.removeImage(for: imageURL)
+                        print("🔄 [Profile同步] 强制刷新头像缓存: \(imageURL)")
+                    }
+                }
+            } else {
+                print("⚠️ [Profile同步] 无法获取最新 profile")
+            }
+        } catch {
+            print("⚠️ [Profile同步] 同步失败: \(error.localizedDescription)")
         }
     }
     
@@ -309,18 +419,19 @@ struct ProfileHeaderView: View {
                             .frame(width: 100, height: 100)
                             .rotationEffect(.degrees(-90))
                         
-                        // Profile Image (inner)
-                        AsyncImage(url: URL(string: profile.coreIdentity.profileImage ?? "")) { image in
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            Image(systemName: "person.circle.fill")
-                                .font(.system(size: 60))
-                                .foregroundColor(.gray)
+                        // Profile Image (inner) - 使用 AvatarView 以便更好地控制缓存
+                        Group {
+                            if let imageURL = profile.coreIdentity.profileImage, !imageURL.isEmpty {
+                                AvatarView(avatarString: imageURL, size: 84)
+                            } else {
+                                Image(systemName: "person.circle.fill")
+                                    .font(.system(size: 60))
+                                    .foregroundColor(.gray)
+                            }
                         }
                         .frame(width: 84, height: 84)
                         .clipShape(Circle())
+                        .id("profile-avatar-\(profile.coreIdentity.profileImage ?? "nil")") // 强制刷新当头像URL变化时
                         .overlay(
                             Circle()
                                 .stroke(Color.white, lineWidth: 2)

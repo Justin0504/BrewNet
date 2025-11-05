@@ -15,7 +15,12 @@ struct BrewNetApp: App {
     @StateObject private var supabaseService = SupabaseService.shared
     
     init() {
+        print("🚀 =========================================")
         print("🚀 BrewNetApp initialized")
+        print("🚀 =========================================")
+        print("TEST TEST TEST - 如果你看到这条消息，说明应用正在运行")
+        print("TEST TEST TEST - 如果你看到这条消息，说明应用正在运行")
+        print("TEST TEST TEST - 如果你看到这条消息，说明应用正在运行")
     }
     
     var body: some Scene {
@@ -33,10 +38,15 @@ struct BrewNetApp: App {
     
     // 在视图出现后设置依赖
     private func setupDependencies() {
+        print("🔧 =========================================")
+        print("🔧 setupDependencies() 被调用")
+        print("🔧 =========================================")
         print("🔧 设置依赖关系...")
         
         // 设置依赖关系
+        print("🔧 1. 设置 SupabaseService 依赖...")
         supabaseService.setDependencies(databaseManager: databaseManager)
+        print("🔧 2. 设置 AuthManager 依赖...")
         authManager.setDependencies(databaseManager: databaseManager, supabaseService: supabaseService)
         
         print("✅ 依赖关系设置完成")
@@ -50,6 +60,8 @@ struct BrewNetApp: App {
         // Initialize database with sample data
         databaseManager.createSampleData()
         
+        print("✅ =========================================")
         print("✅ 应用初始化完成")
+        print("✅ =========================================")
     }
 }

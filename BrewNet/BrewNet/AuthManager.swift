@@ -40,30 +40,49 @@ class AuthManager: ObservableObject {
     private let userKey = "current_user"
     private weak var databaseManager: DatabaseManager?
     private weak var supabaseService: SupabaseService?
+    private var hasCheckedAuth = false // 标记是否已经检查过认证状态
     
     init() {
+        print("🚀 =========================================")
         print("🚀 AuthManager initialized")
-        // Check if there's saved user information
-        checkAuthStatus()
+        print("🚀 =========================================")
+        print("TEST - AuthManager 初始化")
+        print("🔍 [AuthManager] init() - supabaseService 初始值: \(supabaseService == nil ? "nil" : "已设置")")
+        // 不在 init 中检查，等待依赖注入完成后再检查
+        print("⚠️ [AuthManager] 注意：checkAuthStatus 将在依赖注入后调用")
     }
     
     // MARK: - Dependency Injection
     func setDependencies(databaseManager: DatabaseManager, supabaseService: SupabaseService) {
+        print("🔧 [AuthManager] setDependencies 被调用")
+        print("   - databaseManager: \(databaseManager)")
+        print("   - supabaseService: \(supabaseService)")
         self.databaseManager = databaseManager
         self.supabaseService = supabaseService
+        print("✅ [AuthManager] 依赖注入完成，supabaseService 已设置: \(self.supabaseService != nil)")
+        
+        // 依赖注入完成后，检查认证状态
+        if !hasCheckedAuth {
+            print("🔄 [AuthManager] 依赖注入完成，现在检查认证状态")
+            hasCheckedAuth = true
+            checkAuthStatus()
+        }
     }
     
     // MARK: - Check Authentication Status
     private func checkAuthStatus() {
-        print("🔍 Checking authentication status...")
+        print("🔍 [AuthManager] checkAuthStatus() 被调用")
+        print("   - supabaseService 是否为 nil: \(supabaseService == nil)")
         // Check Supabase session
         Task {
             do {
                 let session = try await SupabaseConfig.shared.client.auth.session
-                print("✅ Supabase session found, user ID: \(session.user.id.uuidString)")
+                print("✅ [AuthManager] Supabase session found, user ID: \(session.user.id.uuidString)")
+                print("   - supabaseService 是否为 nil: \(supabaseService == nil)")
                 
                 // Get user info from Supabase
                 if let supabaseUser = try await supabaseService?.getUser(id: session.user.id.uuidString) {
+                    print("✅ [AuthManager] 获取到用户信息: \(supabaseUser.name)")
                     let appUser = supabaseUser.toAppUser()
                     
                     // Check if user has profile
@@ -79,7 +98,28 @@ class AuthManager: ObservableObject {
                     
                     await MainActor.run {
                         saveUser(finalAppUser)
-                        print("✅ Auto-login successful: \(finalAppUser.name)")
+                        print("✅ [AuthManager] Auto-login successful: \(finalAppUser.name)")
+                        // 重要：设置认证状态和当前用户
+                        self.currentUser = finalAppUser
+                        self.authState = .authenticated(finalAppUser)
+                        print("✅ [AuthManager] 认证状态已更新为 authenticated")
+                    }
+                    
+                    // 设置用户在线状态并启动 heartbeat
+                    print("🔍 [AuthManager] 准备启动 heartbeat（自动登录）")
+                    print("   - supabaseService 是否为 nil: \(supabaseService == nil)")
+                    print("   - 用户ID: \(finalAppUser.id)")
+                    
+                    if let service = supabaseService {
+                        print("✅ [AuthManager] supabaseService 可用，开始设置在线状态和启动 heartbeat")
+                        await service.setUserOnlineStatus(userId: finalAppUser.id, isOnline: true)
+                        print("✅ [AuthManager] 在线状态已设置，现在启动 heartbeat")
+                        await service.startLastSeenHeartbeat(userId: finalAppUser.id, interval: 30)
+                        print("✅ [AuthManager] 已启动 heartbeat 机制（自动登录）")
+                    } else {
+                        print("❌ [AuthManager] ⚠️⚠️⚠️ supabaseService 为 nil，无法启动 heartbeat ⚠️⚠️⚠️")
+                        print("   - 这可能是因为依赖注入还没有完成")
+                        print("   - 请检查 setDependencies 是否被调用")
                     }
                 } else {
                     print("⚠️ No user info found in Supabase")
@@ -207,6 +247,19 @@ class AuthManager: ObservableObject {
                     saveUser(appUser)
                 }
                 
+                // 设置用户在线状态并启动 heartbeat
+                print("🔍 [AuthManager] 准备启动 heartbeat（自动注册）")
+                print("   - supabaseService 是否为 nil: \(supabaseService == nil)")
+                print("   - 用户ID: \(appUser.id)")
+                
+                if let service = supabaseService {
+                    await service.setUserOnlineStatus(userId: appUser.id, isOnline: true)
+                    await service.startLastSeenHeartbeat(userId: appUser.id, interval: 30)
+                    print("✅ [AuthManager] 已启动 heartbeat 机制（自动注册）")
+                } else {
+                    print("❌ [AuthManager] ⚠️⚠️⚠️ supabaseService 为 nil，无法启动 heartbeat ⚠️⚠️⚠️")
+                }
+                
                 return .success(appUser)
             } else {
                 print("❌ 无法创建 Supabase 用户详细信息")
@@ -257,9 +310,18 @@ class AuthManager: ObservableObject {
                     print("✅ 用户登录成功: \(finalAppUser.name), profile completed: \(finalAppUser.profileSetupCompleted)")
                 }
                 
-                // 设置用户在线状态
-                await supabaseService?.setUserOnlineStatus(userId: finalAppUser.id, isOnline: true)
-                await supabaseService?.startLastSeenHeartbeat(userId: finalAppUser.id, interval: 30)
+                // 设置用户在线状态并启动 heartbeat
+                print("🔍 [AuthManager] 准备启动 heartbeat（登录）")
+                print("   - supabaseService 是否为 nil: \(supabaseService == nil)")
+                print("   - 用户ID: \(finalAppUser.id)")
+                
+                if let service = supabaseService {
+                    await service.setUserOnlineStatus(userId: finalAppUser.id, isOnline: true)
+                    await service.startLastSeenHeartbeat(userId: finalAppUser.id, interval: 30)
+                    print("✅ [AuthManager] 已启动 heartbeat 机制（登录）")
+                } else {
+                    print("❌ [AuthManager] ⚠️⚠️⚠️ supabaseService 为 nil，无法启动 heartbeat ⚠️⚠️⚠️")
+                }
                 
                 return .success(finalAppUser)
             } else {

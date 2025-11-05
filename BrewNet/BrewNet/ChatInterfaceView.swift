@@ -15,9 +15,11 @@ struct ChatInterfaceView: View {
     @State private var displayedProfile: BrewNetProfile?
     @State private var isLoadingProfile = false
     @State private var messageRefreshTimer: Timer?
+    @State private var onlineStatusSyncTimer: Timer? // 在线状态和头像同步定时器
     @State private var cachedChatSessions: [ChatSession] = [] // 缓存数据
     @State private var lastChatLoadTime: Date? = nil // 记录上次加载时间
     @State private var userIdToFullProfileMap: [String: BrewNetProfile] = [:] // 存储完整的 profile 数据
+    @State private var avatarRefreshVersions: [String: Int] = [:] // 头像刷新版本号，用于强制刷新
     @State private var showingUnmatchConfirmAlert = false
     @State private var sessionToUnmatch: ChatSession? = nil
     @State private var scrollToBottomId: UUID? = nil // 用于触发滚动到底部
@@ -36,13 +38,19 @@ struct ChatInterfaceView: View {
             .onAppear {
                 loadChatSessions()
                 startMessageRefreshTimer()
+                startOnlineStatusSyncTimer() // 启动在线状态和头像同步定时器
             }
             .onChange(of: supabaseService.userOnlineStatuses.count) { _ in
                 // 当在线状态更新时（通过字典数量变化触发），刷新聊天会话列表
                 updateChatSessionsWithOnlineStatus()
             }
+            .onChange(of: supabaseService.onlineStatusUpdateVersion) { _ in
+                // 当在线状态版本号变化时（表示状态已更新），刷新聊天会话列表
+                updateChatSessionsWithOnlineStatus()
+            }
             .onDisappear {
             stopMessageRefreshTimer()
+            stopOnlineStatusSyncTimer() // 停止在线状态同步定时器
             // 停止在线状态监控
             supabaseService.stopMonitoringOnlineStatus()
             // 先尝试从持久化缓存加载
@@ -503,7 +511,11 @@ struct ChatInterfaceView: View {
                 loadProfile(for: session.user)
             }) {
                 HStack(spacing: 12) {
-                    AvatarView(avatarString: session.user.avatar, size: 40)
+                    // 使用实时头像（如果profile map中有更新）
+                    let currentAvatar = getCurrentAvatarForUser(session.user)
+                    let avatarVersion = session.user.userId.flatMap { avatarRefreshVersions[$0] } ?? 0
+                    AvatarView(avatarString: currentAvatar, size: 40)
+                        .id("avatar-\(session.user.id)-\(currentAvatar)-v\(avatarVersion)") // 强制刷新当头像URL或版本号变化时
                     
                     VStack(alignment: .leading, spacing: 2) {
                         Text(session.user.name)
@@ -633,19 +645,63 @@ struct ChatInterfaceView: View {
         .background(Color.white)
     }
     
-    /// 更新聊天会话的在线状态（当实时状态更新时调用）
+    /// 获取用户当前最新的头像（优先使用 profile map 中的最新头像）
+    private func getCurrentAvatarForUser(_ user: ChatUser) -> String {
+        if let userId = user.userId,
+           let profile = userIdToFullProfileMap[userId],
+           let newAvatar = profile.coreIdentity.profileImage,
+           !newAvatar.isEmpty {
+            return newAvatar
+        }
+        return user.avatar
+    }
+    
+    /// 更新聊天会话的在线状态和头像（当实时状态更新时调用）
     private func updateChatSessionsWithOnlineStatus() {
         // 由于 ChatSession 的 user 是 let，需要重新创建整个会话
         var updatedSessions: [ChatSession] = []
         for session in chatSessions {
-            if let userId = session.user.userId,
-               let status = supabaseService.userOnlineStatuses[userId] {
+            if let userId = session.user.userId {
+                // 获取最新的在线状态
+                let status = supabaseService.userOnlineStatuses[userId]
+                let isOnline = status?.isOnline ?? session.user.isOnline
+                let lastSeen = status?.lastSeen ?? session.user.lastSeen
+                
+                // 获取最新的头像（从 profile map 中获取）
+                var avatar = session.user.avatar
+                let oldAvatar = avatar
+                if let profile = userIdToFullProfileMap[userId],
+                   let newAvatar = profile.coreIdentity.profileImage,
+                   !newAvatar.isEmpty {
+                    // 即使 URL 相同也要更新（确保显示最新数据）
+                    avatar = newAvatar
+                    
+                    // 如果头像URL变化了，清除旧头像的缓存
+                    if oldAvatar != newAvatar && (oldAvatar.hasPrefix("http://") || oldAvatar.hasPrefix("https://")) {
+                        ImageCacheManager.shared.removeImage(for: oldAvatar)
+                        print("   🗑️ [头像更新] 已清除旧头像缓存: \(oldAvatar)")
+                    }
+                    
+                    // 即使 URL 相同，也清除缓存以确保显示最新图片
+                    if oldAvatar == newAvatar && (newAvatar.hasPrefix("http://") || newAvatar.hasPrefix("https://")) {
+                        ImageCacheManager.shared.removeImage(for: newAvatar)
+                        // 增加刷新版本号，强制刷新视图
+                        avatarRefreshVersions[userId] = (avatarRefreshVersions[userId] ?? 0) + 1
+                        print("   🔄 [头像更新] 头像URL相同但强制刷新缓存: \(newAvatar) (版本: \(avatarRefreshVersions[userId] ?? 0))")
+                    } else if oldAvatar != newAvatar {
+                        // URL 变化时也更新版本号
+                        avatarRefreshVersions[userId] = (avatarRefreshVersions[userId] ?? 0) + 1
+                    }
+                    
+                    print("   ✅ [头像更新] 用户 \(userId) 头像: \(oldAvatar) -> \(newAvatar)")
+                }
+                
                 // 创建更新后的 ChatUser
                 let updatedChatUser = ChatUser(
                     name: session.user.name,
-                    avatar: session.user.avatar,
-                    isOnline: status.isOnline,
-                    lastSeen: status.lastSeen,
+                    avatar: avatar,
+                    isOnline: isOnline,
+                    lastSeen: lastSeen,
                     interests: session.user.interests,
                     bio: session.user.bio,
                     isMatched: session.user.isMatched,
@@ -663,7 +719,7 @@ struct ChatInterfaceView: View {
                 updatedSession.lastMessageAt = session.lastMessageAt
                 updatedSessions.append(updatedSession)
             } else {
-                // 如果没有状态更新，保留原会话
+                // 如果没有 userId，保留原会话
                 updatedSessions.append(session)
             }
         }
@@ -1400,6 +1456,222 @@ struct ChatInterfaceView: View {
         messageRefreshTimer = nil
     }
     
+    // MARK: - Online Status and Avatar Sync Timer
+    /// 启动在线状态和头像同步定时器（每10秒同步一次）
+    private func startOnlineStatusSyncTimer() {
+        stopOnlineStatusSyncTimer() // 先停止现有的定时器
+        
+        print("🔄 [Chat同步] 启动在线状态和头像同步定时器（每10秒）")
+        
+        onlineStatusSyncTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { _ in
+            Task { @MainActor in
+                await self.syncOnlineStatusAndAvatars()
+            }
+        }
+    }
+    
+    /// 停止在线状态同步定时器
+    private func stopOnlineStatusSyncTimer() {
+        onlineStatusSyncTimer?.invalidate()
+        onlineStatusSyncTimer = nil
+    }
+    
+    /// 同步在线状态和头像（每10秒调用一次）
+    @MainActor
+    private func syncOnlineStatusAndAvatars() async {
+        guard let currentUser = authManager.currentUser else {
+            print("⚠️ [Chat同步] 没有当前用户，跳过同步")
+            return
+        }
+        
+        print("🔄 [Chat同步] 开始同步在线状态和头像...")
+        print("   - 当前会话数量: \(chatSessions.count)")
+        
+        // 收集所有需要同步的用户ID
+        let userIdsToSync = chatSessions.compactMap { $0.user.userId }
+        guard !userIdsToSync.isEmpty else {
+            print("ℹ️ [Chat同步] 没有需要同步的用户")
+            return
+        }
+        
+        print("   - 需要同步的用户数量: \(userIdsToSync.count)")
+        print("   - 用户IDs: \(userIdsToSync)")
+        
+        // 并行获取所有用户的在线状态
+        var updatedOnlineStatuses: [String: (isOnline: Bool, lastSeen: Date)] = [:]
+        await withTaskGroup(of: (String, (isOnline: Bool, lastSeen: Date)?).self) { group in
+            for userId in userIdsToSync {
+                group.addTask {
+                    let status = await self.supabaseService.getUserOnlineStatus(userId: userId)
+                    return (userId, status)
+                }
+            }
+            
+            for await (userId, status) in group {
+                if let status = status {
+                    updatedOnlineStatuses[userId] = status
+                }
+            }
+        }
+        
+        // 更新 SupabaseService 的在线状态缓存
+        var hasStatusChanges = false
+        for (userId, status) in updatedOnlineStatuses {
+            await MainActor.run {
+                let oldStatus = supabaseService.userOnlineStatuses[userId]
+                supabaseService.userOnlineStatuses[userId] = status
+                // 检查是否有变化
+                if oldStatus?.isOnline != status.isOnline || oldStatus?.lastSeen != status.lastSeen {
+                    hasStatusChanges = true
+                }
+            }
+        }
+        
+        // 如果有状态变化，更新版本号以触发 UI 更新
+        if hasStatusChanges {
+            await MainActor.run {
+                supabaseService.onlineStatusUpdateVersion += 1
+            }
+        }
+        
+        print("   - 已更新在线状态: \(updatedOnlineStatuses.count) 个用户\(hasStatusChanges ? " (有变化)" : "")")
+        
+        // 并行获取所有用户的头像（从 profile 获取）
+        var updatedProfiles: [String: BrewNetProfile] = [:]
+        await withTaskGroup(of: (String, BrewNetProfile?).self) { group in
+            for userId in userIdsToSync {
+                group.addTask {
+                    if let profile = try? await self.supabaseService.getProfile(userId: userId) {
+                        return (userId, profile.toBrewNetProfile())
+                    }
+                    return (userId, nil)
+                }
+            }
+            
+            for await (userId, profile) in group {
+                if let profile = profile {
+                    updatedProfiles[userId] = profile
+                }
+            }
+        }
+        
+        // 更新 profile map
+        for (userId, profile) in updatedProfiles {
+            userIdToFullProfileMap[userId] = profile
+        }
+        
+        print("   - 已更新头像: \(updatedProfiles.count) 个用户")
+        
+        // 更新聊天会话列表（包括在线状态和头像）
+        var updatedSessions: [ChatSession] = []
+        for session in chatSessions {
+            guard let userId = session.user.userId else {
+                updatedSessions.append(session)
+                continue
+            }
+            
+            // 获取最新的在线状态
+            let status = updatedOnlineStatuses[userId] ?? supabaseService.userOnlineStatuses[userId]
+            let isOnline = status?.isOnline ?? session.user.isOnline
+            let lastSeen = status?.lastSeen ?? session.user.lastSeen
+            
+            // 获取最新的头像
+            var avatar = session.user.avatar
+            let oldAvatar = avatar
+            var shouldClearCache = false
+            
+            if let profile = updatedProfiles[userId] ?? userIdToFullProfileMap[userId] {
+                // 优先使用新获取的头像，如果为空则保持原头像
+                if let newAvatar = profile.coreIdentity.profileImage, !newAvatar.isEmpty {
+                    // 即使 URL 相同，也要更新（因为可能图片内容已更新）
+                    avatar = newAvatar
+                    
+                    // 如果头像URL变化了，清除旧头像的缓存
+                    if oldAvatar != newAvatar && (oldAvatar.hasPrefix("http://") || oldAvatar.hasPrefix("https://")) {
+                        ImageCacheManager.shared.removeImage(for: oldAvatar)
+                        print("   🗑️ [头像更新] 已清除旧头像缓存: \(oldAvatar)")
+                    }
+                    
+                    // 即使 URL 相同，也清除缓存以确保显示最新图片（可能图片已更新）
+                    // 注意：每次同步时都清除缓存，确保显示最新的图片
+                    if oldAvatar == newAvatar && (newAvatar.hasPrefix("http://") || newAvatar.hasPrefix("https://")) {
+                        ImageCacheManager.shared.removeImage(for: newAvatar)
+                        // 增加刷新版本号，强制刷新视图
+                        avatarRefreshVersions[userId] = (avatarRefreshVersions[userId] ?? 0) + 1
+                        print("   🔄 [头像更新] 头像URL相同但强制刷新缓存: \(newAvatar) (版本: \(avatarRefreshVersions[userId] ?? 0))")
+                    } else if oldAvatar != newAvatar {
+                        // URL 变化时也更新版本号
+                        avatarRefreshVersions[userId] = (avatarRefreshVersions[userId] ?? 0) + 1
+                    }
+                    
+                    print("   ✅ [头像更新] 用户 \(userId) 头像: \(oldAvatar) -> \(newAvatar)")
+                } else {
+                    print("   ⚠️ [头像更新] 用户 \(userId) 的新头像为空，保持原头像: \(avatar)")
+                }
+            } else {
+                print("   ⚠️ [头像更新] 用户 \(userId) 的 profile 不存在于 map 中")
+            }
+            
+            // 创建更新后的 ChatUser
+            let updatedChatUser = ChatUser(
+                name: session.user.name,
+                avatar: avatar,
+                isOnline: isOnline,
+                lastSeen: lastSeen,
+                interests: session.user.interests,
+                bio: session.user.bio,
+                isMatched: session.user.isMatched,
+                matchDate: session.user.matchDate,
+                matchType: session.user.matchType,
+                userId: session.user.userId
+            )
+            
+            // 创建新的 ChatSession
+            var updatedSession = ChatSession(
+                user: updatedChatUser,
+                messages: session.messages,
+                aiSuggestions: session.aiSuggestions,
+                isActive: session.isActive
+            )
+            updatedSession.lastMessageAt = session.lastMessageAt
+            updatedSessions.append(updatedSession)
+        }
+        
+        // 更新会话列表
+        chatSessions = updatedSessions
+        
+        // 如果当前有选中的会话，也需要更新它（确保聊天详情页的头像也更新）
+        if let currentSelectedSession = selectedSession,
+           let currentUserId = currentSelectedSession.user.userId,
+           let updatedSelectedSession = updatedSessions.first(where: { $0.user.userId == currentUserId }) {
+            // 即使头像URL相同，也要更新（确保显示最新数据）
+            let avatarChanged = updatedSelectedSession.user.avatar != currentSelectedSession.user.avatar
+            
+            if avatarChanged || updatedSelectedSession.user.name != currentSelectedSession.user.name || 
+               updatedSelectedSession.user.isOnline != currentSelectedSession.user.isOnline {
+                print("🔄 [Chat同步] 更新选中会话:")
+                print("   - 头像: \(currentSelectedSession.user.avatar) -> \(updatedSelectedSession.user.avatar)")
+                print("   - 在线状态: \(currentSelectedSession.user.isOnline) -> \(updatedSelectedSession.user.isOnline)")
+                
+                // 如果头像URL变化了，清除旧头像的缓存
+                if avatarChanged && (currentSelectedSession.user.avatar.hasPrefix("http://") || currentSelectedSession.user.avatar.hasPrefix("https://")) {
+                    ImageCacheManager.shared.removeImage(for: currentSelectedSession.user.avatar)
+                    print("🗑️ [Chat同步] 已清除旧头像缓存: \(currentSelectedSession.user.avatar)")
+                }
+                
+                // 即使URL相同，也清除缓存以确保显示最新图片
+                if !avatarChanged && (updatedSelectedSession.user.avatar.hasPrefix("http://") || updatedSelectedSession.user.avatar.hasPrefix("https://")) {
+                    ImageCacheManager.shared.removeImage(for: updatedSelectedSession.user.avatar)
+                    print("🔄 [Chat同步] 强制刷新头像缓存: \(updatedSelectedSession.user.avatar)")
+                }
+                
+                selectedSession = updatedSelectedSession
+            }
+        }
+        
+        print("✅ [Chat同步] 同步完成，已更新 \(updatedSessions.count) 个会话")
+    }
+    
     @MainActor
     private func refreshMessagesForCurrentSession() async {
         guard let session = selectedSession,
@@ -1612,8 +1884,10 @@ struct ChatSessionRowView: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
-                // Avatar
+                // Avatar - 使用时间戳确保刷新
+                let timestamp = Date().timeIntervalSince1970
                 AvatarView(avatarString: session.user.avatar, size: 50)
+                    .id("avatar-\(session.user.id)-\(session.user.avatar)-\(Int(timestamp / 10))") // 每10秒刷新一次
                 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -2486,10 +2760,12 @@ struct AvatarView: View {
     let size: CGFloat
     @State private var cachedImage: UIImage?
     @State private var isLoading = false
+    @State private var currentAvatarString: String = "" // 跟踪当前头像URL
     
     init(avatarString: String, size: CGFloat = 50) {
         self.avatarString = avatarString
         self.size = size
+        _currentAvatarString = State(initialValue: avatarString)
         
         // 在初始化时立即尝试从缓存加载（同步）
         if avatarString.hasPrefix("http://") || avatarString.hasPrefix("https://"),
@@ -2522,6 +2798,21 @@ struct AvatarView: View {
                 // 视图出现时立即尝试加载
                 loadImage()
             }
+            .onChange(of: avatarString) { newValue in
+                // 当头像URL变化时，清除缓存并重新加载
+                if newValue != currentAvatarString {
+                    print("🔄 [AvatarView] 头像URL变化: \(currentAvatarString) -> \(newValue)")
+                    currentAvatarString = newValue
+                    cachedImage = nil // 清除旧图片
+                    // 清除缓存
+                    if newValue.hasPrefix("http://") || newValue.hasPrefix("https://") {
+                        ImageCacheManager.shared.removeImage(for: newValue)
+                    }
+                    loadImage() // 重新加载新图片
+                }
+                // 注意：如果 URL 相同，不在 onChange 中处理，避免循环刷新
+                // 缓存清除由同步逻辑在外部处理
+            }
         } else {
             // 如果是 SF Symbol
             Image(systemName: avatarString)
@@ -2531,14 +2822,20 @@ struct AvatarView: View {
     }
     
     private func loadImage() {
-        // 如果已经有缓存图片，不再重复加载
-        if cachedImage != nil {
+        // 如果当前头像URL与缓存中的URL不匹配，清除缓存
+        if cachedImage != nil && currentAvatarString != avatarString {
+            cachedImage = nil
+        }
+        
+        // 如果已经有缓存图片且URL匹配，不再重复加载
+        if cachedImage != nil && currentAvatarString == avatarString {
             return
         }
         
         // 先尝试从缓存加载（同步，立即返回）
         if let cached = ImageCacheManager.shared.loadImage(from: avatarString) {
             self.cachedImage = cached
+            self.currentAvatarString = avatarString
             return
         }
         
@@ -2550,6 +2847,8 @@ struct AvatarView: View {
             return
         }
         
+        print("🔄 [AvatarView] 开始加载头像: \(avatarString)")
+        
         Task {
             do {
                 let (data, _) = try await URLSession.shared.data(from: url)
@@ -2559,11 +2858,13 @@ struct AvatarView: View {
                         // 保存到缓存
                         ImageCacheManager.shared.saveImage(image, for: avatarString)
                         self.cachedImage = image
+                        self.currentAvatarString = avatarString
+                        print("✅ [AvatarView] 头像加载成功: \(avatarString)")
                     }
                     self.isLoading = false
                 }
             } catch {
-                print("⚠️ Failed to load avatar: \(error.localizedDescription)")
+                print("⚠️ [AvatarView] 头像加载失败: \(error.localizedDescription)")
                 await MainActor.run {
                     self.isLoading = false
                 }

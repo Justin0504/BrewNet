@@ -74,6 +74,19 @@ class ImageCacheManager {
         }
     }
     
+    /// 清除指定 URL 的缓存
+    func removeImage(for urlString: String) {
+        // 从内存缓存中移除
+        memoryCache.removeObject(forKey: urlString as NSString)
+        
+        // 从磁盘缓存中移除
+        let cacheFileURL = self.cacheFileURL(for: urlString)
+        if fileManager.fileExists(atPath: cacheFileURL.path) {
+            try? fileManager.removeItem(at: cacheFileURL)
+            print("🗑️ [ImageCache] 已清除头像缓存: \(urlString)")
+        }
+    }
+    
     /// 清除所有缓存
     func clearCache() {
         memoryCache.removeAllObjects()
