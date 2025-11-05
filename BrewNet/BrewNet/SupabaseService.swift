@@ -365,7 +365,19 @@ class SupabaseService: ObservableObject {
         let filePath = "\(userId)/\(fileName)"
         
         do {
+            // 先尝试删除旧的头像文件（如果存在），避免 "resource already exists" 错误
+            do {
+                try await client.storage
+                    .from("avatars")
+                    .remove(paths: [filePath])
+                print("🗑️ Removed existing avatar file")
+            } catch {
+                // 如果文件不存在，忽略错误（这是正常的）
+                print("ℹ️ No existing avatar file to remove (this is OK)")
+            }
+            
             // 上传图片到 storage bucket
+            // 注意：由于我们已经删除了旧文件，这里应该不会出现 "resource already exists" 错误
             try await client.storage
                 .from("avatars")
                 .upload(
@@ -2602,7 +2614,7 @@ extension SupabaseService {
                     do {
                         let recordData = try JSONSerialization.data(withJSONObject: record)
                         let features = try JSONDecoder().decode(UserTowerFeatures.self, from: recordData)
-                        results.append((userIdStr, features))
+                    results.append((userIdStr, features))
                     } catch {
                         failedDecodes += 1
                         print("⚠️ Failed to decode features for user \(userIdStr): \(error.localizedDescription)")

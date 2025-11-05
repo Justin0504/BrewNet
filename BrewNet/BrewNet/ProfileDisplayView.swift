@@ -4,6 +4,7 @@ import PhotosUI
 struct ProfileDisplayView: View {
     @State var profile: BrewNetProfile
     var onEditProfile: (() -> Void)?
+    var onProfileUpdated: ((BrewNetProfile) -> Void)?
     
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var supabaseService: SupabaseService
@@ -26,6 +27,8 @@ struct ProfileDisplayView: View {
                     onEditProfile: onEditProfile,
                     onProfileUpdated: { updatedProfile in
                         profile = updatedProfile
+                        // 同时调用父视图的回调，确保更新同步
+                        onProfileUpdated?(updatedProfile)
                     }
                 )
                 .padding(.horizontal, 16)
@@ -184,6 +187,9 @@ struct ProfileHeaderView: View {
     
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var isUploadingImage = false
+    @State private var showErrorAlert = false
+    @State private var errorMessage = ""
+    @State private var showSuccessAlert = false
     
     // 计算资料完成度百分比
     private var profileCompletionPercentage: Int {
@@ -426,24 +432,55 @@ struct ProfileHeaderView: View {
                                 updatedAt: ISO8601DateFormatter().string(from: Date())
                             )
                             
-                            _ = try await supabaseService.updateProfile(profileId: profile.id, profile: supabaseProfile)
+                            // Update in Supabase database
+                            let updatedSupabaseProfile = try await supabaseService.updateProfile(profileId: profile.id, profile: supabaseProfile)
+                            print("✅ Profile updated in database successfully")
+                            
+                            // Verify the update by reloading from database
+                            if let verifiedProfile = try? await supabaseService.getProfile(userId: profile.userId) {
+                                let verifiedBrewNetProfile = verifiedProfile.toBrewNetProfile()
+                                print("✅ Verified profile update from database, new image URL: \(verifiedBrewNetProfile.coreIdentity.profileImage ?? "nil")")
                             
                             await MainActor.run {
                                 isUploadingImage = false
-                                onProfileUpdated?(updatedProfile)
+                                    // Update with verified profile from database
+                                    onProfileUpdated?(verifiedBrewNetProfile)
+                                    showSuccessAlert = true
                                 print("✅ Profile image uploaded and updated successfully: \(publicURL)")
                                 // Post notification to refresh profile
                                 NotificationCenter.default.post(name: NSNotification.Name("ProfileUpdated"), object: nil)
+                                }
+                            } else {
+                                // If verification fails, still update with what we have
+                                await MainActor.run {
+                                    isUploadingImage = false
+                                    onProfileUpdated?(updatedProfile)
+                                    showSuccessAlert = true
+                                    print("✅ Profile image uploaded and updated (verification skipped): \(publicURL)")
+                                    NotificationCenter.default.post(name: NSNotification.Name("ProfileUpdated"), object: nil)
+                                }
                             }
                         } catch {
                             await MainActor.run {
                                 isUploadingImage = false
+                                errorMessage = "Failed to update profile image: \(error.localizedDescription)"
+                                showErrorAlert = true
                                 print("❌ Failed to upload profile image: \(error.localizedDescription)")
                             }
                         }
                     }
                 }
             }
+        }
+        .alert("Success", isPresented: $showSuccessAlert) {
+            Button("OK") { }
+        } message: {
+            Text("Profile image updated successfully!")
+        }
+        .alert("Error", isPresented: $showErrorAlert) {
+            Button("OK") { }
+        } message: {
+            Text(errorMessage)
         }
     }
     
