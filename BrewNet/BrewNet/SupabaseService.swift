@@ -2350,6 +2350,158 @@ class SupabaseService: ObservableObject {
         
         return jsonArray.count
     }
+    
+    /// 获取临时消息（发送给我但还未匹配的消息）
+    /// 临时消息是指：1. message_type 为 "temporary"，或 2. 在两个用户之间还没有匹配记录时的消息
+    func getTemporaryMessages(receiverId: String) async throws -> [SupabaseMessage] {
+        print("🔍 [临时消息] Fetching all temporary messages for receiver: \(receiverId)")
+        
+        // 获取所有发送给我的消息
+        let response = try await client
+            .from(SupabaseTable.messages.rawValue)
+            .select()
+            .eq("receiver_id", value: receiverId)
+            .order("timestamp", ascending: false)
+            .execute()
+        
+        let data = response.data
+        
+        // 解析 JSON 数组
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw ProfileError.fetchFailed("Failed to parse temporary messages response")
+        }
+        
+        print("🔍 [临时消息] 查询到 \(jsonArray.count) 条发送给我的消息")
+        
+        var messages: [SupabaseMessage] = []
+        for json in jsonArray {
+            if let messageData = try? JSONSerialization.data(withJSONObject: json),
+               let message = try? JSONDecoder().decode(SupabaseMessage.self, from: messageData) {
+                messages.append(message)
+            }
+        }
+        
+        // 获取所有匹配记录
+        var matchedUserIds: Set<String> = []
+        do {
+            let matches = try await getActiveMatches(userId: receiverId)
+            for match in matches {
+                if match.userId == receiverId {
+                    matchedUserIds.insert(match.matchedUserId)
+                } else if match.matchedUserId == receiverId {
+                    matchedUserIds.insert(match.userId)
+                }
+            }
+            print("🔍 [临时消息] 已匹配的用户: \(matchedUserIds)")
+        } catch {
+            print("⚠️ [临时消息] 检查匹配状态失败: \(error.localizedDescription)")
+        }
+        
+        // 过滤临时消息
+        var temporaryMessages: [SupabaseMessage] = []
+        for message in messages {
+            let senderId = message.senderId
+            let isMatched = matchedUserIds.contains(senderId)
+            
+            // 如果消息类型是 "temporary"，或者未匹配时发送的消息，都视为临时消息
+            if message.messageType == "temporary" {
+                temporaryMessages.append(message)
+                print("✅ [临时消息] 添加临时消息 (类型): \(message.content.prefix(30))...")
+            } else if !isMatched {
+                // 如果还未匹配，所有消息都视为临时消息
+                temporaryMessages.append(message)
+                print("✅ [临时消息] 添加临时消息 (未匹配): \(message.content.prefix(30))...")
+            } else {
+                print("ℹ️ [临时消息] 跳过已匹配后的消息: \(message.content.prefix(30))...")
+            }
+        }
+        
+        print("✅ [临时消息] 最终找到 \(temporaryMessages.count) 条临时消息")
+        return temporaryMessages
+    }
+    
+    /// 获取两个用户之间的所有临时消息（双向查询，类似 getMessages）
+    /// 临时消息是指：1. message_type 为 "temporary"，或 2. 在两个用户之间还没有匹配记录时的消息
+    /// 参数说明：userId1 和 userId2 是任意顺序的两个用户ID，方法会查询这两个用户之间的所有临时消息
+    func getTemporaryMessagesFromSender(receiverId: String, senderId: String) async throws -> [SupabaseMessage] {
+        // 使用更通用的参数名，因为这是双向查询
+        let userId1 = receiverId
+        let userId2 = senderId
+        print("🔍 [临时消息] 开始双向查询: userId1=\(userId1), userId2=\(userId2)")
+        
+        // 检查是否已匹配
+        var isMatched = false
+        do {
+            let matches = try await getActiveMatches(userId: userId1)
+            isMatched = matches.contains { match in
+                (match.userId == userId1 && match.matchedUserId == userId2) ||
+                (match.userId == userId2 && match.matchedUserId == userId1)
+            }
+            print("🔍 [临时消息] 匹配状态: \(isMatched ? "已匹配" : "未匹配")")
+        } catch {
+            print("⚠️ [临时消息] 检查匹配状态失败: \(error.localizedDescription)")
+        }
+        
+        // 如果已匹配，则没有临时消息（所有消息都是正常消息）
+        if isMatched {
+            print("ℹ️ [临时消息] 用户已匹配，返回空列表")
+            return []
+        }
+        
+        // 双向查询：获取两个用户之间的所有消息（无论谁发给谁）
+        // 使用和 getMessages 完全相同的查询方式
+        let response = try await client
+            .from(SupabaseTable.messages.rawValue)
+            .select()
+            .or("sender_id.eq.\(userId1),receiver_id.eq.\(userId1)")
+            .or("sender_id.eq.\(userId2),receiver_id.eq.\(userId2)")
+            .order("timestamp", ascending: true)
+            .execute()
+        
+        let data = response.data
+        
+        // 解析 JSON 数组（使用和 getMessages 相同的解析方式）
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            print("❌ [临时消息] 解析响应失败")
+            throw ProfileError.fetchFailed("Failed to parse temporary messages response")
+        }
+        
+        print("🔍 [临时消息] 查询到 \(jsonArray.count) 条原始消息")
+        
+        var messages: [SupabaseMessage] = []
+        for json in jsonArray {
+            // 只包含涉及这两个用户的消息（和 getMessages 相同的过滤逻辑）
+            let msgSenderId = json["sender_id"] as? String ?? ""
+            let msgReceiverId = json["receiver_id"] as? String ?? ""
+            
+            // 确保消息只涉及这两个用户
+            if (msgSenderId == userId1 && msgReceiverId == userId2) ||
+               (msgSenderId == userId2 && msgReceiverId == userId1) {
+                
+                if let messageData = try? JSONSerialization.data(withJSONObject: json),
+                   let message = try? JSONDecoder().decode(SupabaseMessage.self, from: messageData) {
+                    
+                    let messageType = message.messageType
+                    print("🔍 [临时消息] 消息类型: \(messageType), 发送者: \(msgSenderId), 接收者: \(msgReceiverId), 内容: \(message.content.prefix(30))...")
+                    
+                    // 如果消息类型明确标记为 "temporary"，或者未匹配时发送的所有消息都视为临时消息
+                    if messageType == "temporary" {
+                        messages.append(message)
+                        print("✅ [临时消息] 添加临时消息: \(message.content.prefix(30))...")
+                    } else if !isMatched {
+                        // 如果还未匹配，所有消息都视为临时消息
+                        messages.append(message)
+                        print("✅ [临时消息] 添加未匹配时的消息: \(message.content.prefix(30))...")
+                    } else {
+                        print("ℹ️ [临时消息] 跳过已匹配后的消息: \(message.content.prefix(30))...")
+                    }
+                }
+            }
+        }
+        
+        print("✅ [临时消息] 最终返回 \(messages.count) 条临时消息（双向）")
+        return messages
+    }
 }
 
 // MARK: - Profile Error Types

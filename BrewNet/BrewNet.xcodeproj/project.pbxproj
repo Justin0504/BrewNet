@@ -34,7 +34,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		D00D7F592E89F38D00709D4F /* Exceptions for "BrewNet" folder in "BrewNet" target */ = {
+		8ADC225D2EBA969800D70F50 /* Exceptions for "BrewNet" folder in "BrewNet" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -47,7 +47,7 @@
 		D00D7F352E89F38C00709D4F /* BrewNet */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				D00D7F592E89F38D00709D4F /* Exceptions for "BrewNet" folder in "BrewNet" target */,
+				8ADC225D2EBA969800D70F50 /* Exceptions for "BrewNet" folder in "BrewNet" target */,
 			);
 			path = BrewNet;
 			sourceTree = "<group>";
