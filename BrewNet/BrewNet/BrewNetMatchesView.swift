@@ -30,6 +30,9 @@ struct BrewNetMatchesView: View {
     @State private var shouldForceRefresh = false // 标记是否强制刷新（忽略缓存）
     @State private var showingTemporaryChat = false
     @State private var selectedProfileForChat: BrewNetProfile?
+    @State private var showingGroupMeet = false
+    @State private var showingMatchFilter = false
+    @State private var showingIncreaseExposure = false
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -42,6 +45,58 @@ struct BrewNetMatchesView: View {
                 .ignoresSafeArea()
             
             VStack(spacing: 0) {
+                // Header Buttons - 放在卡片上方
+                HStack {
+                    // 左上角按钮组
+                    HStack(spacing: 16) {
+                        // 群体 Meet 按钮
+                        Button(action: {
+                            showingGroupMeet = true
+                        }) {
+                            Image(systemName: "person.3.fill")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                .frame(width: 44, height: 44)
+                                .background(Color.white)
+                                .clipShape(Circle())
+                                .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                        }
+                        
+                        // Match Filter 按钮
+                        Button(action: {
+                            showingMatchFilter = true
+                        }) {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                .frame(width: 44, height: 44)
+                                .background(Color.white)
+                                .clipShape(Circle())
+                                .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                        }
+                    }
+                    .padding(.leading, 20)
+                    .padding(.top, 60) // 避免状态栏重叠
+                    
+                    Spacer()
+                    
+                    // 右上角按钮 - 星星图标
+                    Button(action: {
+                        showingIncreaseExposure = true
+                    }) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            .frame(width: 44, height: 44)
+                            .background(Color.white)
+                            .clipShape(Circle())
+                            .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                    }
+                    .padding(.trailing, 20)
+                    .padding(.top, 60) // 避免状态栏重叠
+                }
+                .padding(.bottom, 10) // 与卡片之间的间距
+                
                 // Loading indicator
                 if isLoading {
                     ProgressView()
@@ -73,7 +128,6 @@ struct BrewNetMatchesView: View {
                         )
                     }
                     .frame(height: screenHeight * 0.8)
-                    .padding(.top, 50) // 添加顶部padding避免和状态栏重叠
                 } else {
                     // No more profiles
                     noMoreProfilesView
@@ -132,6 +186,21 @@ struct BrewNetMatchesView: View {
                 .environmentObject(authManager)
                 .environmentObject(supabaseService)
             }
+        }
+        .sheet(isPresented: $showingGroupMeet) {
+            GroupMeetView()
+                .environmentObject(authManager)
+                .environmentObject(supabaseService)
+        }
+        .sheet(isPresented: $showingMatchFilter) {
+            MatchFilterView()
+                .environmentObject(authManager)
+                .environmentObject(supabaseService)
+        }
+        .sheet(isPresented: $showingIncreaseExposure) {
+            IncreaseExposureView()
+                .environmentObject(authManager)
+                .environmentObject(supabaseService)
         }
         .onAppear {
             // 先尝试从持久化缓存加载（包括索引）
@@ -351,7 +420,7 @@ struct BrewNetMatchesView: View {
                         .frame(width: 60, height: 60)
                         .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 3)
                     
-                    Image(systemName: "message.fill")
+                    Image(systemName: "envelope.fill")
                         .font(.system(size: 24, weight: .bold))
                         .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                 }
@@ -368,9 +437,9 @@ struct BrewNetMatchesView: View {
                         .frame(width: 60, height: 60)
                         .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
                     
-                    Image(systemName: "heart.fill")
+                    Image(systemName: "cup.and.saucer.fill")
                         .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(.red)
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 }
             }
             .disabled(currentIndex >= profiles.count)
@@ -1575,6 +1644,123 @@ struct BrewNetMatchesView: View {
         }
         
         return true
+    }
+}
+
+// MARK: - Group Meet View
+struct GroupMeetView: View {
+    @Environment(\.presentationMode) var presentationMode
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 20) {
+                Image(systemName: "person.3.fill")
+                    .font(.system(size: 60))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    .padding(.top, 40)
+                
+                Text("Group Meet")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                
+                Text("Join or create group networking events")
+                    .font(.system(size: 16))
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+                
+                Spacer()
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Match Filter View
+struct MatchFilterView: View {
+    @Environment(\.presentationMode) var presentationMode
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 20) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 60))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    .padding(.top, 40)
+                
+                Text("Match Filter")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                
+                Text("Filter your matches by preferences")
+                    .font(.system(size: 16))
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+                
+                Spacer()
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Increase Exposure View
+struct IncreaseExposureView: View {
+    @Environment(\.presentationMode) var presentationMode
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 20) {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 60))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    .padding(.top, 40)
+                
+                Text("Increase Exposure")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                
+                Text("Boost your profile visibility")
+                    .font(.system(size: 16))
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+                
+                Spacer()
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                }
+            }
+        }
     }
 }
 

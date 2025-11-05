@@ -3367,5 +3367,323 @@ enum InteractionType: String, Codable {
     case match = "match"
 }
 
+// MARK: - Points System Functions
+extension SupabaseService {
+    /// 获取用户积分
+    func getUserPoints(userId: String) async throws -> Int {
+        print("🔍 [积分系统] 获取用户积分: \(userId)")
+        
+        // 从 coffee_chat_records 表计算总积分
+        let response = try await client
+            .from("coffee_chat_records")
+            .select("points_earned")
+            .eq("user_id", value: userId)
+            .eq("status", value: "completed")
+            .execute()
+        
+        let data = response.data
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return 0
+        }
+        
+        let totalPoints = jsonArray.compactMap { json -> Int? in
+            if let points = json["points_earned"] as? Int {
+                return points
+            } else if let pointsString = json["points_earned"] as? String {
+                return Int(pointsString)
+            }
+            return nil
+        }.reduce(0, +)
+        
+        print("✅ [积分系统] 用户 \(userId) 总积分: \(totalPoints)")
+        return totalPoints
+    }
+    
+    /// 获取 Coffee Chat 历史记录
+    func getCoffeeChatHistory(userId: String) async throws -> [CoffeeChatRecord] {
+        print("🔍 [积分系统] 获取 Coffee Chat 历史: \(userId)")
+        
+        let response = try await client
+            .from("coffee_chat_records")
+            .select()
+            .eq("user_id", value: userId)
+            .order("date", ascending: false)
+            .execute()
+        
+        let data = response.data
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        
+        var records: [CoffeeChatRecord] = []
+        for json in jsonArray {
+            guard let id = json["id"] as? String,
+                  let partnerId = json["partner_id"] as? String,
+                  let statusString = json["status"] as? String,
+                  let status = CoffeeChatRecord.CoffeeChatStatus(rawValue: statusString) else {
+                continue
+            }
+            
+            let pointsEarned: Int
+            if let points = json["points_earned"] as? Int {
+                pointsEarned = points
+            } else if let pointsString = json["points_earned"] as? String, let points = Int(pointsString) {
+                pointsEarned = points
+            } else {
+                pointsEarned = 0
+            }
+            
+            // 获取 partner 名称
+            var partnerName = "Unknown"
+            if let partnerProfile = try? await getProfile(userId: partnerId) {
+                partnerName = partnerProfile.coreIdentity.name
+            }
+            
+            // 解析日期
+            var date = Date()
+            if let dateString = json["date"] as? String {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                date = formatter.date(from: dateString) ?? Date()
+            }
+            
+            let record = CoffeeChatRecord(
+                id: id,
+                partnerId: partnerId,
+                partnerName: partnerName,
+                date: date,
+                pointsEarned: pointsEarned,
+                status: status
+            )
+            records.append(record)
+        }
+        
+        print("✅ [积分系统] 找到 \(records.count) 条 Coffee Chat 记录")
+        return records
+    }
+    
+    /// 记录完成一次 Coffee Chat（双方确认后调用）
+    func recordCoffeeChatCompletion(userId1: String, userId2: String) async throws {
+        print("🔍 [积分系统] 记录 Coffee Chat 完成: \(userId1) 和 \(userId2)")
+        
+        let pointsEarned = 10 // 每次完成获得 10 积分
+        let now = ISO8601DateFormatter().string(from: Date())
+        
+        // 为两个用户分别创建记录
+        let record1: [String: String] = [
+            "id": UUID().uuidString,
+            "user_id": userId1,
+            "partner_id": userId2,
+            "date": now,
+            "points_earned": String(pointsEarned),
+            "status": "completed",
+            "created_at": now,
+            "updated_at": now
+        ]
+        
+        let record2: [String: String] = [
+            "id": UUID().uuidString,
+            "user_id": userId2,
+            "partner_id": userId1,
+            "date": now,
+            "points_earned": String(pointsEarned),
+            "status": "completed",
+            "created_at": now,
+            "updated_at": now
+        ]
+        
+        // 插入两条记录
+        // 分别插入两条记录
+        try await client
+            .from("coffee_chat_records")
+            .insert(record1)
+            .execute()
+        
+        try await client
+            .from("coffee_chat_records")
+            .insert(record2)
+            .execute()
+        
+        print("✅ [积分系统] Coffee Chat 记录已创建，双方各获得 \(pointsEarned) 积分")
+    }
+    
+    /// 获取可兑换的奖励列表
+    func getAvailableRewards() async throws -> [Reward] {
+        print("🔍 [兑换系统] 获取可兑换奖励列表")
+        
+        let response = try await client
+            .from("rewards")
+            .select()
+            .eq("is_active", value: true)
+            .order("points_required", ascending: true)
+            .execute()
+        
+        let data = response.data
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        
+        var rewards: [Reward] = []
+        for json in jsonArray {
+            guard let id = json["id"] as? String,
+                  let name = json["name"] as? String,
+                  let description = json["description"] as? String,
+                  let categoryString = json["category"] as? String,
+                  let category = Reward.RewardCategory(rawValue: categoryString) else {
+                continue
+            }
+            
+            let pointsRequired: Int
+            if let points = json["points_required"] as? Int {
+                pointsRequired = points
+            } else if let pointsString = json["points_required"] as? String, let points = Int(pointsString) {
+                pointsRequired = points
+            } else {
+                pointsRequired = 0
+            }
+            
+            let imageUrl = json["image_url"] as? String
+            
+            let reward = Reward(
+                id: id,
+                name: name,
+                description: description,
+                pointsRequired: pointsRequired,
+                category: category,
+                imageUrl: imageUrl
+            )
+            rewards.append(reward)
+        }
+        
+        print("✅ [兑换系统] 找到 \(rewards.count) 个可用奖励")
+        return rewards
+    }
+    
+    /// 获取用户的兑换记录
+    func getUserRedemptions(userId: String) async throws -> [RedemptionRecord] {
+        print("🔍 [兑换系统] 获取用户兑换记录: \(userId)")
+        
+        let response = try await client
+            .from("redemptions")
+            .select()
+            .eq("user_id", value: userId)
+            .order("redeemed_at", ascending: false)
+            .execute()
+        
+        let data = response.data
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        
+        var records: [RedemptionRecord] = []
+        for json in jsonArray {
+            guard let id = json["id"] as? String,
+                  let rewardId = json["reward_id"] as? String,
+                  let statusString = json["status"] as? String,
+                  let status = RedemptionRecord.RedemptionStatus(rawValue: statusString) else {
+                continue
+            }
+            
+            let pointsUsed: Int
+            if let points = json["points_used"] as? Int {
+                pointsUsed = points
+            } else if let pointsString = json["points_used"] as? String, let points = Int(pointsString) {
+                pointsUsed = points
+            } else {
+                pointsUsed = 0
+            }
+            
+            // 获取奖励名称
+            var rewardName = "Unknown Reward"
+            if let rewardResponse = try? await client
+                .from("rewards")
+                .select("name")
+                .eq("id", value: rewardId)
+                .single()
+                .execute() {
+                let rewardData = rewardResponse.data
+                if let rewardJson = try? JSONSerialization.jsonObject(with: rewardData) as? [String: Any],
+                   let name = rewardJson["name"] as? String {
+                    rewardName = name
+                }
+            }
+            
+            // 解析日期
+            var date = Date()
+            if let dateString = json["redeemed_at"] as? String {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                date = formatter.date(from: dateString) ?? Date()
+            }
+            
+            let record = RedemptionRecord(
+                id: id,
+                rewardId: rewardId,
+                rewardName: rewardName,
+                pointsUsed: pointsUsed,
+                redeemedAt: date,
+                status: status
+            )
+            records.append(record)
+        }
+        
+        print("✅ [兑换系统] 找到 \(records.count) 条兑换记录")
+        return records
+    }
+    
+    /// 兑换奖励
+    func redeemReward(userId: String, rewardId: String) async throws {
+        print("🔍 [兑换系统] 用户 \(userId) 兑换奖励 \(rewardId)")
+        
+        // 1. 获取奖励信息
+        let rewardResponse = try await client
+            .from("rewards")
+            .select()
+            .eq("id", value: rewardId)
+            .single()
+            .execute()
+        
+        let rewardData = rewardResponse.data
+        guard let rewardJson = try? JSONSerialization.jsonObject(with: rewardData) as? [String: Any] else {
+            throw ProfileError.fetchFailed("Reward not found")
+        }
+        
+        let pointsRequired: Int
+        if let points = rewardJson["points_required"] as? Int {
+            pointsRequired = points
+        } else if let pointsString = rewardJson["points_required"] as? String, let points = Int(pointsString) {
+            pointsRequired = points
+        } else {
+            throw ProfileError.fetchFailed("Reward points_required invalid")
+        }
+        
+        // 2. 检查用户积分是否足够
+        let userPoints = try await getUserPoints(userId: userId)
+        guard userPoints >= pointsRequired else {
+            throw ProfileError.fetchFailed("Insufficient points")
+        }
+        
+        // 3. 创建兑换记录
+        let now = ISO8601DateFormatter().string(from: Date())
+        let redemption: [String: String] = [
+            "id": UUID().uuidString,
+            "user_id": userId,
+            "reward_id": rewardId,
+            "points_used": String(pointsRequired),
+            "status": "pending",
+            "redeemed_at": now,
+            "created_at": now,
+            "updated_at": now
+        ]
+        
+        try await client
+            .from("redemptions")
+            .insert(redemption)
+            .execute()
+        
+        print("✅ [兑换系统] 兑换记录已创建，消耗 \(pointsRequired) 积分")
+    }
+}
+
 // MARK: - DatabaseManager Extensions
 // 这些方法已移动到 DatabaseManager.swift 中

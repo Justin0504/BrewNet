@@ -610,6 +610,7 @@ struct CoreIdentityStep: View {
     @EnvironmentObject var supabaseService: SupabaseService
     @EnvironmentObject var authManager: AuthManager
     @Binding var profileData: ProfileCreationData
+    @StateObject private var locationService = LocationService.shared
     @State private var name = ""
     @State private var email = ""
     @State private var phoneNumber = ""
@@ -838,12 +839,64 @@ struct CoreIdentityStep: View {
             
             // Location
             VStack(alignment: .leading, spacing: 8) {
-                Text("Location")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                HStack {
+                    Text("Location")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    
+                    Spacer()
+                    
+                    // Use Current Location Button
+                    Button(action: {
+                        useCurrentLocation()
+                    }) {
+                        HStack(spacing: 4) {
+                            if locationService.isLocating {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "location.fill")
+                                    .font(.system(size: 12))
+                            }
+                            Text("Use Current Location")
+                                .font(.system(size: 12))
+                        }
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                    .disabled(locationService.isLocating)
+                }
                 
-                TextField("e.g., San Francisco, CA", text: $location)
+                TextField("e.g., San Francisco, CA, USA", text: $location)
                     .textFieldStyle(CustomTextFieldStyle())
+                    .onChange(of: location) { newValue in
+                        // 实时验证和格式化地址
+                        validateAndFormatLocation(newValue)
+                    }
+                
+                // 地址格式提示
+                if !location.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 10))
+                            .foregroundColor(.blue)
+                        Text("建议格式: 城市, 州, 国家 (例如: Austin, TX, USA)")
+                            .font(.system(size: 11))
+                            .foregroundColor(.blue.opacity(0.7))
+                    }
+                    .padding(.top, 4)
+                }
+                
+                // Show location error if any
+                if let error = locationService.locationError {
+                    Text(error)
+                        .font(.system(size: 12))
+                        .foregroundColor(.red)
+                }
             }
             
             // Personal Website
@@ -938,7 +991,95 @@ struct CoreIdentityStep: View {
         .onChange(of: bio) { _ in updateProfileData() }
         .onChange(of: pronouns) { _ in updateProfileData() }
         .onChange(of: location) { _ in updateProfileData() }
+        .onChange(of: locationService.currentAddress) { newAddress in
+            if let address = newAddress, !address.isEmpty {
+                location = address
+                updateProfileData()
+                print("✅ [Location] 自动填入地址: \(address)")
+            }
+        }
         .onChange(of: personalWebsite) { _ in updateProfileData() }
+    }
+    
+    private func useCurrentLocation() {
+        print("📍 [Location] 点击了 Use Current Location 按钮")
+        
+        // 如果已经在定位中，忽略重复点击
+        if locationService.isLocating {
+            print("⚠️ [Location] 定位请求正在进行中，请稍候...")
+            return
+        }
+        
+        // 检查权限状态
+        switch locationService.authorizationStatus {
+        case .notDetermined:
+            print("📍 [Location] 请求位置权限...")
+            // 先设置 isLocating，这样权限授予后会自动获取位置
+            locationService.isLocating = true
+            locationService.requestLocationPermission()
+        case .authorizedWhenInUse, .authorizedAlways:
+            print("📍 [Location] 开始获取当前位置...")
+            // 先清空当前地址，确保 onChange 能触发
+            locationService.currentAddress = nil
+            
+            // 获取位置
+            locationService.getCurrentLocation()
+            
+            // 使用 Task 监听地址更新（作为 onChange 的补充）
+            Task {
+                // 等待最多 5 秒
+                for _ in 0..<50 {
+                    try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 秒
+                    if let address = locationService.currentAddress, !address.isEmpty {
+                        await MainActor.run {
+                            if location != address {
+                                location = address
+                                updateProfileData()
+                                print("✅ [Location] 通过 Task 更新地址: \(address)")
+                            }
+                        }
+                        return
+                    }
+                    // 如果定位完成但地址为空，也停止等待
+                    if !locationService.isLocating && locationService.currentAddress == nil {
+                        break
+                    }
+                }
+                print("⚠️ [Location] 等待地址更新超时")
+            }
+        case .denied, .restricted:
+            locationService.locationError = "Location permission denied. Please enable it in Settings."
+            print("⚠️ [Location] 位置权限被拒绝")
+        @unknown default:
+            locationService.locationError = "Unknown location permission status."
+        }
+    }
+    
+    private func validateAndFormatLocation(_ address: String) {
+        guard !address.isEmpty else { return }
+        
+        // 检查地址格式并提供建议
+        let trimmed = address.trimmingCharacters(in: .whitespaces)
+        let addressLower = trimmed.lowercased()
+        
+        // 检查是否包含国家信息
+        let hasCountry = addressLower.contains("usa") || 
+                        addressLower.contains("united states") || 
+                        addressLower.contains("america") ||
+                        addressLower.contains(", us") ||
+                        addressLower.hasSuffix(" usa")
+        
+        // 如果地址格式是 "City, State" 但没有国家信息，可以提示用户
+        if trimmed.contains(",") {
+            let parts = trimmed.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            if parts.count == 2 && !hasCountry {
+                // 格式：City, State - 建议添加国家
+                print("💡 [Location] 地址格式建议: '\(trimmed)' 可以改进为 '\(trimmed), USA' 以提高地理编码成功率")
+            }
+        } else if !hasCountry {
+            // 单部分地址，建议添加国家
+            print("💡 [Location] 地址格式建议: '\(trimmed)' 建议使用 'City, State, Country' 格式")
+        }
     }
     
     private func updateProfileData() {
