@@ -1890,6 +1890,17 @@ struct AISuggestionsView: View {
                             .font(.system(size: 12))
                             .foregroundColor(suggestion.category.color)
                         
+                        // 如果有风格标签，显示风格
+                        if let style = suggestion.style {
+                            Text("•")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                            
+                            Text(style.displayName)
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                        }
+                        
                         Spacer()
                         
                         Image(systemName: "arrow.right.circle.fill")
@@ -1948,6 +1959,18 @@ struct ProfileCardSheetView: View {
                         
                         // Level 3: Deep Understanding
                         level3DeepUnderstandingView
+                        
+                        // Available Timeslot Grid (moved to bottom)
+                        if shouldShowTimeslot {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Divider()
+                                AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 16)
+                                    .padding(.bottom, 30)
+                                    .background(Color.white)
+                            }
+                        }
                     }
                 }
             }
@@ -2056,11 +2079,6 @@ struct ProfileCardSheetView: View {
                     .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                 
                 Spacer()
-            }
-            
-            // Available Timeslot Grid (same UI as Profile page)
-            if shouldShowTimeslot {
-                AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
             }
         }
         .padding(20)

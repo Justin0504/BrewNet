@@ -128,13 +128,44 @@ struct AISuggestion: Identifiable, Codable {
     let category: SuggestionCategory
     let timestamp: Date
     let isUsed: Bool
+    let style: SuggestionStyle? // 回复风格
     
-    init(content: String, category: SuggestionCategory, isUsed: Bool = false) {
+    init(content: String, category: SuggestionCategory, isUsed: Bool = false, style: SuggestionStyle? = nil) {
         self.id = UUID()
         self.content = content
         self.category = category
         self.timestamp = Date()
         self.isUsed = isUsed
+        self.style = style
+    }
+}
+
+// MARK: - Suggestion Style
+enum SuggestionStyle: String, Codable, CaseIterable {
+    case humorous = "humorous"      // 幽默
+    case serious = "serious"        // 严肃
+    case caring = "caring"           // 体贴
+    case professional = "professional" // 专业
+    case friendly = "friendly"       // 友好
+    case curious = "curious"         // 好奇
+    case supportive = "supportive"   // 支持
+    case playful = "playful"         // 轻松
+    case thoughtful = "thoughtful"   // 深思
+    case warm = "warm"               // 温暖
+    
+    var displayName: String {
+        switch self {
+        case .humorous: return "Humorous"
+        case .serious: return "Serious"
+        case .caring: return "Caring"
+        case .professional: return "Professional"
+        case .friendly: return "Friendly"
+        case .curious: return "Curious"
+        case .supportive: return "Supportive"
+        case .playful: return "Playful"
+        case .thoughtful: return "Thoughtful"
+        case .warm: return "Warm"
+        }
     }
 }
 
@@ -204,9 +235,16 @@ enum SuggestionCategory: String, Codable, CaseIterable {
             ]
         case .followUp:
             return [
-                AISuggestion(content: "That sounds interesting! Could you tell me more about that?", category: .followUp),
-                AISuggestion(content: "How did you get interested in this field?", category: .followUp),
-                AISuggestion(content: "What challenges have you faced along the way?", category: .followUp)
+                AISuggestion(content: "That sounds interesting! Could you tell me more about that?", category: .followUp, style: .curious),
+                AISuggestion(content: "How did you get interested in this field?", category: .followUp, style: .friendly),
+                AISuggestion(content: "What challenges have you faced along the way?", category: .followUp, style: .serious),
+                AISuggestion(content: "That's really impressive! I'd love to learn more about your experience.", category: .followUp, style: .warm),
+                AISuggestion(content: "Based on what you've shared, I think this is a great opportunity to explore further.", category: .followUp, style: .professional),
+                AISuggestion(content: "I can relate to that! How did you handle it?", category: .followUp, style: .caring),
+                AISuggestion(content: "That's fascinating! What made you choose that path?", category: .followUp, style: .thoughtful),
+                AISuggestion(content: "Haha, that's a great point! I never thought about it that way.", category: .followUp, style: .humorous),
+                AISuggestion(content: "That's really inspiring! Keep up the great work.", category: .followUp, style: .supportive),
+                AISuggestion(content: "Sounds like you've had quite the journey! What's next for you?", category: .followUp, style: .playful)
             ]
         case .compliment:
             return [

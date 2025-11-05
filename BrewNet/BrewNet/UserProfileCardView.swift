@@ -45,6 +45,18 @@ struct UserProfileCardView: View {
                     
                     // Level 3: Deep Understanding
                     level3DeepUnderstandingView
+                    
+                    // Available Timeslot Grid (moved to bottom)
+                    if shouldShowTimeslot {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Divider()
+                            AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 16)
+                                .padding(.bottom, 30)
+                                .background(Color.white)
+                        }
+                    }
                 }
                 .frame(maxWidth: screenWidth - 40)
             }
@@ -201,11 +213,6 @@ struct UserProfileCardView: View {
                     .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                 
                 Spacer()
-            }
-            
-            // Available Timeslot Grid (same UI as Profile page)
-            if shouldShowTimeslot {
-                AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
             }
         }
         .padding(20)
@@ -813,11 +820,6 @@ struct PublicProfileCardView: View {
                     .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                 
                 Spacer()
-            }
-            
-            // Available Timeslot Grid (same UI as Profile page)
-            if shouldShowTimeslot {
-                AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
             }
         }
         .padding(20)
