@@ -10,6 +10,7 @@ struct ConnectionRequest: Identifiable, Codable {
     let reasonForInterest: String? // e.g., "Interested in your article on design thinking"
     let createdAt: Date
     let isFeatured: Bool // "Featured Professional" tag
+    var temporaryMessages: [TemporaryMessage] = [] // 临时消息列表
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -19,12 +20,32 @@ struct ConnectionRequest: Identifiable, Codable {
         case reasonForInterest = "reason_for_interest"
         case createdAt = "created_at"
         case isFeatured = "is_featured"
+        case temporaryMessages = "temporary_messages"
     }
     
     var timeAgo: String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
         return formatter.localizedString(for: createdAt, relativeTo: Date())
+    }
+    
+    /// 最近的一条临时消息
+    var latestTemporaryMessage: TemporaryMessage? {
+        return temporaryMessages.sorted(by: { $0.timestamp > $1.timestamp }).first
+    }
+    
+    /// 未读临时消息数量（只统计对方发送给我的未读消息）
+    var unreadTemporaryMessageCount: Int {
+        // 注意：这个方法需要知道当前用户ID才能正确计算
+        // 暂时返回所有未读消息，实际使用时会在调用处传入当前用户ID
+        return temporaryMessages.filter { !$0.isRead }.count
+    }
+    
+    /// 计算未读消息数量（需要传入当前用户ID）
+    func unreadTemporaryMessageCount(currentUserId: String) -> Int {
+        return temporaryMessages.filter { message in
+            !message.isRead && message.senderId != currentUserId
+        }.count
     }
 }
 
@@ -48,6 +69,44 @@ struct ConnectionRequestProfile: Codable {
         case bio
         case expertise
         case backgroundImage = "background_image"
+    }
+}
+
+// MARK: - Temporary Message Model
+struct TemporaryMessage: Identifiable, Codable {
+    let id: String
+    let content: String
+    let senderId: String
+    let receiverId: String
+    let timestamp: Date
+    var isRead: Bool
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case content
+        case senderId = "sender_id"
+        case receiverId = "receiver_id"
+        case timestamp
+        case isRead = "is_read"
+    }
+    
+    /// 从 SupabaseMessage 创建 TemporaryMessage
+    init(from supabaseMessage: SupabaseMessage) {
+        self.id = supabaseMessage.id
+        self.content = supabaseMessage.content
+        self.senderId = supabaseMessage.senderId
+        self.receiverId = supabaseMessage.receiverId
+        self.isRead = supabaseMessage.isRead
+        
+        // 解析时间戳
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = dateFormatter.date(from: supabaseMessage.timestamp) {
+            self.timestamp = date
+        } else {
+            dateFormatter.formatOptions = [.withInternetDateTime]
+            self.timestamp = dateFormatter.date(from: supabaseMessage.timestamp) ?? Date()
+        }
     }
 }
 

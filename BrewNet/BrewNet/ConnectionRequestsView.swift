@@ -12,6 +12,10 @@ struct ConnectionRequestsView: View {
     @State private var showingSentInvitations = false
     @State private var sentInvitations: [SupabaseInvitation] = []
     @State private var isLoadingSentInvitations = false
+    @State private var showingTemporaryChats = false
+    @State private var showingTemporaryChatDetail = false
+    @State private var selectedTemporaryChatRequest: ConnectionRequest?
+    @State private var totalUnreadTemporaryMessagesCount: Int = 0
     
     private var themeBrown: Color { BrewTheme.primaryBrown }
     private var themeBrownLight: Color { BrewTheme.secondaryBrown }
@@ -46,6 +50,49 @@ struct ConnectionRequestsView: View {
                         .environmentObject(supabaseService)
                 }
             }
+            .sheet(isPresented: $showingTemporaryChats) {
+                NavigationStack {
+                    TemporaryChatsView(requests: requests)
+                        .environmentObject(authManager)
+                        .environmentObject(databaseManager)
+                        .environmentObject(supabaseService)
+                }
+            }
+            .sheet(isPresented: $showingTemporaryChatDetail) {
+                if let request = selectedTemporaryChatRequest {
+                    TemporaryChatDetailView(
+                        request: request,
+                        onDismiss: {
+                            showingTemporaryChatDetail = false
+                            selectedTemporaryChatRequest = nil
+                            // 刷新连接请求列表和未读消息数（消息可能已被标记为已读）
+                            Task {
+                                loadConnectionRequests()
+                                // 延迟一点刷新，确保数据库更新完成
+                                try? await Task.sleep(nanoseconds: 300_000_000) // 0.3秒
+                                await MainActor.run {
+                                    loadConnectionRequests()
+                                }
+                                await updateUnreadTemporaryMessagesCount()
+                            }
+                        }
+                    )
+                    .environmentObject(authManager)
+                    .environmentObject(databaseManager)
+                    .environmentObject(supabaseService)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("TemporaryMessagesRead"))) { notification in
+                // 当消息被标记为已读时，刷新连接请求列表和未读数
+                Task {
+                    // 延迟一点刷新，确保数据库更新完成
+                    try? await Task.sleep(nanoseconds: 500_000_000) // 0.5秒
+                    await MainActor.run {
+                        loadConnectionRequests()
+                    }
+                    await updateUnreadTemporaryMessagesCount()
+                }
+            }
             .fullScreenCover(item: $selectedRequest) { request in
                 ConnectionRequestDetailView(
                     request: request,
@@ -70,6 +117,9 @@ struct ConnectionRequestsView: View {
             .onAppear {
                 loadConnectionRequests()
                 loadSentInvitations()
+                Task {
+                    await updateUnreadTemporaryMessagesCount()
+                }
             }
         }
     }
@@ -78,7 +128,33 @@ struct ConnectionRequestsView: View {
     @ViewBuilder
     private func topBarView() -> some View {
         HStack {
+            // Temporary Chats Button (左上角)
+            Button(action: {
+                showingTemporaryChats = true
+            }) {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "message.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(themeBrown)
+                    
+                    // 未读消息徽章
+                    if totalUnreadTemporaryMessagesCount > 0 {
+                        ZStack {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 18, height: 18)
+                            
+                            Text("\(totalUnreadTemporaryMessagesCount)")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                        .offset(x: 8, y: -8)
+                    }
+                }
+            }
+            
             Spacer()
+            
             HStack(spacing: 8) {
                 Image(systemName: "person.badge.plus.fill")
                     .font(.system(size: 18))
@@ -88,6 +164,7 @@ struct ConnectionRequestsView: View {
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(themeBrown)
             }
+            
             Spacer()
             
             // Sent Invitations Icon
@@ -125,10 +202,24 @@ struct ConnectionRequestsView: View {
         ScrollView {
             LazyVStack(spacing: 16) {
                 ForEach(requests) { request in
-                    CompactRequestCard(request: request)
-                        .onTapGesture {
+                    CompactRequestCard(
+                        request: request,
+                        currentUserId: authManager.currentUser?.id,
+                        onTap: {
+                            // 点击卡片：如果有临时消息，直接跳转到临时聊天界面
+                            if request.latestTemporaryMessage != nil {
+                                selectedTemporaryChatRequest = request
+                                showingTemporaryChatDetail = true
+                            } else {
+                                // 否则打开详情页面
+                                selectedRequest = request
+                            }
+                        },
+                        onArrowTap: {
+                            // 点击箭头：总是跳转到详情页面（同意/不同意match界面）
                             selectedRequest = request
                         }
+                    )
                 }
             }
             .padding(.horizontal, 20)
@@ -328,7 +419,31 @@ struct ConnectionRequestsView: View {
                     let dateFormatter = ISO8601DateFormatter()
                     let createdAt = dateFormatter.date(from: invitation.createdAt) ?? Date()
                     
-                    let connectionRequest = ConnectionRequest(
+                    // 加载该请求的临时消息
+                    var temporaryMessages: [TemporaryMessage] = []
+                    do {
+                        let messages = try await supabaseService.getTemporaryMessagesFromSender(
+                            receiverId: currentUser.id,
+                            senderId: invitation.senderId
+                        )
+                        var tempMessages = messages.map { TemporaryMessage(from: $0) }
+                        
+                        // 限制最多10条消息（保留最新的10条）
+                        if tempMessages.count > 10 {
+                            tempMessages.sort(by: { $0.timestamp < $1.timestamp })
+                            tempMessages = Array(tempMessages.suffix(10))
+                        }
+                        
+                        temporaryMessages = tempMessages
+                        print("✅ [请求页面] 从 \(requesterProfile.name) 加载了 \(temporaryMessages.count) 条临时消息")
+                        if temporaryMessages.count > 0 {
+                            print("📝 [请求页面] 最新消息: \(temporaryMessages.last?.content.prefix(50) ?? "无")")
+                        }
+                    } catch {
+                        print("⚠️ [请求页面] 加载临时消息失败: \(error.localizedDescription)")
+                    }
+                    
+                    var connectionRequest = ConnectionRequest(
                         id: invitation.id,
                         requesterId: invitation.senderId,
                         requesterName: requesterProfile.name,
@@ -337,6 +452,7 @@ struct ConnectionRequestsView: View {
                         createdAt: createdAt,
                         isFeatured: false // 可以根据需要设置
                     )
+                    connectionRequest.temporaryMessages = temporaryMessages
                     
                     convertedRequests.append(connectionRequest)
                 }
@@ -346,6 +462,9 @@ struct ConnectionRequestsView: View {
                     self.isLoading = false
                     print("✅ Loaded \(convertedRequests.count) connection requests from database")
                 }
+                
+                // 更新未读临时消息数
+                await updateUnreadTemporaryMessagesCount()
                 
             } catch {
                 print("❌ Failed to load connection requests: \(error.localizedDescription)")
@@ -379,11 +498,95 @@ struct ConnectionRequestsView: View {
             }
         }
     }
+    
+    // MARK: - Update Unread Temporary Messages Count
+    private func updateUnreadTemporaryMessagesCount() async {
+        guard let currentUser = authManager.currentUser else {
+            await MainActor.run {
+                totalUnreadTemporaryMessagesCount = 0
+            }
+            return
+        }
+        
+        do {
+            // 获取所有发送给我的临时消息（包括虚拟请求的用户）
+            let allTemporaryMessages = try await supabaseService.getTemporaryMessages(receiverId: currentUser.id)
+            
+            // 统计未读消息数（只统计对方发送给我的未读消息）
+            let unreadCount = allTemporaryMessages.filter { message in
+                !message.isRead && message.senderId != currentUser.id
+            }.count
+            
+            await MainActor.run {
+                totalUnreadTemporaryMessagesCount = unreadCount
+                print("📊 [临时消息] 更新未读消息数: \(unreadCount)")
+            }
+        } catch {
+            print("⚠️ Failed to update unread temporary messages count: \(error.localizedDescription)")
+            await MainActor.run {
+                // 如果获取失败，使用 requests 中的消息计算（作为后备方案）
+                totalUnreadTemporaryMessagesCount = requests.reduce(0) { $0 + $1.unreadTemporaryMessageCount(currentUserId: currentUser.id) }
+            }
+        }
+    }
+}
+
+// MARK: - Temporary Message Bubble
+struct TemporaryMessageBubble: View {
+    let message: TemporaryMessage
+    let unreadCount: Int
+    let currentUserId: String?
+    
+    private var themeBrown: Color { BrewTheme.primaryBrown }
+    private var themeBrownLight: Color { BrewTheme.secondaryBrown }
+    
+    // 只显示对方发送给我的未读消息的红点
+    private var shouldShowUnreadDot: Bool {
+        guard let currentUserId = currentUserId else { return false }
+        return !message.isRead && message.senderId != currentUserId
+    }
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            // Message bubble icon
+            Image(systemName: "message.fill")
+                .font(.system(size: 12))
+                .foregroundColor(themeBrown)
+            
+            // Message content
+            Text(message.content)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(themeBrown)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            
+            // Unread indicator (只显示对方发送给我的未读消息)
+            if shouldShowUnreadDot {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 8, height: 8)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(themeBrownLight.opacity(0.2))
+        .cornerRadius(14)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(themeBrown.opacity(0.4), lineWidth: 1.5)
+        )
+        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+    }
 }
 
 // MARK: - Compact Request Card
 struct CompactRequestCard: View {
     let request: ConnectionRequest
+    let currentUserId: String?
+    let onTap: () -> Void
+    let onArrowTap: () -> Void
+    
     private var themeBrown: Color { BrewTheme.primaryBrown }
     private var themeBrownLight: Color { BrewTheme.secondaryBrown }
     
@@ -427,8 +630,18 @@ struct CompactRequestCard: View {
                         .foregroundColor(.gray)
                 }
                 
-                // Reason for interest
-                if let reason = request.reasonForInterest {
+                // Temporary Message Bubble (if exists)
+                if let latestMessage = request.latestTemporaryMessage {
+                    TemporaryMessageBubble(
+                        message: latestMessage,
+                        unreadCount: request.unreadTemporaryMessageCount,
+                        currentUserId: currentUserId
+                    )
+                    .padding(.top, 2)
+                }
+                
+                // Reason for interest (only show if no message)
+                if request.latestTemporaryMessage == nil, let reason = request.reasonForInterest {
                     Text(reason)
                         .font(.system(size: 13))
                         .italic()
@@ -459,15 +672,24 @@ struct CompactRequestCard: View {
             
             Spacer()
             
-            // Chevron
-            Image(systemName: "chevron.right")
-                .font(.system(size: 14))
-                .foregroundColor(.gray)
+            // Chevron (独立点击处理，跳转到详情页面)
+            Button(action: {
+                onArrowTap()
+            }) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+            }
+            .buttonStyle(PlainButtonStyle())
         }
         .padding(16)
         .background(Color.white)
         .cornerRadius(16)
         .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onTap()
+        }
     }
 }
 
@@ -602,11 +824,27 @@ struct ConnectionRequestDetailView: View {
     }
     
     private func handleSendMessage(message: String) {
-        // 在真实应用中，这里会发送消息到后端
-        print("💬 Sent message to \(request.requesterProfile.name): \(message)")
+        guard let currentUser = authManager.currentUser else {
+            print("❌ No current user found")
+            return
+        }
         
-        // 可以创建一个未匹配的消息实体并保存到本地数据库
-        // 在实际应用中，这会发送到 Supabase
+        print("💬 Sending temporary message to \(request.requesterProfile.name): \(message)")
+        
+        Task {
+            do {
+                // 发送临时消息到 Supabase
+                let _ = try await supabaseService.sendMessage(
+                    senderId: currentUser.id,
+                    receiverId: request.requesterId,
+                    content: message,
+                    messageType: "temporary" // 标记为临时消息
+                )
+                print("✅ Temporary message sent successfully")
+            } catch {
+                print("❌ Failed to send temporary message: \(error.localizedDescription)")
+            }
+        }
     }
     
     @ViewBuilder
@@ -870,6 +1108,703 @@ struct TipRow: View {
                 .font(.system(size: 13))
                 .foregroundColor(.gray)
         }
+    }
+}
+
+// MARK: - Temporary Chats View
+struct TemporaryChatsView: View {
+    let requests: [ConnectionRequest]
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var databaseManager: DatabaseManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    @Environment(\.dismiss) var dismiss
+    @State private var selectedRequest: ConnectionRequest?
+    @State private var showingChatDetail = false
+    @State private var refreshedRequests: [ConnectionRequest] = []
+    @State private var isLoading = false
+    
+    private var themeBrown: Color { BrewTheme.primaryBrown }
+    private var themeBrownLight: Color { BrewTheme.secondaryBrown }
+    
+    // 过滤出有临时消息的请求
+    private var requestsWithMessages: [ConnectionRequest] {
+        let requestsToUse = refreshedRequests.isEmpty ? requests : refreshedRequests
+        return requestsToUse.filter { !$0.temporaryMessages.isEmpty }
+    }
+    
+    var body: some View {
+        ZStack {
+            BrewTheme.background
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                // Top Bar
+                topBarView()
+                
+                // Content
+                if requestsWithMessages.isEmpty {
+                    emptyStateView()
+                } else {
+                    messagesListView()
+                }
+            }
+        }
+        .navigationBarHidden(true)
+        .refreshable {
+            await refreshMessages()
+        }
+        .onAppear {
+            Task {
+                await refreshMessages()
+            }
+        }
+        .sheet(isPresented: $showingChatDetail) {
+            if let request = selectedRequest {
+                TemporaryChatDetailView(
+                    request: request,
+                    onDismiss: {
+                        showingChatDetail = false
+                        selectedRequest = nil
+                        // 刷新消息列表（消息可能已被标记为已读）
+                        Task {
+                            await refreshMessages()
+                            // 延迟一点刷新，确保数据库更新完成
+                            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3秒
+                            await refreshMessages()
+                        }
+                    }
+                )
+                .environmentObject(authManager)
+                .environmentObject(databaseManager)
+                .environmentObject(supabaseService)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("TemporaryMessagesRead"))) { notification in
+            // 当消息被标记为已读时，刷新列表
+            Task {
+                await refreshMessages()
+            }
+        }
+    }
+    
+    // MARK: - Refresh Messages
+    private func refreshMessages() async {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        await MainActor.run {
+            isLoading = true
+        }
+        
+        do {
+            // 首先获取所有发送给我的临时消息（无论是否有连接请求）
+            let allTemporaryMessages = try await supabaseService.getTemporaryMessages(receiverId: currentUser.id)
+            print("🔍 [临时聊天] 查询到 \(allTemporaryMessages.count) 条发送给我的临时消息")
+            
+            // 按发送者分组
+            var messagesBySender: [String: [SupabaseMessage]] = [:]
+            for message in allTemporaryMessages {
+                if messagesBySender[message.senderId] == nil {
+                    messagesBySender[message.senderId] = []
+                }
+                messagesBySender[message.senderId]?.append(message)
+            }
+            
+            // 重新加载所有请求的临时消息
+            var updatedRequests: [ConnectionRequest] = []
+            
+            // 处理已有请求的消息
+            for request in requests {
+                do {
+                    let messages = try await supabaseService.getTemporaryMessagesFromSender(
+                        receiverId: currentUser.id,
+                        senderId: request.requesterId
+                    )
+                    var temporaryMessages = messages.map { TemporaryMessage(from: $0) }
+                    
+                    // 限制最多10条消息（保留最新的10条）
+                    if temporaryMessages.count > 10 {
+                        temporaryMessages.sort(by: { $0.timestamp < $1.timestamp })
+                        temporaryMessages = Array(temporaryMessages.suffix(10))
+                    }
+                    
+                    var updatedRequest = request
+                    updatedRequest.temporaryMessages = temporaryMessages
+                    updatedRequests.append(updatedRequest)
+                } catch {
+                    print("⚠️ Failed to refresh messages for \(request.requesterProfile.name): \(error.localizedDescription)")
+                    updatedRequests.append(request)
+                }
+            }
+            
+            // 为没有连接请求但收到消息的发送者创建虚拟请求
+            for (senderId, messages) in messagesBySender {
+                // 检查是否已经有对应的请求
+                let hasRequest = updatedRequests.contains { $0.requesterId == senderId }
+                
+                if !hasRequest && !messages.isEmpty {
+                    // 为这个发送者创建虚拟请求
+                    do {
+                        // 获取发送者的 profile
+                        if let senderProfile = try? await supabaseService.getProfile(userId: senderId) {
+                            let brewNetProfile = senderProfile.toBrewNetProfile()
+                            let requesterProfile = ConnectionRequestProfile(
+                                profilePhoto: brewNetProfile.coreIdentity.profileImage,
+                                name: brewNetProfile.coreIdentity.name,
+                                jobTitle: brewNetProfile.professionalBackground.jobTitle ?? "",
+                                company: brewNetProfile.professionalBackground.currentCompany ?? "",
+                                location: brewNetProfile.coreIdentity.location ?? "",
+                                bio: brewNetProfile.coreIdentity.bio ?? "",
+                                expertise: brewNetProfile.professionalBackground.skills,
+                                backgroundImage: nil
+                            )
+                            
+                            // 获取双向消息
+                            let allMessages = try await supabaseService.getTemporaryMessagesFromSender(
+                                receiverId: currentUser.id,
+                                senderId: senderId
+                            )
+                            var temporaryMessages = allMessages.map { TemporaryMessage(from: $0) }
+                            
+                            // 限制最多10条消息（保留最新的10条）
+                            if temporaryMessages.count > 10 {
+                                temporaryMessages.sort(by: { $0.timestamp < $1.timestamp })
+                                temporaryMessages = Array(temporaryMessages.suffix(10))
+                            }
+                            
+                            let virtualRequest = ConnectionRequest(
+                                id: UUID().uuidString, // 虚拟ID
+                                requesterId: senderId,
+                                requesterName: requesterProfile.name,
+                                requesterProfile: requesterProfile,
+                                reasonForInterest: nil,
+                                createdAt: temporaryMessages.first?.timestamp ?? Date(),
+                                isFeatured: false
+                            )
+                            var mutableRequest = virtualRequest
+                            mutableRequest.temporaryMessages = temporaryMessages
+                            updatedRequests.append(mutableRequest)
+                            
+                            print("✅ [临时聊天] 为发送者 \(requesterProfile.name) 创建虚拟请求，包含 \(temporaryMessages.count) 条消息")
+                        }
+                    } catch {
+                        print("⚠️ Failed to create virtual request for sender \(senderId): \(error.localizedDescription)")
+                    }
+                }
+            }
+            
+            await MainActor.run {
+                refreshedRequests = updatedRequests
+                isLoading = false
+                print("✅ Refreshed temporary messages for \(updatedRequests.count) requests (including virtual requests)")
+            }
+        } catch {
+            print("❌ Failed to refresh messages: \(error.localizedDescription)")
+            await MainActor.run {
+                isLoading = false
+            }
+        }
+    }
+    
+    // MARK: - Top Bar
+    @ViewBuilder
+    private func topBarView() -> some View {
+        HStack {
+            Button(action: {
+                dismiss()
+            }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(themeBrown)
+            }
+            
+            Spacer()
+            
+            Text("Temporary Chats")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(themeBrown)
+            
+            Spacer()
+            
+            // 占位符保持对称
+            Color.clear
+                .frame(width: 18, height: 18)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(Color.white)
+    }
+    
+    // MARK: - Empty State
+    @ViewBuilder
+    private func emptyStateView() -> some View {
+        VStack(spacing: 20) {
+            Image(systemName: "message")
+                .font(.system(size: 60))
+                .foregroundColor(themeBrownLight)
+            
+            Text("No Temporary Messages")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(themeBrown)
+            
+            Text("When you receive temporary messages\nfor connection requests, they will appear here")
+                .font(.system(size: 14))
+                .foregroundColor(.gray)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
+    }
+    
+    // MARK: - Messages List
+    @ViewBuilder
+    private func messagesListView() -> some View {
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(requestsWithMessages) { request in
+                    TemporaryChatCard(request: request)
+                        .environmentObject(authManager)
+                        .onTapGesture {
+                            selectedRequest = request
+                            showingChatDetail = true
+                        }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+        }
+    }
+}
+
+// MARK: - Temporary Chat Card
+struct TemporaryChatCard: View {
+    let request: ConnectionRequest
+    @EnvironmentObject var authManager: AuthManager
+    
+    private var themeBrown: Color { BrewTheme.primaryBrown }
+    private var themeBrownLight: Color { BrewTheme.secondaryBrown }
+    
+    // 计算未读消息数量（只统计对方发送给我的）
+    private var unreadCount: Int {
+        guard let currentUser = authManager.currentUser else { return 0 }
+        return request.unreadTemporaryMessageCount(currentUserId: currentUser.id)
+    }
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            // Profile Avatar
+            Image(systemName: "person.circle.fill")
+                .font(.system(size: 50))
+                .foregroundColor(themeBrownLight)
+            
+            // Message Info
+            VStack(alignment: .leading, spacing: 6) {
+                // Name and Unread Badge
+                HStack(spacing: 8) {
+                    Text(request.requesterProfile.name)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(themeBrown)
+                    
+                    if unreadCount > 0 {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 8, height: 8)
+                    }
+                }
+                
+                // Latest Message Preview
+                if let latestMessage = request.latestTemporaryMessage {
+                    Text(latestMessage.content)
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                
+                // Time
+                if let latestMessage = request.latestTemporaryMessage {
+                    Text(timeAgoString(from: latestMessage.timestamp))
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                }
+            }
+            
+            Spacer()
+            
+            // Unread Count Badge
+            if unreadCount > 0 {
+                ZStack {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 24, height: 24)
+                    
+                    Text("\(unreadCount)")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.white)
+                }
+            }
+        }
+        .padding(16)
+        .background(Color.white)
+        .cornerRadius(16)
+        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+    }
+    
+    private func timeAgoString(from date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+// MARK: - Temporary Chat Detail View
+struct TemporaryChatDetailView: View {
+    let request: ConnectionRequest
+    let onDismiss: () -> Void
+    
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var databaseManager: DatabaseManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    @State private var messageText = ""
+    @FocusState private var isTextFieldFocused: Bool
+    @State private var messages: [TemporaryMessage] = []
+    
+    private var themeBrown: Color { BrewTheme.primaryBrown }
+    private var themeBrownLight: Color { BrewTheme.secondaryBrown }
+    private let maxMessageLength = 200
+    
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                BrewTheme.background
+                    .ignoresSafeArea()
+                
+                VStack(spacing: 0) {
+                    // Messages List
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(spacing: 12) {
+                                ForEach(messages) { message in
+                                    TemporaryMessageBubbleView(message: message, isFromUser: message.senderId == authManager.currentUser?.id)
+                                        .id(message.id)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 16)
+                        }
+                        .onAppear {
+                            if let lastMessage = messages.last {
+                                withAnimation {
+                                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                }
+                            }
+                        }
+                        .onChange(of: messages.count) { _ in
+                            if let lastMessage = messages.last {
+                                withAnimation {
+                                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Input Area
+                    messageInputView()
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .foregroundColor(themeBrown)
+                            .font(.system(size: 18, weight: .semibold))
+                    }
+                }
+                
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 2) {
+                        Text(request.requesterProfile.name)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(themeBrown)
+                        
+                        Text("Temporary Chat")
+                            .font(.system(size: 12))
+                            .foregroundColor(.gray)
+                    }
+                }
+            }
+            .onAppear {
+                loadMessages()
+                // 延迟一点标记已读，确保消息已加载
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    markAllMessagesAsRead()
+                }
+            }
+            .refreshable {
+                await refreshMessages()
+            }
+        }
+    }
+    
+    // MARK: - Message Input View
+    @ViewBuilder
+    private func messageInputView() -> some View {
+        VStack(spacing: 0) {
+            // Message Count Indicator
+            if messages.count > 0 {
+                HStack {
+                    Spacer()
+                    Text("\(messages.count)/10 messages")
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(12)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            }
+            
+            Divider()
+            
+            HStack(spacing: 12) {
+                // Text Field
+                TextField("Type a message...", text: $messageText, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Color.white)
+                    .cornerRadius(20)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(themeBrownLight.opacity(0.3), lineWidth: 1)
+                    )
+                    .lineLimit(1...4)
+                    .focused($isTextFieldFocused)
+                    .disabled(messages.count >= 10) // 达到10条时禁用输入
+                    .onChange(of: messageText) { newValue in
+                        if newValue.count > maxMessageLength {
+                            messageText = String(newValue.prefix(maxMessageLength))
+                        }
+                    }
+                
+                // Send Button
+                Button(action: {
+                    sendMessage()
+                }) {
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(.white)
+                        .frame(width: 40, height: 40)
+                        .background(
+                            Group {
+                                if messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || messages.count >= 10 {
+                                    Color.gray.opacity(0.5)
+                                } else {
+                                    BrewTheme.gradientPrimary()
+                                }
+                            }
+                        )
+                        .clipShape(Circle())
+                }
+                .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || messages.count >= 10)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color.white)
+        }
+    }
+    
+    // MARK: - Load Messages
+    private func loadMessages() {
+        Task {
+            await refreshMessages()
+        }
+    }
+    
+    // MARK: - Refresh Messages
+    private func refreshMessages() async {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        do {
+            // 重新从数据库加载最新的临时消息
+            let latestMessages = try await supabaseService.getTemporaryMessagesFromSender(
+                receiverId: currentUser.id,
+                senderId: request.requesterId
+            )
+            
+            let temporaryMessages = latestMessages.map { TemporaryMessage(from: $0) }
+            
+            await MainActor.run {
+                var sortedMessages = temporaryMessages.sorted(by: { $0.timestamp < $1.timestamp })
+                
+                // 限制最多10条消息（保留最新的10条）
+                if sortedMessages.count > 10 {
+                    sortedMessages = Array(sortedMessages.suffix(10))
+                    print("⚠️ [临时聊天] 消息数量超过10条，已保留最新的10条")
+                }
+                
+                messages = sortedMessages
+                print("✅ Refreshed \(messages.count) messages in chat detail")
+            }
+        } catch {
+            print("⚠️ Failed to refresh messages: \(error.localizedDescription)")
+            // 如果刷新失败，使用原来的消息列表
+            await MainActor.run {
+                var sortedMessages = request.temporaryMessages.sorted(by: { $0.timestamp < $1.timestamp })
+                // 即使使用原有消息，也限制为10条
+                if sortedMessages.count > 10 {
+                    sortedMessages = Array(sortedMessages.suffix(10))
+                }
+                messages = sortedMessages
+            }
+        }
+    }
+    
+    // MARK: - Mark All Messages As Read
+    private func markAllMessagesAsRead() {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        Task {
+            // 等待消息加载完成
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5秒
+            
+            // 找到所有未读的消息（对方发送给我的）
+            let unreadMessages = messages.filter { message in
+                !message.isRead && message.senderId != currentUser.id
+            }
+            
+            if !unreadMessages.isEmpty {
+                print("📖 [临时聊天] 标记 \(unreadMessages.count) 条消息为已读")
+                
+                // 批量标记为已读
+                for message in unreadMessages {
+                    do {
+                        try await supabaseService.markMessageAsRead(messageId: message.id)
+                        print("✅ [临时聊天] 已标记消息 \(message.id) 为已读")
+                    } catch {
+                        print("⚠️ Failed to mark message \(message.id) as read: \(error.localizedDescription)")
+                    }
+                }
+                
+                // 先刷新消息列表（从数据库重新加载已更新的状态）
+                await refreshMessages()
+                
+                // 刷新临时聊天列表（通知父视图更新）
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("TemporaryMessagesRead"),
+                    object: nil,
+                    userInfo: ["requesterId": request.requesterId]
+                )
+            } else {
+                print("ℹ️ [临时聊天] 没有未读消息需要标记")
+            }
+        }
+    }
+    
+    // MARK: - Send Message
+    private func sendMessage() {
+        guard let currentUser = authManager.currentUser,
+              !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        
+        // 检查消息数量限制（最多10条）
+        let currentMessageCount = messages.count
+        if currentMessageCount >= 10 {
+            print("⚠️ [临时聊天] 消息数量已达上限（10条），无法发送新消息")
+            return
+        }
+        
+        let content = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        messageText = ""
+        
+        Task {
+            do {
+                let sentMessage = try await supabaseService.sendMessage(
+                    senderId: currentUser.id,
+                    receiverId: request.requesterId,
+                    content: content,
+                    messageType: "temporary"
+                )
+                
+                // 创建本地消息对象
+                let newMessage = TemporaryMessage(from: sentMessage)
+                
+                await MainActor.run {
+                    messages.append(newMessage)
+                    messages = messages.sorted(by: { $0.timestamp < $1.timestamp })
+                    
+                    // 如果超过10条，只保留最新的10条
+                    if messages.count > 10 {
+                        messages = Array(messages.suffix(10))
+                        print("⚠️ [临时聊天] 消息数量超过10条，已保留最新的10条")
+                    }
+                }
+                
+                print("✅ Temporary message sent successfully")
+                
+                // 刷新消息列表以确保显示最新消息
+                await refreshMessages()
+            } catch {
+                print("❌ Failed to send temporary message: \(error.localizedDescription)")
+            }
+        }
+    }
+}
+
+// MARK: - Temporary Message Bubble View
+struct TemporaryMessageBubbleView: View {
+    let message: TemporaryMessage
+    let isFromUser: Bool
+    
+    private var themeBrown: Color { BrewTheme.primaryBrown }
+    private var themeBrownLight: Color { BrewTheme.secondaryBrown }
+    
+    var body: some View {
+        HStack {
+            if isFromUser {
+                Spacer(minLength: 60)
+            }
+            
+            VStack(alignment: isFromUser ? .trailing : .leading, spacing: 4) {
+                Text(message.content)
+                    .font(.system(size: 15))
+                    .foregroundColor(isFromUser ? .white : themeBrown)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(
+                        Group {
+                            if isFromUser {
+                                BrewTheme.gradientPrimary()
+                            } else {
+                                themeBrownLight.opacity(0.15)
+                            }
+                        }
+                    )
+                    .cornerRadius(18)
+                
+                Text(timeAgoString(from: message.timestamp))
+                    .font(.system(size: 11))
+                    .foregroundColor(.gray)
+                    .padding(.horizontal, 4)
+            }
+            
+            if !isFromUser {
+                Spacer(minLength: 60)
+            }
+        }
+    }
+    
+    private func timeAgoString(from date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 }
 
