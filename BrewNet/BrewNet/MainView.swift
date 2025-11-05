@@ -8,6 +8,8 @@ struct MainView: View {
     @State private var profilesPreloaded = false // 标记是否已预加载
     @State private var unreadMessageCount = 0 // 未读消息总数
     @State private var chatListRefreshTimer: Timer? // 用于刷新未读消息数
+    @State private var pendingRequestCount = 0 // 待处理的请求总数
+    @State private var requestRefreshTimer: Timer? // 用于刷新请求数
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -33,6 +35,7 @@ struct MainView: View {
                     Image(systemName: "person.badge.plus.fill")
                 }
                 .tag(2)
+                .badge(pendingRequestCount > 0 ? pendingRequestCount : 0)
             
             // Chat
             NavigationStack {
@@ -59,9 +62,12 @@ struct MainView: View {
             preloadMatchesData()
             // 开始刷新未读消息数
             startUnreadMessageCountRefresh()
+            // 开始刷新请求数
+            startRequestCountRefresh()
         }
         .onDisappear {
             stopUnreadMessageCountRefresh()
+            stopRequestCountRefresh()
         }
         .onChange(of: selectedTab) { newTab in
             // 切换到第一个 tab 时，如果还没预加载，则预加载
@@ -76,6 +82,18 @@ struct MainView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToMatches"))) { _ in
             // 当收到导航到 Matches 的通知时，切换到 Matches tab
             selectedTab = 0
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ConnectionRequestAccepted"))) { _ in
+            // 当请求被接受时，刷新请求数
+            Task {
+                await updatePendingRequestCount()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ConnectionRequestRejected"))) { _ in
+            // 当请求被拒绝时，刷新请求数
+            Task {
+                await updatePendingRequestCount()
+            }
         }
     }
     
@@ -138,10 +156,17 @@ struct MainView: View {
             let matches = try await supabaseService.getActiveMatches(userId: currentUser.id)
             
             var totalUnread = 0
+            var processedUserIds = Set<String>() // 用于去重，确保每个用户只计算一次
             
             // 对每个匹配，获取未读消息数
             for match in matches {
                 let otherUserId = match.userId == currentUser.id ? match.matchedUserId : match.userId
+                
+                // 跳过已处理的用户，避免重复计算
+                if processedUserIds.contains(otherUserId) {
+                    continue
+                }
+                processedUserIds.insert(otherUserId)
                 
                 // 获取该用户的所有消息
                 let messages = try await supabaseService.getMessages(
@@ -149,8 +174,18 @@ struct MainView: View {
                     userId2: otherUserId
                 )
                 
+                // 去重：基于消息 ID 去重，确保不会有重复消息
+                var uniqueMessages: [SupabaseMessage] = []
+                var seenMessageIds = Set<String>()
+                for message in messages {
+                    if !seenMessageIds.contains(message.id) {
+                        uniqueMessages.append(message)
+                        seenMessageIds.insert(message.id)
+                    }
+                }
+                
                 // 计算未读消息数（接收者是自己且未读）
-                let unread = messages.filter { message in
+                let unread = uniqueMessages.filter { message in
                     message.receiverId == currentUser.id && !message.isRead
                 }.count
                 
@@ -158,8 +193,69 @@ struct MainView: View {
             }
             
             unreadMessageCount = totalUnread
+            print("✅ Updated unread message count: \(totalUnread)")
         } catch {
             print("⚠️ Failed to update unread message count: \(error.localizedDescription)")
+        }
+    }
+    
+    // MARK: - Request Count Refresh
+    private func startRequestCountRefresh() {
+        stopRequestCountRefresh()
+        
+        // 立即刷新一次
+        Task {
+            await updatePendingRequestCount()
+        }
+        
+        // 每5秒刷新一次请求数
+        requestRefreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+            Task {
+                await updatePendingRequestCount()
+            }
+        }
+    }
+    
+    private func stopRequestCountRefresh() {
+        requestRefreshTimer?.invalidate()
+        requestRefreshTimer = nil
+    }
+    
+    @MainActor
+    private func updatePendingRequestCount() async {
+        guard let currentUser = authManager.currentUser else {
+            pendingRequestCount = 0
+            return
+        }
+        
+        do {
+            // 获取所有待处理的邀请
+            let pendingInvitations = try await supabaseService.getPendingInvitations(userId: currentUser.id)
+            
+            // 获取所有已匹配的用户ID，用于过滤
+            var matchedUserIds: Set<String> = []
+            do {
+                let matches = try await supabaseService.getActiveMatches(userId: currentUser.id)
+                for match in matches {
+                    if match.userId == currentUser.id {
+                        matchedUserIds.insert(match.matchedUserId)
+                    } else if match.matchedUserId == currentUser.id {
+                        matchedUserIds.insert(match.userId)
+                    }
+                }
+            } catch {
+                print("⚠️ Failed to fetch matches for filtering: \(error.localizedDescription)")
+            }
+            
+            // 过滤掉已经匹配的邀请
+            let filteredInvitations = pendingInvitations.filter { invitation in
+                !matchedUserIds.contains(invitation.senderId)
+            }
+            
+            pendingRequestCount = filteredInvitations.count
+            print("✅ Updated pending request count: \(pendingRequestCount)")
+        } catch {
+            print("⚠️ Failed to update pending request count: \(error.localizedDescription)")
         }
     }
 }

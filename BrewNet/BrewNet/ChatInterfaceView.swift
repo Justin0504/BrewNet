@@ -1322,8 +1322,76 @@ struct ChatInterfaceView: View {
         // 在 SwiftUI 中，可以直接调用方法，不需要捕获 self
         messageRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
             Task { @MainActor in
-                await refreshMessagesForCurrentSession()
+                // 如果当前有选中的会话，刷新该会话的消息
+                if selectedSession != nil {
+                    await refreshMessagesForCurrentSession()
+                } else {
+                    // 如果没有选中的会话（在聊天列表页面），刷新整个列表以更新未读消息数
+                    await refreshChatSessionsMessages()
+                }
             }
+        }
+    }
+    
+    // 刷新所有会话的消息（用于更新未读消息数）
+    @MainActor
+    private func refreshChatSessionsMessages() async {
+        guard let currentUser = authManager.currentUser else {
+            return
+        }
+        
+        // 只刷新有未读消息的会话，或者最近有消息的会话
+        for index in chatSessions.indices {
+            let session = chatSessions[index]
+            guard let receiverUserId = session.user.userId else { continue }
+            
+            do {
+                let supabaseMessages = try await supabaseService.getMessages(
+                    userId1: currentUser.id,
+                    userId2: receiverUserId
+                )
+                
+                let messages = supabaseMessages.map { supabaseMessage in
+                    supabaseMessage.toChatMessage(currentUserId: currentUser.id)
+                }
+                
+                // 去重
+                var uniqueMessages: [ChatMessage] = []
+                var seenMessageIds = Set<UUID>()
+                for message in messages {
+                    if !seenMessageIds.contains(message.id) {
+                        uniqueMessages.append(message)
+                        seenMessageIds.insert(message.id)
+                    }
+                }
+                
+                // 更新会话消息
+                chatSessions[index].messages = uniqueMessages
+                if let lastMessage = uniqueMessages.last {
+                    chatSessions[index].lastMessageAt = lastMessage.timestamp
+                }
+            } catch {
+                print("⚠️ Failed to refresh messages for session \(session.user.name): \(error.localizedDescription)")
+            }
+        }
+        
+        // 重新排序
+        chatSessions.sort { session1, session2 in
+            let hasMessages1 = !session1.messages.isEmpty
+            let hasMessages2 = !session2.messages.isEmpty
+            
+            if hasMessages1 && hasMessages2 {
+                return session1.lastMessageAt > session2.lastMessageAt
+            }
+            if hasMessages1 && !hasMessages2 {
+                return true
+            }
+            if !hasMessages1 && hasMessages2 {
+                return false
+            }
+            let date1 = session1.user.matchDate ?? Date.distantPast
+            let date2 = session2.user.matchDate ?? Date.distantPast
+            return date1 > date2
         }
     }
     
@@ -1376,29 +1444,26 @@ struct ChatInterfaceView: View {
                 if let lastMessage = uniqueMessages.last {
                     chatSessions[index].lastMessageAt = lastMessage.timestamp
                 }
+                // 更新选中会话（用于聊天视图）
                 selectedSession = chatSessions[index]
                 
-                // 更新列表中的会话（用于排序）
-                if let listIndex = chatSessions.firstIndex(where: { $0.id == session.id }) {
-                    chatSessions[listIndex] = chatSessions[index]
-                    // 重新排序
-                    chatSessions.sort { session1, session2 in
-                        let hasMessages1 = !session1.messages.isEmpty
-                        let hasMessages2 = !session2.messages.isEmpty
-                        
-                        if hasMessages1 && hasMessages2 {
-                            return session1.lastMessageAt > session2.lastMessageAt
-                        }
-                        if hasMessages1 && !hasMessages2 {
-                            return true
-                        }
-                        if !hasMessages1 && hasMessages2 {
-                            return false
-                        }
-                        let date1 = session1.user.matchDate ?? Date.distantPast
-                        let date2 = session2.user.matchDate ?? Date.distantPast
-                        return date1 > date2
+                // 重新排序（确保列表按最新消息时间排序）
+                chatSessions.sort { session1, session2 in
+                    let hasMessages1 = !session1.messages.isEmpty
+                    let hasMessages2 = !session2.messages.isEmpty
+                    
+                    if hasMessages1 && hasMessages2 {
+                        return session1.lastMessageAt > session2.lastMessageAt
                     }
+                    if hasMessages1 && !hasMessages2 {
+                        return true
+                    }
+                    if !hasMessages1 && hasMessages2 {
+                        return false
+                    }
+                    let date1 = session1.user.matchDate ?? Date.distantPast
+                    let date2 = session2.user.matchDate ?? Date.distantPast
+                    return date1 > date2
                 }
                 
                 // 如果有新消息且用户在底部，标记需要滚动
@@ -1566,9 +1631,13 @@ struct ChatSessionRowView: View {
                         }
                     }
                     
-                    Text(session.messages.last?.content ?? "Start chatting...")
+                    // 显示未读的最新消息（如果有），否则显示最后一条消息
+                    let unreadMessages = session.messages.filter { !$0.isFromUser && !$0.isRead }
+                    let displayMessage = unreadMessages.last ?? session.messages.last
+                    Text(displayMessage?.content ?? "Start chatting...")
                         .font(.system(size: 14))
-                        .foregroundColor(.gray)
+                        .foregroundColor(unreadMessages.isEmpty ? .gray : Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .fontWeight(unreadMessages.isEmpty ? .regular : .semibold)
                         .lineLimit(1)
                     
                     HStack(spacing: 4) {
