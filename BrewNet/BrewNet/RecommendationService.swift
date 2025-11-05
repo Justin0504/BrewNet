@@ -16,29 +16,35 @@ class RecommendationService: ObservableObject {
     /// - Parameters:
     ///   - userId: 当前用户ID
     ///   - limit: 返回的推荐数量
+    ///   - forceRefresh: 是否强制刷新，忽略缓存
     /// - Returns: 推荐结果列表（包含 userId, score 和用户资料）
     func getRecommendations(
         for userId: String,
-        limit: Int = 20
+        limit: Int = 20,
+        forceRefresh: Bool = false
     ) async throws -> [(userId: String, score: Double, profile: BrewNetProfile)] {
         
-        print("🔍 Getting recommendations for user: \(userId), limit: \(limit)")
+        print("🔍 Getting recommendations for user: \(userId), limit: \(limit), forceRefresh: \(forceRefresh)")
         
-        // 1. 检查缓存（确保缓存来自推荐系统）
-        if let cached = try await supabaseService.getCachedRecommendations(userId: userId) {
-            let (cachedUserIds, cachedScores) = cached
-            
-            // 验证缓存数据的有效性：确保有 userIds 和 scores，且数量匹配
-            if !cachedUserIds.isEmpty && cachedUserIds.count == cachedScores.count && cachedScores.count > 0 {
-                // 缓存有效，使用缓存
-                print("✅ Using cached recommendations (validated: \(cachedUserIds.count) users)")
-                return try await loadProfilesWithCache(cached, userId: userId)
-            } else {
-                // 缓存无效，清除并继续生成新的推荐
-                print("⚠️ Invalid cache data, regenerating recommendations...")
-                try? await supabaseService.clearRecommendationCache(userId: userId)
-                // 继续执行下面的代码生成新的推荐
+        // 1. 检查缓存（如果 forceRefresh 为 true，跳过缓存）
+        if !forceRefresh {
+            if let cached = try await supabaseService.getCachedRecommendations(userId: userId) {
+                let (cachedUserIds, cachedScores) = cached
+                
+                // 验证缓存数据的有效性：确保有 userIds 和 scores，且数量匹配
+                if !cachedUserIds.isEmpty && cachedUserIds.count == cachedScores.count && cachedScores.count > 0 {
+                    // 缓存有效，使用缓存
+                    print("✅ Using cached recommendations (validated: \(cachedUserIds.count) users)")
+                    return try await loadProfilesWithCache(cached, userId: userId)
+                } else {
+                    // 缓存无效，清除并继续生成新的推荐
+                    print("⚠️ Invalid cache data, regenerating recommendations...")
+                    try? await supabaseService.clearRecommendationCache(userId: userId)
+                    // 继续执行下面的代码生成新的推荐
+                }
             }
+        } else {
+            print("🔄 Force refresh: skipping cache check")
         }
         
         // 2. 获取用户特征
@@ -53,10 +59,15 @@ class RecommendationService: ObservableObject {
         print("🚫 Will exclude \(excludedUserIds.count) users from recommendations")
         
         // 4. 获取候选用户特征
+        // 增加 limit 以覆盖更多用户（数据库有1000个用户）
         let allCandidates = try await supabaseService.getAllCandidateFeatures(
             excluding: userId,
-            limit: 1000
+            limit: 2000  // 从 1000 增加到 2000，确保覆盖所有用户
         )
+        
+        print("📊 Candidate analysis:")
+        print("   - Total candidates from user_features table: \(allCandidates.count)")
+        print("   - Total excluded users: \(excludedUserIds.count)")
         
         // 4.5. 过滤掉需要排除的用户
         let candidates = allCandidates.filter { candidate in
@@ -65,7 +76,38 @@ class RecommendationService: ObservableObject {
         
         print("📊 Processing \(candidates.count) candidates (filtered from \(allCandidates.count), excluded \(allCandidates.count - candidates.count))")
         
-        guard !candidates.isEmpty else {
+        // 详细分析：为什么没有候选用户
+        if candidates.isEmpty {
+            print("⚠️ No candidates available after filtering")
+            print("   - All candidates in excluded list: \(allCandidates.count > 0 ? "Yes" : "No")")
+            
+            // 检查有多少候选用户被排除
+            let excludedCandidates = allCandidates.filter { excludedUserIds.contains($0.userId) }
+            print("   - Excluded candidates: \(excludedCandidates.count)/\(allCandidates.count)")
+            
+            // 如果 user_features 表中有很多用户但都被排除了，说明排除列表可能有问题
+            if allCandidates.count > 0 && excludedCandidates.count == allCandidates.count {
+                print("   ⚠️ CRITICAL: All \(allCandidates.count) candidates are in the excluded list!")
+                print("   - This suggests:")
+                print("     1. The exclusion list (192 users) may be too large")
+                print("     2. All users in user_features have been interacted with")
+                print("     3. Possible duplicate entries in exclusion list")
+                print("   - Recommendation: Check if exclusion logic is too strict")
+            }
+            
+            // 如果 user_features 表中用户很少，说明数据同步问题
+            if allCandidates.count == 0 {
+                print("   ⚠️ CRITICAL: No users in user_features table!")
+                print("   - Database has 1000 users, but user_features table is empty or not synced")
+                print("   - Recommendation: Sync user_features table with users table")
+            }
+            
+            print("   - Possible reasons:")
+            print("     1. All users in user_features table have been interacted with")
+            print("     2. user_features table has too few users (not synced with users table)")
+            print("     3. All users are in excluded list (invitations/matches/interactions)")
+            print("     4. Exclusion list (192 users) may contain duplicates or be too large")
+            
             throw RecommendationError.noCandidates
         }
         
@@ -88,20 +130,34 @@ class RecommendationService: ObservableObject {
         
         // 7. 获取 Top-K
         let topK = Array(scoredCandidates.prefix(limit))
+        print("📊 Selected top \(topK.count) candidates (requested: \(limit))")
         
         // 8. 批量获取所有 Top-K 用户的 profiles（优化性能）
         let topKUserIds = topK.map { $0.userId }
+        print("🔍 Fetching profiles for \(topKUserIds.count) recommended users...")
         let profilesDict = try await supabaseService.getProfilesBatch(userIds: topKUserIds)
+        print("✅ Fetched \(profilesDict.count) profiles from database (requested: \(topKUserIds.count))")
         
         // 9. 构建结果，保持推荐分数顺序
         var results: [(userId: String, score: Double, profile: BrewNetProfile)] = []
+        var missingProfiles: [String] = []
         for item in topK {
             if let supabaseProfile = profilesDict[item.userId] {
-                let brewNetProfile = supabaseProfile.toBrewNetProfile()
-                results.append((item.userId, item.score, brewNetProfile))
+                do {
+                    let brewNetProfile = supabaseProfile.toBrewNetProfile()
+                    results.append((item.userId, item.score, brewNetProfile))
+                } catch {
+                    print("⚠️ Failed to convert profile for user \(item.userId): \(error.localizedDescription)")
+                    missingProfiles.append(item.userId)
+                }
             } else {
                 print("⚠️ Profile not found for recommended user: \(item.userId)")
+                missingProfiles.append(item.userId)
             }
+        }
+        
+        if !missingProfiles.isEmpty {
+            print("⚠️ \(missingProfiles.count) profiles failed to load: \(missingProfiles.prefix(5).joined(separator: ", "))")
         }
         
         // 10. 缓存结果（确保只缓存推荐系统的结果）
@@ -124,6 +180,13 @@ class RecommendationService: ObservableObject {
         print("💾 Cached \(userIds.count) recommendations from Two-Tower system")
         
         print("✅ Recommendations generated: \(results.count) profiles")
+        if results.isEmpty {
+            print("⚠️ WARNING: Recommendation system returned 0 profiles!")
+            print("   - This should not happen if there are valid candidates")
+            print("   - Possible causes:")
+            print("     1. All top-K profiles failed to load from database")
+            print("     2. Profile decoding failed for all recommended users")
+        }
         return results
     }
     

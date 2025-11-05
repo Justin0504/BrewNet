@@ -20,39 +20,31 @@ struct ChatInterfaceView: View {
     @State private var userIdToFullProfileMap: [String: BrewNetProfile] = [:] // 存储完整的 profile 数据
     @State private var showingUnmatchConfirmAlert = false
     @State private var sessionToUnmatch: ChatSession? = nil
+    @State private var scrollToBottomId: UUID? = nil // 用于触发滚动到底部
+    @State private var isAtBottom: Bool = true // 跟踪用户是否在聊天底部
+    @State private var scrollViewHeight: CGFloat = 0 // ScrollView 高度
+    @State private var contentHeight: CGFloat = 0 // 内容高度
+    @State private var scrollOffset: CGFloat = 0 // 滚动偏移量
     
     var body: some View {
-        ZStack {
-            // Background - 与其他板块保持一致
-            Color(red: 0.98, green: 0.97, blue: 0.95)
-                .ignoresSafeArea()
-            
-            VStack(spacing: 0) {
-                if let session = selectedSession {
-                    chatView(for: session)
-                } else {
-                    chatListView
-                }
+        mainContent
+            .navigationTitle("Chat")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                toolbarContent
             }
-        }
-        .navigationTitle("Chat")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: {
-                    // 暂时不添加任何功能
-                }) {
-                    Image(systemName: "ellipsis")
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                }
+            .onAppear {
+                loadChatSessions()
+                startMessageRefreshTimer()
             }
-        }
-        .onAppear {
-            loadChatSessions()
-            startMessageRefreshTimer()
-        }
-        .onDisappear {
+            .onChange(of: supabaseService.userOnlineStatuses.count) { _ in
+                // 当在线状态更新时（通过字典数量变化触发），刷新聊天会话列表
+                updateChatSessionsWithOnlineStatus()
+            }
+            .onDisappear {
             stopMessageRefreshTimer()
+            // 停止在线状态监控
+            supabaseService.stopMonitoringOnlineStatus()
             // 先尝试从持久化缓存加载
             loadCachedChatSessionsFromStorage()
             
@@ -89,6 +81,10 @@ struct ChatInterfaceView: View {
             // 下拉刷新时，保持现有聊天列表显示，后台更新数据
             // 不会清空 chatSessions，避免显示空状态
             await loadChatSessionsFromDatabase()
+        }
+        .onChange(of: selectedSession?.id) { newSessionId in
+            // 当会话切换时，重置滚动状态
+            scrollToBottomId = nil
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToChat"))) { notification in
             // 当收到导航到 Chat 的通知时，刷新匹配列表并自动选择匹配的用户
@@ -227,6 +223,33 @@ struct ChatInterfaceView: View {
         }
     }
     
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button(action: {
+                // 暂时不添加任何功能
+            }) {
+                Image(systemName: "ellipsis")
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            }
+        }
+    }
+    
+    private var mainContent: some View {
+        ZStack {
+            // Background - 与其他板块保持一致
+            Color(red: 0.98, green: 0.97, blue: 0.95)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                if let session = selectedSession {
+                    chatView(for: session)
+                } else {
+                    chatListView
+                }
+            }
+        }
+    }
+    
     private var chatListView: some View {
         VStack {
             if isLoadingMatches && chatSessions.isEmpty {
@@ -307,11 +330,148 @@ struct ChatInterfaceView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                }
-                .onChange(of: session.messages.count) { _ in
-                    if let lastMessage = session.messages.last {
-                        withAnimation(.easeInOut(duration: 0.3)) {
+                    .background(
+                        GeometryReader { contentGeometry in
+                            Color.clear
+                                .preference(key: ScrollOffsetPreferenceKey.self, 
+                                          value: contentGeometry.frame(in: .named("scroll")).minY)
+                                .preference(key: ContentHeightPreferenceKey.self, 
+                                          value: contentGeometry.size.height)
+                        }
+                    )
+                    .onAppear {
+                        // 在内容出现时立即滚动到底部，避免闪现顶部
+                        if let lastMessage = session.messages.last {
+                            // 立即尝试滚动，不等待
                             proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                            // 设置初始状态为在底部
+                            isAtBottom = true
+                        }
+                    }
+                }
+                .coordinateSpace(name: "scroll")
+                .background(
+                    GeometryReader { scrollGeometry in
+                        Color.clear
+                            .preference(key: ScrollViewHeightPreferenceKey.self, 
+                                      value: scrollGeometry.size.height)
+                    }
+                )
+                .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+                    scrollOffset = -value
+                    checkIfAtBottom()
+                }
+                .onPreferenceChange(ContentHeightPreferenceKey.self) { value in
+                    contentHeight = value
+                    // 延迟检查以确保布局完成
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        checkIfAtBottom()
+                    }
+                }
+                .onPreferenceChange(ScrollViewHeightPreferenceKey.self) { value in
+                    scrollViewHeight = value
+                    checkIfAtBottom()
+                }
+                .task {
+                    // 使用 task 在视图出现之前就开始滚动，避免闪现顶部
+                    if let lastMessage = session.messages.last {
+                        // 立即尝试滚动（无延迟）
+                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                    }
+                }
+                .onAppear {
+                    // 视图出现时再次确保滚动到底部（作为保险）
+                    if let lastMessage = session.messages.last {
+                        // 使用极短的延迟，确保视图已渲染
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                        }
+                        // 双重保险
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                        }
+                    }
+                }
+                .onChange(of: session.id) { _ in
+                    // 当会话切换时，立即滚动到底部
+                    if let lastMessage = session.messages.last {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                        }
+                    }
+                }
+                .onChange(of: scrollToBottomId) { newId in
+                    // 当需要滚动时（由sendMessage或refreshMessages触发）
+                    if let messageId = newId {
+                        // 检查这条消息是否是自己发送的
+                        let isUserMessage = session.messages.first(where: { $0.id == messageId })?.isFromUser ?? false
+                        
+                        // 延迟滚动，确保消息已渲染到视图
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo(messageId, anchor: .bottom)
+                            }
+                            // 滚动完成后，清空scrollToBottomId，避免重复触发
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                scrollToBottomId = nil
+                            }
+                        }
+                        // 双重保险，确保滚动成功
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo(messageId, anchor: .bottom)
+                            }
+                        }
+                    }
+                }
+                .onChange(of: session.messages.count) { newCount in
+                    // 如果scrollToBottomId已设置，且最后一条消息是自己发送的，则滚动
+                    if let scrollId = scrollToBottomId,
+                       let lastMessage = session.messages.last,
+                       lastMessage.isFromUser,
+                       lastMessage.id == scrollId {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo(scrollId, anchor: .bottom)
+                            }
+                        }
+                    } else if let lastMessage = session.messages.last,
+                              !lastMessage.isFromUser {
+                        // 如果是别人发送的消息，且用户在底部，则自动滚动
+                        if isAtBottom {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                }
+                            }
+                        }
+                    }
+                }
+                .onChange(of: session.messages.last?.id) { newMessageId in
+                    // 监听最后一条消息ID的变化
+                    if let lastMessage = session.messages.last,
+                       !lastMessage.isFromUser,
+                       let messageId = newMessageId,
+                       isAtBottom {
+                        // 如果是别人发送的新消息，且用户在底部，则自动滚动
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo(messageId, anchor: .bottom)
+                            }
+                        }
+                    }
+                }
+                .onChange(of: selectedSession?.messages.count) { newCount in
+                    // 监听消息数量变化（用于刷新消息后的滚动）
+                    if let session = selectedSession,
+                       let lastMessage = session.messages.last,
+                       !lastMessage.isFromUser,
+                       isAtBottom {
+                        // 如果是别人发送的新消息，且用户在底部，则自动滚动
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                            }
                         }
                     }
                 }
@@ -351,13 +511,18 @@ struct ChatInterfaceView: View {
                             .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                         
                         HStack(spacing: 4) {
+                            // 使用实时在线状态（如果可用）
+                            let userId = session.user.userId
+                            let realtimeStatus = userId != nil ? supabaseService.userOnlineStatuses[userId!] : nil
+                            let realtimeIsOnline = realtimeStatus?.isOnline ?? session.user.isOnline
+                            
                             Circle()
-                                .fill(session.user.isOnline ? .green : .gray)
+                                .fill(realtimeIsOnline ? .green : .gray)
                                 .frame(width: 8, height: 8)
                             
-                            Text(session.user.isOnline ? "Active" : "Offline")
+                            Text(realtimeIsOnline ? "Active" : "Offline")
                                 .font(.system(size: 12))
-                                .foregroundColor(session.user.isOnline ? .green : .gray)
+                                .foregroundColor(realtimeIsOnline ? .green : .gray)
                             
                             // Match date
                             if session.user.isMatched, let matchDate = session.user.matchDate {
@@ -466,6 +631,43 @@ struct ChatInterfaceView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color.white)
+    }
+    
+    /// 更新聊天会话的在线状态（当实时状态更新时调用）
+    private func updateChatSessionsWithOnlineStatus() {
+        // 由于 ChatSession 的 user 是 let，需要重新创建整个会话
+        var updatedSessions: [ChatSession] = []
+        for session in chatSessions {
+            if let userId = session.user.userId,
+               let status = supabaseService.userOnlineStatuses[userId] {
+                // 创建更新后的 ChatUser
+                let updatedChatUser = ChatUser(
+                    name: session.user.name,
+                    avatar: session.user.avatar,
+                    isOnline: status.isOnline,
+                    lastSeen: status.lastSeen,
+                    interests: session.user.interests,
+                    bio: session.user.bio,
+                    isMatched: session.user.isMatched,
+                    matchDate: session.user.matchDate,
+                    matchType: session.user.matchType,
+                    userId: session.user.userId
+                )
+                // 创建新的 ChatSession
+                var updatedSession = ChatSession(
+                    user: updatedChatUser,
+                    messages: session.messages,
+                    aiSuggestions: session.aiSuggestions,
+                    isActive: session.isActive
+                )
+                updatedSession.lastMessageAt = session.lastMessageAt
+                updatedSessions.append(updatedSession)
+            } else {
+                // 如果没有状态更新，保留原会话
+                updatedSessions.append(session)
+            }
+        }
+        chatSessions = updatedSessions
     }
     
     private func loadChatSessions() {
@@ -667,8 +869,21 @@ struct ChatInterfaceView: View {
             dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             
             // 并发获取所有用户的在线状态（改进版：更准确的在线判断）
+            // 使用新的在线状态 API 获取实时状态
             let onlineStatusTasks = basicSessionData.map { data -> Task<(userId: String, isOnline: Bool, lastSeen: Date), Never> in
-                Task {
+                Task { @MainActor in
+                    // 优先使用实时状态缓存
+                    let cachedStatus = supabaseService.userOnlineStatuses[data.matchedUserId]
+                    if let status = cachedStatus {
+                        return (data.matchedUserId, status.isOnline, status.lastSeen)
+                    }
+                    
+                    // 如果缓存中没有，从数据库获取
+                    if let status = await supabaseService.getUserOnlineStatus(userId: data.matchedUserId) {
+                        return (data.matchedUserId, status.isOnline, status.lastSeen)
+                    }
+                    
+                    // 回退到旧方法（基于 lastLoginAt）
                     var isOnline = false
                     var lastSeen = Date()
                     
@@ -676,14 +891,11 @@ struct ChatInterfaceView: View {
                         let formatter = ISO8601DateFormatter()
                         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
                         
-                        // 尝试解析 lastLoginAt
                         if let lastLoginAt = formatter.date(from: user.lastLoginAt) {
                             lastSeen = lastLoginAt
                             let timeSinceLastLogin = Date().timeIntervalSince(lastLoginAt)
-                            // 5分钟内活跃视为在线
                             isOnline = timeSinceLastLogin < 300
                         } else {
-                            // 如果解析失败，尝试不带小数秒的格式
                             formatter.formatOptions = [.withInternetDateTime]
                             if let lastLoginAt = formatter.date(from: user.lastLoginAt) {
                                 lastSeen = lastLoginAt
@@ -795,8 +1007,24 @@ struct ChatInterfaceView: View {
                 sessions.append(session)
             }
             
-            // 按匹配时间排序，最新的在前面
+            // 按最新消息时间排序，最新的在前面
+            // 有消息的按最后消息时间排序，没有消息的按匹配时间排序放在后面
             sessions.sort { session1, session2 in
+                let hasMessages1 = !session1.messages.isEmpty
+                let hasMessages2 = !session2.messages.isEmpty
+                
+                // 如果两个都有消息，按最后消息时间排序
+                if hasMessages1 && hasMessages2 {
+                    return session1.lastMessageAt > session2.lastMessageAt
+                }
+                // 如果有消息的排在前面
+                if hasMessages1 && !hasMessages2 {
+                    return true
+                }
+                if !hasMessages1 && hasMessages2 {
+                    return false
+                }
+                // 两个都没有消息，按匹配时间排序
                 let date1 = session1.user.matchDate ?? Date.distantPast
                 let date2 = session2.user.matchDate ?? Date.distantPast
                 return date1 > date2
@@ -809,6 +1037,12 @@ struct ChatInterfaceView: View {
                     return false
                 }
                 return true
+            }
+            
+            // 启动在线状态监控（实时更新）- 使用过滤后的会话
+            let matchedUserIds = filteredSessions.compactMap { $0.user.userId }
+            if !matchedUserIds.isEmpty {
+                supabaseService.startMonitoringOnlineStatus(for: matchedUserIds)
             }
             
             // 显示会话列表（所有数据已加载完成）
@@ -915,7 +1149,30 @@ struct ChatInterfaceView: View {
         // 先更新本地UI（乐观更新）
         if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
             chatSessions[index].addMessage(message)
+            // 更新最后消息时间
+            chatSessions[index].lastMessageAt = message.timestamp
             selectedSession = chatSessions[index]
+            // 设置需要滚动到的消息ID（触发滚动）
+            scrollToBottomId = message.id
+            
+            // 重新排序列表（按最新消息时间）
+            chatSessions.sort { session1, session2 in
+                let hasMessages1 = !session1.messages.isEmpty
+                let hasMessages2 = !session2.messages.isEmpty
+                
+                if hasMessages1 && hasMessages2 {
+                    return session1.lastMessageAt > session2.lastMessageAt
+                }
+                if hasMessages1 && !hasMessages2 {
+                    return true
+                }
+                if !hasMessages1 && hasMessages2 {
+                    return false
+                }
+                let date1 = session1.user.matchDate ?? Date.distantPast
+                let date2 = session2.user.matchDate ?? Date.distantPast
+                return date1 > date2
+            }
         }
         
         // 发送到数据库
@@ -1065,8 +1322,76 @@ struct ChatInterfaceView: View {
         // 在 SwiftUI 中，可以直接调用方法，不需要捕获 self
         messageRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
             Task { @MainActor in
-                await refreshMessagesForCurrentSession()
+                // 如果当前有选中的会话，刷新该会话的消息
+                if selectedSession != nil {
+                    await refreshMessagesForCurrentSession()
+                } else {
+                    // 如果没有选中的会话（在聊天列表页面），刷新整个列表以更新未读消息数
+                    await refreshChatSessionsMessages()
+                }
             }
+        }
+    }
+    
+    // 刷新所有会话的消息（用于更新未读消息数）
+    @MainActor
+    private func refreshChatSessionsMessages() async {
+        guard let currentUser = authManager.currentUser else {
+            return
+        }
+        
+        // 只刷新有未读消息的会话，或者最近有消息的会话
+        for index in chatSessions.indices {
+            let session = chatSessions[index]
+            guard let receiverUserId = session.user.userId else { continue }
+            
+            do {
+                let supabaseMessages = try await supabaseService.getMessages(
+                    userId1: currentUser.id,
+                    userId2: receiverUserId
+                )
+                
+                let messages = supabaseMessages.map { supabaseMessage in
+                    supabaseMessage.toChatMessage(currentUserId: currentUser.id)
+                }
+                
+                // 去重
+                var uniqueMessages: [ChatMessage] = []
+                var seenMessageIds = Set<UUID>()
+                for message in messages {
+                    if !seenMessageIds.contains(message.id) {
+                        uniqueMessages.append(message)
+                        seenMessageIds.insert(message.id)
+                    }
+                }
+                
+                // 更新会话消息
+                chatSessions[index].messages = uniqueMessages
+                if let lastMessage = uniqueMessages.last {
+                    chatSessions[index].lastMessageAt = lastMessage.timestamp
+                }
+            } catch {
+                print("⚠️ Failed to refresh messages for session \(session.user.name): \(error.localizedDescription)")
+            }
+        }
+        
+        // 重新排序
+        chatSessions.sort { session1, session2 in
+            let hasMessages1 = !session1.messages.isEmpty
+            let hasMessages2 = !session2.messages.isEmpty
+            
+            if hasMessages1 && hasMessages2 {
+                return session1.lastMessageAt > session2.lastMessageAt
+            }
+            if hasMessages1 && !hasMessages2 {
+                return true
+            }
+            if !hasMessages1 && hasMessages2 {
+                return false
+            }
+            let date1 = session1.user.matchDate ?? Date.distantPast
+            let date2 = session2.user.matchDate ?? Date.distantPast
+            return date1 > date2
         }
     }
     
@@ -1083,6 +1408,10 @@ struct ChatInterfaceView: View {
             return
         }
         
+        // 保存当前消息数量，用于检测是否有新消息
+        let previousMessageCount = session.messages.count
+        let previousLastMessageId = session.messages.last?.id
+        
         do {
             let supabaseMessages = try await supabaseService.getMessages(
                 userId1: currentUser.id,
@@ -1093,19 +1422,86 @@ struct ChatInterfaceView: View {
                 supabaseMessage.toChatMessage(currentUserId: currentUser.id)
             }
             
-            // 更新会话消息
+            // 去重：基于消息 ID 去重，确保不会有重复消息
+            var uniqueMessages: [ChatMessage] = []
+            var seenMessageIds = Set<UUID>()
+            for message in messages {
+                if !seenMessageIds.contains(message.id) {
+                    uniqueMessages.append(message)
+                    seenMessageIds.insert(message.id)
+                }
+            }
+            
+            // 检查是否有新消息（来自对方）
+            let hasNewMessageFromOther = uniqueMessages.count > previousMessageCount && 
+                                         uniqueMessages.last?.isFromUser == false &&
+                                         uniqueMessages.last?.id != previousLastMessageId
+            
+            // 更新会话消息（使用去重后的消息）
             if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
-                chatSessions[index].messages = messages
+                chatSessions[index].messages = uniqueMessages
+                // 更新最后消息时间
+                if let lastMessage = uniqueMessages.last {
+                    chatSessions[index].lastMessageAt = lastMessage.timestamp
+                }
+                // 更新选中会话（用于聊天视图）
                 selectedSession = chatSessions[index]
+                
+                // 重新排序（确保列表按最新消息时间排序）
+                chatSessions.sort { session1, session2 in
+                    let hasMessages1 = !session1.messages.isEmpty
+                    let hasMessages2 = !session2.messages.isEmpty
+                    
+                    if hasMessages1 && hasMessages2 {
+                        return session1.lastMessageAt > session2.lastMessageAt
+                    }
+                    if hasMessages1 && !hasMessages2 {
+                        return true
+                    }
+                    if !hasMessages1 && hasMessages2 {
+                        return false
+                    }
+                    let date1 = session1.user.matchDate ?? Date.distantPast
+                    let date2 = session2.user.matchDate ?? Date.distantPast
+                    return date1 > date2
+                }
+                
+                // 如果有新消息且用户在底部，标记需要滚动
+                if hasNewMessageFromOther, isAtBottom, let lastMessage = uniqueMessages.last {
+                    // 通过设置 scrollToBottomId 触发滚动（会在 onChange 中处理）
+                    scrollToBottomId = lastMessage.id
+                }
             }
         } catch {
             print("⚠️ Failed to refresh messages: \(error.localizedDescription)")
         }
     }
     
+    // 检查用户是否在聊天底部
+    private func checkIfAtBottom() {
+        guard contentHeight > 0 && scrollViewHeight > 0 else {
+            return
+        }
+        
+        // 计算可滚动的高度
+        let scrollableHeight = contentHeight - scrollViewHeight
+        
+        // 如果内容不需要滚动（内容高度小于等于视图高度），认为在底部
+        if scrollableHeight <= 10 {
+            isAtBottom = true
+            return
+        }
+        
+        // 检查是否滚动到底部（使用50pt的容差）
+        let threshold = 50.0
+        isAtBottom = scrollOffset >= scrollableHeight - threshold
+    }
+    
     // 在选择会话时标记消息为已读
     private func selectSession(_ session: ChatSession) {
         selectedSession = session
+        scrollToBottomId = nil // 重置滚动状态
+        isAtBottom = true // 切换会话时，默认认为在底部
         loadAISuggestions(for: session.user)
         
         // 标记来自对方的未读消息为已读
@@ -1211,6 +1607,7 @@ struct ChatSessionRowView: View {
     let session: ChatSession
     let onTap: () -> Void
     let onUnmatch: () -> Void
+    @EnvironmentObject var supabaseService: SupabaseService
     
     var body: some View {
         Button(action: onTap) {
@@ -1226,38 +1623,36 @@ struct ChatSessionRowView: View {
                         
                         Spacer()
                         
-                        // 只在有消息时显示时间
+                        // 显示最新消息时间（如果有消息）
                         if !session.messages.isEmpty {
-                            Text(formatTime(session.lastMessageAt))
+                            Text(formatLastMessageTime(session.lastMessageAt))
                                 .font(.system(size: 12))
                                 .foregroundColor(.gray)
                         }
                     }
                     
-                    Text(session.messages.last?.content ?? "Start chatting...")
+                    // 显示未读的最新消息（如果有），否则显示最后一条消息
+                    let unreadMessages = session.messages.filter { !$0.isFromUser && !$0.isRead }
+                    let displayMessage = unreadMessages.last ?? session.messages.last
+                    Text(displayMessage?.content ?? "Start chatting...")
                         .font(.system(size: 14))
-                        .foregroundColor(.gray)
+                        .foregroundColor(unreadMessages.isEmpty ? .gray : Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .fontWeight(unreadMessages.isEmpty ? .regular : .semibold)
                         .lineLimit(1)
                     
                     HStack(spacing: 4) {
+                        // 使用实时在线状态（如果可用）
+                        let userId = session.user.userId
+                        let realtimeStatus = userId != nil ? supabaseService.userOnlineStatuses[userId!] : nil
+                        let realtimeIsOnline = realtimeStatus?.isOnline ?? session.user.isOnline
+                        
                         Circle()
-                            .fill(session.user.isOnline ? .green : .gray)
+                            .fill(realtimeIsOnline ? .green : .gray)
                             .frame(width: 8, height: 8)
                         
-                        Text(session.user.isOnline ? "Active" : "Offline")
+                        Text(realtimeIsOnline ? "Active" : "Offline")
                             .font(.system(size: 12))
-                            .foregroundColor(session.user.isOnline ? .green : .gray)
-                        
-                        // Match date
-                        if session.user.isMatched, let matchDate = session.user.matchDate {
-                            Circle()
-                                .fill(Color.red)
-                                .frame(width: 4, height: 4)
-                            
-                            Text("Matched on \(formatMatchDate(matchDate))")
-                                .font(.system(size: 12))
-                                .foregroundColor(.red)
-                        }
+                            .foregroundColor(realtimeIsOnline ? .green : .gray)
                         
                         Spacer()
                         
@@ -1292,6 +1687,24 @@ struct ChatSessionRowView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: date)
+    }
+    
+    private func formatLastMessageTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        let calendar = Calendar.current
+        
+        if calendar.isDateInToday(date) {
+            // 今天：显示时间
+            formatter.dateFormat = "HH:mm"
+            return formatter.string(from: date)
+        } else if calendar.isDateInYesterday(date) {
+            // 昨天：显示"昨天"
+            return "Yesterday"
+        } else {
+            // 更早：显示日期 MM/dd
+            formatter.dateFormat = "MM/dd"
+            return formatter.string(from: date)
+        }
     }
     
     private func formatMatchDate(_ date: Date) -> String {
@@ -1945,6 +2358,15 @@ struct ProfileCardSheetView: View {
     
     private var shouldShowTimeslot: Bool {
         profile.privacyTrust.visibilitySettings.timeslot.isVisible(isConnection: isConnection)
+    }
+}
+
+// MARK: - Preference Keys for Scroll Detection
+// Note: ScrollOffsetPreferenceKey and ContentHeightPreferenceKey are defined in ProfileSetupView.swift
+struct ScrollViewHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

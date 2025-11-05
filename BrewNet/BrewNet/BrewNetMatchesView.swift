@@ -26,6 +26,7 @@ struct BrewNetMatchesView: View {
     @State private var isCacheFromRecommendation = false // 标记缓存是否来自推荐系统
     @State private var savedFirstProfile: BrewNetProfile? = nil // 保存切换前的第一个profile
     @State private var hasAppearedBefore = false // 标记是否已经显示过
+    @State private var shouldForceRefresh = false // 标记是否强制刷新（忽略缓存）
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -141,38 +142,53 @@ struct BrewNetMatchesView: View {
                         await validateAndDisplayCache()
                     }
                 } else {
-                    // 首次加载（登录时），先显示加载状态，然后快速验证过滤后再显示
-                    isLoading = true
-                    
-                    // 如果缓存为空，直接加载新数据
-                    if cachedProfiles.isEmpty {
-                        loadProfiles()
-                    } else {
-                        // 立即进行快速验证和过滤（等待完成后再显示，避免显示错误的用户）
+                    // 首次加载（登录时），如果 SplashScreen 已经预热完成，直接显示缓存
+                    // 如果缓存来自 SplashScreen 预热（推荐系统），直接显示，无需加载状态
+                    if isCacheFromRecommendation && !cachedProfiles.isEmpty {
+                        // SplashScreen 已经预热完成，直接显示缓存
+                        profiles = cachedProfiles
+                        isLoading = false
+                        print("✅ Displaying pre-warmed profiles from SplashScreen (\(cachedProfiles.count) profiles)")
+                        
+                        // 后台进行验证和过滤（不影响显示）
                         Task {
                             await quickValidateAndFilterCache()
-                            
-                            // 快速验证完成后，检查是否还有有效数据
-                            await MainActor.run {
-                                if profiles.isEmpty && cachedProfiles.isEmpty {
-                                    // 如果过滤后没有数据，加载新数据
-                                    print("⚠️ No valid profiles after quick filter, loading new profiles...")
-                                    loadProfiles()
-                                } else {
-                                    // 有有效数据，更新显示
-                                    isLoading = false
-                                    if currentIndex < profiles.count {
-                                        let profile = profiles[currentIndex]
-                                        print("⚡ Display after quick validation: showing profile at index \(currentIndex) (\(profile.coreIdentity.name)) from last session")
-                                    } else if !profiles.isEmpty {
-                                        currentIndex = 0
+                            await validateAndDisplayCache()
+                        }
+                    } else {
+                        // 缓存为空或不是来自推荐系统，显示加载状态
+                        isLoading = true
+                        
+                        // 如果缓存为空，直接加载新数据
+                        if cachedProfiles.isEmpty {
+                            loadProfiles()
+                        } else {
+                            // 立即进行快速验证和过滤（等待完成后再显示，避免显示错误的用户）
+                            Task {
+                                await quickValidateAndFilterCache()
+                                
+                                // 快速验证完成后，检查是否还有有效数据
+                                await MainActor.run {
+                                    if profiles.isEmpty && cachedProfiles.isEmpty {
+                                        // 如果过滤后没有数据，加载新数据
+                                        print("⚠️ No valid profiles after quick filter, loading new profiles...")
+                                        loadProfiles()
+                                    } else {
+                                        // 有有效数据，更新显示
                                         isLoading = false
+                                        if currentIndex < profiles.count {
+                                            let profile = profiles[currentIndex]
+                                            print("⚡ Display after quick validation: showing profile at index \(currentIndex) (\(profile.coreIdentity.name)) from last session")
+                                        } else if !profiles.isEmpty {
+                                            currentIndex = 0
+                                            isLoading = false
+                                        }
                                     }
                                 }
+                                
+                                // 后台完整验证并更新（会进一步过滤并更新缓存）
+                                await validateAndDisplayCache()
                             }
-                            
-                            // 后台完整验证并更新（会进一步过滤并更新缓存）
-                            await validateAndDisplayCache()
                         }
                     }
                 }
@@ -223,10 +239,27 @@ struct BrewNetMatchesView: View {
                     .foregroundColor(.gray)
                     .multilineTextAlignment(.center)
             } else {
-                Text("You've seen all available profiles!\n\(profiles.count) profiles loaded.")
-                    .font(.system(size: 16))
-                    .foregroundColor(.gray)
-                    .multilineTextAlignment(.center)
+                if profiles.count == 0 {
+                    VStack(spacing: 8) {
+                        Text("No New Recommendations Available")
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray)
+                            .multilineTextAlignment(.center)
+                        Text("Possible reasons:")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                            .padding(.top, 4)
+                        Text("• All users have already been interacted with\n• No more users in the database\n• Please try again later or refresh")
+                            .font(.system(size: 12))
+                            .foregroundColor(.gray.opacity(0.8))
+                            .multilineTextAlignment(.leading)
+                    }
+                } else {
+                    Text("You've seen all available profiles!\n\(profiles.count) profiles loaded.")
+                        .font(.system(size: 16))
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                }
             }
             
             if totalFiltered > 0 {
@@ -591,9 +624,12 @@ struct BrewNetMatchesView: View {
         
         do {
             // 只使用推荐系统刷新，确保数据一致性
+            // 增加推荐数量，提高过滤后仍有足够用户的概率
+            // 静默刷新时也强制刷新，确保获取最新推荐
             let recommendations = try await recommendationService.getRecommendations(
                 for: currentUser.id,
-                limit: 20
+                limit: 50,  // 从 20 增加到 50，增加成功率
+                forceRefresh: true  // 静默刷新时也强制刷新
             )
             
             // 获取需要排除的用户ID集合
@@ -733,13 +769,16 @@ struct BrewNetMatchesView: View {
                     
                     print("⚡ Quick filtered cache: \(filteredProfiles.count)/\(originalCount) profiles remain, showing at index \(currentIndex)")
                 } else {
-                    // 如果过滤后没有数据，清空 profiles 和 cachedProfiles，等待完整验证或重新加载
+                    // 如果过滤后没有数据，清空 profiles 和 cachedProfiles，然后重新加载
                     profiles = []
                     cachedProfiles = []
                     currentIndex = 0
                     // 清除持久化缓存，确保下次加载时不会再次出现已排除的用户
                     clearInvalidCache()
-                    print("⚠️ Quick filter removed all profiles (from \(originalCount)), cleared cache")
+                    print("⚠️ Quick filter removed all profiles (from \(originalCount)), reloading...")
+                    
+                    // 立即重新加载，避免显示"No More Profiles"
+                    loadProfiles()
                 }
             }
         } catch {
@@ -985,18 +1024,51 @@ struct BrewNetMatchesView: View {
             if offset == 0 && isInitial {
                 // 使用 Two-Tower 推荐引擎
                 print("🚀 Using Two-Tower recommendation engine")
+                // 增加推荐数量，提高过滤后仍有足够用户的概率
+                // 如果 shouldForceRefresh 为 true，强制刷新忽略缓存
+                let forceRefresh = await MainActor.run { shouldForceRefresh }
                 let recommendations = try await recommendationService.getRecommendations(
                     for: currentUser.id,
-                    limit: 20
+                    limit: 50,  // 从 20 增加到 50，增加成功率
+                    forceRefresh: forceRefresh
                 )
+                
+                // 重置强制刷新标志
+                await MainActor.run {
+                    shouldForceRefresh = false
+                }
                 
                 // 确保按照推荐分数排序（从高到低）
                 let sortedRecommendations = recommendations.sorted { $0.score > $1.score }
                 
                 let brewNetProfiles = sortedRecommendations.map { $0.profile }
                 
+                // 注意：推荐系统在计算时已经过滤了排除用户，这里只做防御性验证
                 // 获取需要排除的用户ID集合（在显示前进行最终验证）
                 let excludedUserIds = try await supabaseService.getExcludedUserIds(userId: currentUser.id)
+                print("🔍 Final validation: excluding \(excludedUserIds.count) users (recommendation system already filtered)")
+                print("📊 Recommendations received: \(brewNetProfiles.count) profiles")
+                
+                // 诊断：分析为什么用户被排除
+                var excludedByReason: [String: Int] = [:]
+                var invalidNames: [String] = []
+                
+                for profile in brewNetProfiles {
+                    if excludedUserIds.contains(profile.userId) {
+                        excludedByReason["excludedUserIds", default: 0] += 1
+                    }
+                    if !isValidProfileName(profile.coreIdentity.name) {
+                        invalidNames.append(profile.coreIdentity.name)
+                        excludedByReason["invalidName", default: 0] += 1
+                    }
+                }
+                
+                print("🔍 Exclusion analysis:")
+                print("   - Excluded by excludedUserIds: \(excludedByReason["excludedUserIds", default: 0])")
+                print("   - Excluded by invalid name: \(excludedByReason["invalidName", default: 0])")
+                if !invalidNames.isEmpty {
+                    print("   - Invalid names: \(invalidNames.prefix(5).joined(separator: ", "))")
+                }
                 
                 // 最终过滤：确保不包含任何已交互的用户和无效测试用户
                 let finalValidProfiles = brewNetProfiles.filter { profile in
@@ -1004,31 +1076,52 @@ struct BrewNetMatchesView: View {
                     isValidProfileName(profile.coreIdentity.name)
                 }
                 
+                print("📊 Filtered results: \(finalValidProfiles.count) valid profiles from \(brewNetProfiles.count) recommendations (excluded: \(brewNetProfiles.count - finalValidProfiles.count))")
+                
                 await MainActor.run {
-                    // 确保按照推荐分数排序显示（只显示最终验证后的结果）
-                    profiles = finalValidProfiles
-                    cachedProfiles = finalValidProfiles
-                    lastLoadTime = Date()
-                    isLoading = false
-                    saveCachedProfilesToStorage(isFromRecommendation: true) // 标记为来自推荐系统
-                    hasMoreProfiles = false // Two-Tower 返回固定数量
-                    
-                    // 尝试保持当前索引（如果有效），否则使用保存的索引
-                    let savedIndex = restoreCurrentIndex()
-                    if savedIndex < finalValidProfiles.count {
-                        currentIndex = savedIndex
-                        print("📌 Restored index from previous session: \(savedIndex)")
+                    if finalValidProfiles.isEmpty {
+                        // 如果过滤后没有有效用户，显示详细诊断信息
+                        print("⚠️ No valid profiles after filtering all recommendations")
+                        print("   - Total recommendations received: \(brewNetProfiles.count)")
+                        print("   - Total excluded users: \(excludedUserIds.count)")
+                        print("   - Excluded by excludedUserIds: \(excludedByReason["excludedUserIds", default: 0])")
+                        print("   - Excluded by invalid name: \(excludedByReason["invalidName", default: 0])")
+                        print("   - This may indicate:")
+                        print("     1. All recommended users have been interacted with")
+                        print("     2. All recommended users have invalid names")
+                        print("     3. Database may need more users")
+                        
+                        profiles = []
+                        cachedProfiles = []
+                        isLoading = false
+                        hasMoreProfiles = false
+                        // 不保存空缓存
                     } else {
-                        currentIndex = 0
-                    }
-                    
-                    // 保存当前状态
-                    saveCachedProfilesToStorage(isFromRecommendation: true)
-                    
-                    print("✅ Two-Tower recommendations loaded: \(finalValidProfiles.count) profiles (filtered from \(brewNetProfiles.count))")
-                    print("📊 Top 5 Scores: \(sortedRecommendations.prefix(5).map { String(format: "%.3f", $0.score) }.joined(separator: ", "))")
-                    if let firstProfile = finalValidProfiles.first {
-                        print("📊 First profile: \(firstProfile.coreIdentity.name) (score: \(sortedRecommendations.first?.score ?? 0.0))")
+                        // 确保按照推荐分数排序显示（只显示最终验证后的结果）
+                        profiles = finalValidProfiles
+                        cachedProfiles = finalValidProfiles
+                        lastLoadTime = Date()
+                        isLoading = false
+                        saveCachedProfilesToStorage(isFromRecommendation: true) // 标记为来自推荐系统
+                        hasMoreProfiles = false // Two-Tower 返回固定数量
+                        
+                        // 尝试保持当前索引（如果有效），否则使用保存的索引
+                        let savedIndex = restoreCurrentIndex()
+                        if savedIndex < finalValidProfiles.count {
+                            currentIndex = savedIndex
+                            print("📌 Restored index from previous session: \(savedIndex)")
+                        } else {
+                            currentIndex = 0
+                        }
+                        
+                        // 保存当前状态
+                        saveCachedProfilesToStorage(isFromRecommendation: true)
+                        
+                        print("✅ Two-Tower recommendations loaded: \(finalValidProfiles.count) profiles (filtered from \(brewNetProfiles.count))")
+                        print("📊 Top 5 Scores: \(sortedRecommendations.prefix(5).map { String(format: "%.3f", $0.score) }.joined(separator: ", "))")
+                        if let firstProfile = finalValidProfiles.first {
+                            print("📊 First profile: \(firstProfile.coreIdentity.name) (score: \(sortedRecommendations.first?.score ?? 0.0))")
+                        }
                     }
                 }
                 return
@@ -1104,6 +1197,28 @@ struct BrewNetMatchesView: View {
             
         } catch {
             print("❌ Failed to load profiles: \(error.localizedDescription)")
+            
+            // 检查是否是 noCandidates 错误（通过错误描述判断）
+            let errorString = error.localizedDescription.lowercased()
+            if errorString.contains("no candidates") || 
+               errorString.contains("没有候选用户") ||
+               errorString.contains("no valid profiles") {
+                print("⚠️ No candidates available - all users have been interacted with or database is empty")
+                await MainActor.run {
+                    if isInitial {
+                        profiles = []
+                        cachedProfiles = []
+                        isLoading = false
+                        hasMoreProfiles = false
+                        errorMessage = nil  // 不显示错误，显示"No More Profiles"
+                    } else {
+                        isLoadingMore = false
+                        hasMoreProfiles = false
+                    }
+                }
+                return
+            }
+            
             await MainActor.run {
                 if isInitial {
                     errorMessage = "Failed to load profiles: \(error.localizedDescription)"
@@ -1116,11 +1231,46 @@ struct BrewNetMatchesView: View {
     }
     
     private func refreshProfiles() {
+        print("🔄 Refreshing profiles - clearing all caches...")
+        
+        // 清除所有缓存，强制重新生成推荐
+        guard let currentUser = authManager.currentUser else { return }
+        
+        // 1. 清除客户端持久化缓存
+        clearInvalidCache()
+        
+        // 2. 重置状态
         currentIndex = 0
         hasMoreProfiles = true
         likedProfiles.removeAll()
         passedProfiles.removeAll()
-        loadProfiles()
+        profiles.removeAll()
+        cachedProfiles.removeAll()
+        isCacheFromRecommendation = false
+        lastLoadTime = nil
+        isLoading = true
+        
+        // 3. 设置强制刷新标志并清除服务器端推荐缓存
+        shouldForceRefresh = true
+        
+        Task {
+            do {
+                // 先清除服务器端缓存
+                try await supabaseService.clearRecommendationCache(userId: currentUser.id)
+                print("✅ Cleared server-side recommendation cache")
+                
+                // 清除完成后，重新加载（会使用 forceRefresh）
+                await MainActor.run {
+                    loadProfiles()
+                }
+            } catch {
+                print("⚠️ Failed to clear server-side cache: \(error.localizedDescription)")
+                // 即使清除失败，也尝试重新加载（使用 forceRefresh）
+                await MainActor.run {
+                    loadProfiles()
+                }
+            }
+        }
     }
     
     // MARK: - Sample Data

@@ -33,9 +33,12 @@ struct ProfileView: View {
             } else if let profile = userProfile {
                 // Show profile display
                 // 使用 userProfile 作为 binding 的 source of truth，确保更新时自动刷新
-                ProfileDisplayView(profile: profile) {
+                ProfileDisplayView(profile: profile, onEditProfile: {
                     showingEditProfile = true
-                }
+                }, onProfileUpdated: { updatedProfile in
+                    // 当 profile 更新时，同步更新父视图的 userProfile
+                    userProfile = updatedProfile
+                })
                 .environmentObject(supabaseService)
                 .environmentObject(authManager)
                 // 使用 profile 的 id 和 updatedAt 作为视图 ID，当 profile 更新时会强制刷新

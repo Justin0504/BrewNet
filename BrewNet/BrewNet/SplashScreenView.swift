@@ -104,23 +104,48 @@ struct SplashScreenView: View {
                 print("✅ Preloaded current user's profile image: \(profileImage)")
             }
             
-            // 3. Preload recommended profiles (for Matches tab cache) - Potential matches
+            // 3. Preload recommended profiles using Two-Tower recommendation system
             await updateProgress(0.5, message: "Finding great matches, making catches...")
             var recommendedProfiles: [SupabaseProfile] = []
+            var brewNetProfiles: [BrewNetProfile] = []
             do {
-                let (profiles, _, _) = try await supabaseService.getRecommendedProfiles(
-                    userId: currentUser.id,
-                    limit: 20,
-                    offset: 0
+                // 使用推荐系统（Two-Tower）进行预热，确保使用与推荐页面相同的逻辑
+                let recommendationService = RecommendationService.shared
+                let recommendations = try await recommendationService.getRecommendations(
+                    for: currentUser.id,
+                    limit: 50,  // 使用与推荐页面相同的数量
+                    forceRefresh: false  // 使用缓存如果可用
                 )
-                recommendedProfiles = profiles
                 
-                // 保存到 UserDefaults 缓存，供 BrewNetMatchesView 使用
-                let brewNetProfiles = profiles.map { $0.toBrewNetProfile() }
-                await saveProfilesToCache(profiles: brewNetProfiles, userId: currentUser.id)
-                print("✅ Saved \(brewNetProfiles.count) profiles to cache for Matches tab")
+                // 转换为 BrewNetProfile
+                brewNetProfiles = recommendations.map { $0.profile }
+                
+                // 转换为 SupabaseProfile 用于图片预加载
+                // 注意：这里我们需要从 profiles 获取，但推荐系统返回的是 BrewNetProfile
+                // 我们需要获取原始 SupabaseProfile 用于图片预加载
+                let profileUserIds = brewNetProfiles.map { $0.userId }
+                let profilesDict = try await supabaseService.getProfilesBatch(userIds: profileUserIds)
+                recommendedProfiles = Array(profilesDict.values)
+                
+                // 保存到 UserDefaults 缓存，并标记为来自推荐系统
+                await saveProfilesToCache(profiles: brewNetProfiles, userId: currentUser.id, isFromRecommendation: true)
+                print("✅ Preloaded and saved \(brewNetProfiles.count) profiles from recommendation system to cache")
             } catch {
-                print("⚠️ Failed to preload profiles: \(error.localizedDescription)")
+                print("⚠️ Failed to preload profiles with recommendation system: \(error.localizedDescription)")
+                // 如果推荐系统失败，回退到传统方法
+                do {
+                    let (profiles, _, _) = try await supabaseService.getRecommendedProfiles(
+                        userId: currentUser.id,
+                        limit: 20,
+                        offset: 0
+                    )
+                    recommendedProfiles = profiles
+                    brewNetProfiles = profiles.map { $0.toBrewNetProfile() }
+                    await saveProfilesToCache(profiles: brewNetProfiles, userId: currentUser.id, isFromRecommendation: false)
+                    print("✅ Fallback: Saved \(brewNetProfiles.count) profiles to cache using traditional method")
+                } catch {
+                    print("⚠️ Failed to preload profiles with fallback method: \(error.localizedDescription)")
+                }
             }
             
             // 4. Preload active matches (for Chat tab cache) - Existing matches
@@ -290,16 +315,18 @@ struct SplashScreenView: View {
     // MARK: - Cache Helpers
     
     /// Save profiles to UserDefaults cache (same format as BrewNetMatchesView)
-    private func saveProfilesToCache(profiles: [BrewNetProfile], userId: String) async {
+    private func saveProfilesToCache(profiles: [BrewNetProfile], userId: String, isFromRecommendation: Bool = false) async {
         let cacheKey = "matches_cache_\(userId)"
         let timeKey = "matches_cache_time_\(userId)"
+        let sourceKey = "matches_cache_source_\(userId)"  // 标记缓存来源
         
         do {
             let encoder = JSONEncoder()
             let data = try encoder.encode(profiles)
             UserDefaults.standard.set(data, forKey: cacheKey)
             UserDefaults.standard.set(Date(), forKey: timeKey)
-            print("✅ Saved \(profiles.count) profiles to cache")
+            UserDefaults.standard.set(isFromRecommendation, forKey: sourceKey)  // 保存缓存来源标记
+            print("✅ Saved \(profiles.count) profiles to cache (from recommendation system: \(isFromRecommendation))")
         } catch {
             print("⚠️ Failed to save profiles to cache: \(error)")
         }
