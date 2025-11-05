@@ -21,6 +21,8 @@ struct CategoryRecommendationsView: View {
     @State private var isLoadingMore = false
     @State private var hasMoreProfiles = true
     @State private var isConnection: Bool = false
+    @State private var showingTemporaryChat = false
+    @State private var selectedProfileForChat: BrewNetProfile?
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -107,6 +109,7 @@ struct CategoryRecommendationsView: View {
                     Spacer()
                     actionButtonsView
                         .padding(.bottom, 40) // Distance from bottom
+                        .zIndex(100) // 确保按钮在最上层
                 }
             }
         }
@@ -124,6 +127,22 @@ struct CategoryRecommendationsView: View {
         }
         .onAppear {
             loadRecommendations()
+        }
+        .sheet(isPresented: $showingTemporaryChat) {
+            if let profile = selectedProfileForChat {
+                TemporaryChatFromProfileView(
+                    profile: profile,
+                    onDismiss: {
+                        showingTemporaryChat = false
+                        selectedProfileForChat = nil
+                    },
+                    onSend: { message in
+                        handleTemporaryChatSend(message: message, profile: profile)
+                    }
+                )
+                .environmentObject(authManager)
+                .environmentObject(supabaseService)
+            }
         }
     }
     
@@ -211,7 +230,7 @@ struct CategoryRecommendationsView: View {
     }
     
     private var actionButtonsView: some View {
-        HStack(spacing: 40) {
+        HStack(spacing: 30) {
             // Pass button
             Button(action: {
                 swipeLeft()
@@ -225,6 +244,23 @@ struct CategoryRecommendationsView: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 24, weight: .bold))
                         .foregroundColor(.red)
+                }
+            }
+            .disabled(currentIndex >= profiles.count)
+            
+            // Temporary Chat button (新增)
+            Button(action: {
+                openTemporaryChat()
+            }) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 60, height: 60)
+                        .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 3)
+                    
+                    Image(systemName: "message.fill")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                 }
             }
             .disabled(currentIndex >= profiles.count)
@@ -245,6 +281,72 @@ struct CategoryRecommendationsView: View {
                 }
             }
             .disabled(currentIndex >= profiles.count)
+        }
+    }
+    
+    private func openTemporaryChat() {
+        guard currentIndex < profiles.count else { return }
+        let profile = profiles[currentIndex]
+        selectedProfileForChat = profile
+        showingTemporaryChat = true
+    }
+    
+    private func handleTemporaryChatSend(message: String, profile: BrewNetProfile) {
+        guard let currentUser = authManager.currentUser else {
+            print("❌ No current user found")
+            return
+        }
+        
+        // 关闭聊天界面
+        showingTemporaryChat = false
+        selectedProfileForChat = nil
+        
+        // 发送临时消息并创建 connection request
+        Task {
+            do {
+                // 1. 发送临时消息
+                let _ = try await supabaseService.sendMessage(
+                    senderId: currentUser.id,
+                    receiverId: profile.userId,
+                    content: message,
+                    messageType: "temporary"
+                )
+                print("✅ Temporary message sent successfully")
+                
+                // 2. 创建 connection request (invitation)
+                var senderProfile: InvitationProfile? = nil
+                if let currentUserProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                    let brewNetProfile = currentUserProfile.toBrewNetProfile()
+                    senderProfile = brewNetProfile.toInvitationProfile()
+                }
+                
+                let invitation = try await supabaseService.sendInvitation(
+                    senderId: currentUser.id,
+                    receiverId: profile.userId,
+                    reasonForInterest: nil,
+                    senderProfile: senderProfile
+                )
+                
+                print("✅ Connection request created: \(invitation.id)")
+                
+                // 3. 记录 Like 交互（因为发送临时消息相当于表达兴趣）
+                await recommendationService.recordLike(
+                    userId: currentUser.id,
+                    targetUserId: profile.userId
+                )
+                
+                // 4. 跳到下一个 profile
+                await MainActor.run {
+                    moveToNextProfile()
+                }
+                
+            } catch {
+                print("❌ Failed to send temporary chat: \(error.localizedDescription)")
+                // 即使失败也跳到下一个 profile
+                await MainActor.run {
+                    moveToNextProfile()
+                }
+            }
         }
     }
     
@@ -288,8 +390,8 @@ struct CategoryRecommendationsView: View {
             return
         }
         
-        let profile = profiles[currentIndex]
-        passedProfiles.append(profile)
+            let profile = profiles[currentIndex]
+            passedProfiles.append(profile)
         
         // 立即从列表中移除已拒绝的 profile，避免连续闪过
         profiles.remove(at: currentIndex)
@@ -576,6 +678,220 @@ struct CategoryRecommendationsView: View {
         }
         
         return true
+    }
+}
+
+// MARK: - Temporary Chat From Profile View
+struct TemporaryChatFromProfileView: View {
+    let profile: BrewNetProfile
+    let onDismiss: () -> Void
+    let onSend: (String) -> Void
+    
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    @State private var messageText = ""
+    @FocusState private var isTextFieldFocused: Bool
+    
+    private var themeBrown: Color { BrewTheme.primaryBrown }
+    private var themeBrownLight: Color { BrewTheme.secondaryBrown }
+    private let maxMessageLength = 200
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                // Top instruction area
+                VStack(spacing: 16) {
+                    // Profile info
+                    VStack(spacing: 8) {
+                        Group {
+                            if let profileImageURL = profile.coreIdentity.profileImage, !profileImageURL.isEmpty {
+                                AsyncImage(url: URL(string: profileImageURL)) { phase in
+                                    switch phase {
+                                    case .empty:
+                                        ProgressView()
+                                            .frame(width: 60, height: 60)
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .frame(width: 60, height: 60)
+                                            .clipShape(Circle())
+                                            .overlay(
+                                                Circle()
+                                                    .stroke(Color.white, lineWidth: 2)
+                                            )
+                                    case .failure(_):
+                                        Image(systemName: "person.circle.fill")
+                                            .font(.system(size: 60))
+                                            .foregroundColor(themeBrownLight)
+                                    @unknown default:
+                                        Image(systemName: "person.circle.fill")
+                                            .font(.system(size: 60))
+                                            .foregroundColor(themeBrownLight)
+                                    }
+                                }
+                            } else {
+                                Image(systemName: "person.circle.fill")
+                                    .font(.system(size: 60))
+                                    .foregroundColor(themeBrownLight)
+                            }
+                        }
+                        
+                        Text("Send a message to \(profile.coreIdentity.name)")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(themeBrown)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 20)
+                        
+                        Text("This will send a connection request and start a temporary chat")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.top, 20)
+                    
+                    // Info box
+                    HStack(spacing: 12) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(BrewTheme.accentColor)
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Message Info")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(themeBrown)
+                            Text("You can send each other messages up to \(maxMessageLength) characters")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    .padding(16)
+                    .background(themeBrownLight.opacity(0.1))
+                    .cornerRadius(12)
+                    .padding(.horizontal, 20)
+                }
+                .padding(.vertical, 24)
+                
+                Divider()
+                
+                // Message input area
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Write your message")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(themeBrown)
+                        .padding(.horizontal, 20)
+                    
+                    ZStack(alignment: .topLeading) {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.white)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(isTextFieldFocused ? themeBrown : Color.gray.opacity(0.3), lineWidth: 2)
+                            )
+                            .frame(height: 150)
+                        
+                        TextEditor(text: $messageText)
+                            .font(.system(size: 16))
+                            .padding(8)
+                            .frame(height: 140)
+                            .scrollContentBackground(.hidden)
+                            .focused($isTextFieldFocused)
+                            .onChange(of: messageText) { newValue in
+                                if newValue.count > maxMessageLength {
+                                    messageText = String(newValue.prefix(maxMessageLength))
+                                }
+                            }
+                        
+                        // Character counter overlay
+                        VStack {
+                            Spacer()
+                            HStack {
+                                Spacer()
+                                Text("\(messageText.count)/\(maxMessageLength)")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(messageText.count > maxMessageLength * 90 / 100 ? .orange : .gray)
+                                    .padding(.trailing, 8)
+                                    .padding(.bottom, 8)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    
+                    // Tips
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "lightbulb.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(BrewTheme.accentColor)
+                            Text("Tips:")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(themeBrown)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            TipRow(text: "Introduce yourself and your professional background")
+                            TipRow(text: "Explain why you share common interests")
+                            TipRow(text: "Express your interest in collaboration or networking")
+                        }
+                        .padding(.leading, 22)
+                    }
+                    .padding(.horizontal, 20)
+                }
+                .padding(.vertical, 24)
+                
+                Spacer()
+                
+                // Send button
+                VStack(spacing: 0) {
+                    Divider()
+                    
+                    Button(action: {
+                        if !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            onSend(messageText.trimmingCharacters(in: .whitespacesAndNewlines))
+                            onDismiss()
+                        }
+                    }) {
+                        HStack {
+                            Spacer()
+                            Text("Send Message")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.white)
+                            Spacer()
+                        }
+                        .frame(height: 56)
+                        .background(
+                            Group {
+                                if messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    Color.gray.opacity(0.5)
+                                } else {
+                                    BrewTheme.gradientPrimary()
+                                }
+                            }
+                        )
+                        .cornerRadius(12)
+                    }
+                    .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+                }
+                .background(Color.white)
+            }
+            .background(BrewTheme.background)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .foregroundColor(themeBrown)
+                            .font(.system(size: 18, weight: .semibold))
+                    }
+                }
+            }
+        }
+        .onAppear {
+            isTextFieldFocused = true
+        }
     }
 }
 

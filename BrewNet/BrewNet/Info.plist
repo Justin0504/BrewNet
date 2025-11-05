@@ -30,5 +30,9 @@
 	<dict/>
 	<key>GEMINI_API_KEY</key>
 	<string>YOUR_GEMINI_API_KEY_HERE</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>BrewNet needs your location to help you find nearby professionals and suggest coffee chat locations.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>BrewNet needs your location to help you find nearby professionals and suggest coffee chat locations.</string>
 </dict>
 </plist>

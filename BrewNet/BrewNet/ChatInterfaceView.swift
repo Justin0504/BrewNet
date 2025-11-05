@@ -1890,6 +1890,17 @@ struct AISuggestionsView: View {
                             .font(.system(size: 12))
                             .foregroundColor(suggestion.category.color)
                         
+                        // 如果有风格标签，显示风格
+                        if let style = suggestion.style {
+                            Text("•")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                            
+                            Text(style.displayName)
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                        }
+                        
                         Spacer()
                         
                         Image(systemName: "arrow.right.circle.fill")
@@ -1913,6 +1924,11 @@ struct AISuggestionsView: View {
 struct ProfileCardSheetView: View {
     let profile: BrewNetProfile
     @Environment(\.presentationMode) var presentationMode
+    
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    @State private var currentUserLocation: String?
     
     // Since this is shown in chat, the users are connected/matched
     private let isConnection = true
@@ -1948,6 +1964,18 @@ struct ProfileCardSheetView: View {
                         
                         // Level 3: Deep Understanding
                         level3DeepUnderstandingView
+                        
+                        // Available Timeslot Grid (moved to bottom)
+                        if shouldShowTimeslot {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Divider()
+                                AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 16)
+                                    .padding(.bottom, 30)
+                                    .background(Color.white)
+                            }
+                        }
                     }
                 }
             }
@@ -1960,6 +1988,42 @@ struct ProfileCardSheetView: View {
                     }
                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 }
+            }
+        }
+        .onAppear {
+            loadCurrentUserLocation()
+        }
+    }
+    
+    // MARK: - Load Current User Location
+    private func loadCurrentUserLocation() {
+        guard let currentUser = authManager.currentUser else {
+            print("⚠️ [ChatProfileCard] 没有当前用户，无法加载位置")
+            return
+        }
+        
+        print("📍 [ChatProfileCard] 开始加载当前用户位置...")
+        print("   - 当前用户 ID: \(currentUser.id)")
+        
+        Task {
+            do {
+                if let currentProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                    let rawLocation = currentProfile.coreIdentity.location
+                    print("   - [原始数据] coreIdentity.location: \(rawLocation ?? "nil")")
+                    
+                    let brewNetProfile = currentProfile.toBrewNetProfile()
+                    await MainActor.run {
+                        currentUserLocation = brewNetProfile.coreIdentity.location
+                        print("✅ [ChatProfileCard] 已加载当前用户位置: \(brewNetProfile.coreIdentity.location ?? "nil")")
+                        if brewNetProfile.coreIdentity.location == nil || brewNetProfile.coreIdentity.location?.isEmpty == true {
+                            print("⚠️ [ChatProfileCard] 当前用户没有设置位置信息")
+                        }
+                    }
+                } else {
+                    print("⚠️ [ChatProfileCard] 无法获取当前用户 profile")
+                }
+            } catch {
+                print("⚠️ [ChatProfileCard] 加载当前用户位置失败: \(error.localizedDescription)")
             }
         }
     }
@@ -2056,11 +2120,6 @@ struct ProfileCardSheetView: View {
                     .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                 
                 Spacer()
-            }
-            
-            // Available Timeslot Grid (same UI as Profile page)
-            if shouldShowTimeslot {
-                AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
             }
         }
         .padding(20)
@@ -2330,13 +2389,24 @@ struct ProfileCardSheetView: View {
             
             // Location
             if shouldShowLocation, let location = profile.coreIdentity.location, !location.isEmpty {
-                HStack {
-                    Image(systemName: "location.fill")
-                        .foregroundColor(.gray)
-                        .font(.system(size: 16))
-                    Text(location)
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Image(systemName: "location.fill")
+                            .foregroundColor(.gray)
+                            .font(.system(size: 16))
+                        Text(location)
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray)
+                        Spacer()
+                    }
+                    
+                    // Distance display (组件内部会等待 currentUserLocation 加载)
+                    // 使用 id 修饰符确保在 currentUserLocation 变化时重新创建视图
+                    DistanceDisplayView(
+                        otherUserLocation: location,
+                        currentUserLocation: currentUserLocation
+                    )
+                    .id("distance-\(location)-\(currentUserLocation ?? "nil")")
                 }
             }
         }

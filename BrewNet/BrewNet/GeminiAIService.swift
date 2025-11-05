@@ -239,21 +239,26 @@ class GeminiAIService: ObservableObject {
     }
     
     private func createConversationAnalysisPrompt(for user: ChatUser, messages: [ChatMessage], userInterests: [String]) -> String {
-        // 构建聊天历史记录
+        // 构建完整的聊天历史记录
         let conversationHistory = messages.map { message in
             let sender = message.isFromUser ? "Me" : user.name
             return "\(sender): \(message.content)"
         }.joined(separator: "\n")
         
-        // 获取最近的几条消息作为上下文（最多10条）
-        let recentMessages = messages.suffix(10)
+        // 获取最近的对话作为上下文（最多20条，确保有足够上下文）
+        let recentMessages = messages.suffix(20)
         let recentConversation = recentMessages.map { message in
             let sender = message.isFromUser ? "Me" : user.name
             return "\(sender): \(message.content)"
         }.joined(separator: "\n")
         
+        // 分析对方最后的消息，确定上下文
+        let otherUserMessages = messages.filter { !$0.isFromUser }
+        let lastOtherMessage = otherUserMessages.last?.content ?? ""
+        let conversationContext = otherUserMessages.suffix(3).map { $0.content }.joined(separator: " | ")
+        
         return """
-        Analyze the following conversation and generate 5 smart, contextually relevant suggestions to continue the conversation naturally.
+        You are an expert conversation assistant. Analyze the conversation history below and generate exactly 10 diverse reply suggestions that are DIRECTLY relevant to the other person's questions and responses.
         
         User Information:
         - Name: \(user.name)
@@ -262,19 +267,50 @@ class GeminiAIService: ObservableObject {
         
         My Interests: \(userInterests.joined(separator: ", "))
         
-        Recent Conversation History:
-        \(recentConversation.isEmpty ? "No previous messages" : recentConversation)
+        Full Conversation History:
+        \(conversationHistory.isEmpty ? "No previous messages" : conversationHistory)
         
-        Requirements:
-        1. Analyze the conversation context and topics discussed
-        2. Generate suggestions that are relevant to what has been said
-        3. Can be follow-up questions, shared interests, or new related topics
-        4. Avoid repeating what has already been discussed unless it's a natural continuation
-        5. Suggestions should feel natural and show genuine interest
-        6. Each suggestion should be expressed in English, 15-50 words long
-        7. Mix different types: questions, shared interests, compliments, or follow-ups
+        Recent Context (Last 3 messages from \(user.name)):
+        \(conversationContext.isEmpty ? "No recent context" : conversationContext)
         
-        Please return 5 suggestions directly, one per line, without numbering or other formatting.
+        Last Message from \(user.name): \(lastOtherMessage)
+        
+        CRITICAL REQUIREMENTS:
+        1. **Strictly target the other person's questions and responses** - Each reply must directly address what they said or asked
+        2. **Generate exactly 10 replies** in different styles:
+           - 2 humorous (witty, light-hearted, with appropriate humor)
+           - 2 serious (professional, thoughtful, in-depth)
+           - 2 caring (empathetic, supportive, considerate)
+           - 1 professional (business-like, formal when appropriate)
+           - 1 friendly (warm, approachable, casual)
+           - 1 curious (asking follow-up questions, showing genuine interest)
+           - 1 supportive (encouraging, validating their perspective)
+        
+        3. **Each reply must:**
+           - Directly respond to or build upon what the other person said
+           - Be contextually relevant to the conversation flow
+           - Show you've read and understood their messages
+           - Be appropriate for the conversation stage (early/middle/deep)
+           - Be natural and conversational (15-60 words)
+        
+        4. **Reply types can include:**
+           - Direct answers to their questions
+           - Follow-up questions about what they mentioned
+           - Shared experiences or opinions related to their topic
+           - Supportive responses to their concerns or achievements
+           - Transitioning to related topics they might find interesting
+        
+        5. **Output format:**
+           Return exactly 10 lines, each line in the format: [STYLE]: [REPLY TEXT]
+           Example format:
+           humorous: That sounds fascinating! I'd love to hear more about your experience with that.
+           serious: Based on what you've shared, I think it's important to consider...
+           caring: I can understand how that must have felt. How are you handling it now?
+        
+        Styles to use: humorous, serious, caring, professional, friendly, curious, supportive, playful, thoughtful, warm
+        Distribute the 10 replies across these styles as specified above.
+        
+        IMPORTANT: Every reply must be directly connected to what the other person said in the conversation. Do not generate generic replies.
         """
     }
     
@@ -323,12 +359,18 @@ class GeminiAIService: ObservableObject {
                 "What do you usually like to do on weekends to relax?"
             ]
         case .followUp:
+            // 返回10条不同风格的回复（模拟）
             suggestions = [
-                "That sounds interesting! Could you elaborate?",
-                "How did you become interested in this field?",
-                "What did you learn from this process?",
-                "What do you think is most important?",
-                "Any advice you'd like to share?"
+                "humorous: That's hilarious! I can totally picture that happening 😄",
+                "serious: Based on what you've shared, I think we should consider the long-term implications.",
+                "caring: I can understand how challenging that must have been. How are you doing now?",
+                "professional: From a strategic perspective, this approach makes a lot of sense.",
+                "friendly: That sounds really cool! I'd love to hear more about your experience.",
+                "curious: That's fascinating! What made you decide to pursue that direction?",
+                "supportive: You're doing great! Keep pushing forward with your goals.",
+                "playful: Sounds like quite the adventure! What's the wildest part of it?",
+                "thoughtful: This makes me think about how we approach similar challenges in my field.",
+                "warm: I really appreciate you sharing that with me. It means a lot."
             ]
         case .compliment:
             suggestions = [
@@ -356,8 +398,13 @@ class GeminiAIService: ObservableObject {
             ]
         }
         
-        return suggestions.map { content in
-            AISuggestion(content: content, category: category)
+        // 对于 followUp 类别，需要解析带风格的回复
+        if category == .followUp {
+            return parseAIResponse(response: suggestions.joined(separator: "\n"), category: category)
+        } else {
+            return suggestions.map { content in
+                AISuggestion(content: content, category: category)
+            }
         }
     }
     
@@ -526,33 +573,64 @@ class GeminiAIService: ObservableObject {
         
         print("🔍 解析到 \(lines.count) 条建议")
         
-        // 过滤掉编号、列表符号等
-        let cleanedLines = lines.map { line in
-            // 移除常见的编号格式（如 "1. ", "2. ", "- ", "* ", "• " 等）
-            var cleaned = line
+        // 解析带风格的回复（格式: [STYLE]: [REPLY TEXT]）
+        var suggestions: [AISuggestion] = []
+        
+        for line in lines {
+            // 尝试解析格式: [STYLE]: [CONTENT]
+            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+            
+            // 匹配格式: style: content 或 [style]: content
+            if let colonRange = trimmedLine.range(of: ":") {
+                let stylePart = String(trimmedLine[..<colonRange.lowerBound]).trimmingCharacters(in: .whitespaces).lowercased()
+                var contentPart = String(trimmedLine[colonRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+                
+                // 移除可能的方括号
+                let style = stylePart.replacingOccurrences(of: "[", with: "").replacingOccurrences(of: "]", with: "")
+                
+                // 移除内容中的编号、列表符号等
+                if let match = contentPart.range(of: #"^[\d+\-\*\•]+\s*"#, options: .regularExpression) {
+                    contentPart.removeSubrange(match)
+                    contentPart = contentPart.trimmingCharacters(in: .whitespaces)
+                }
+                
+                // 尝试匹配风格
+                if let suggestionStyle = SuggestionStyle(rawValue: style), !contentPart.isEmpty {
+                    suggestions.append(AISuggestion(
+                        content: contentPart,
+                        category: category,
+                        style: suggestionStyle
+                    ))
+                    continue
+                }
+            }
+            
+            // 如果没有风格标签，尝试移除编号和列表符号后作为普通建议
+            var cleaned = trimmedLine
             if let match = cleaned.range(of: #"^[\d+\-\*\•]+\s*"#, options: .regularExpression) {
                 cleaned.removeSubrange(match)
                 cleaned = cleaned.trimmingCharacters(in: .whitespaces)
             }
-            return cleaned
-        }
-        .filter { !$0.isEmpty }
-        
-        // 转换为 AISuggestion 数组
-        let suggestions = cleanedLines.prefix(5) // 最多取5条
-            .map { content in
-                AISuggestion(content: content, category: category)
+            
+            // 如果清理后的内容不为空，添加为无风格的建议
+            if !cleaned.isEmpty {
+                suggestions.append(AISuggestion(content: cleaned, category: category))
             }
+        }
         
-        print("✅ 成功解析 \(suggestions.count) 条建议")
+        // 对于对话分析，应该返回最多10条建议
+        let maxSuggestions = category == .followUp ? 10 : 5
+        let finalSuggestions = Array(suggestions.prefix(maxSuggestions))
+        
+        print("✅ 成功解析 \(finalSuggestions.count) 条建议（带风格: \(finalSuggestions.filter { $0.style != nil }.count)）")
         
         // 如果没有有效建议，回退到模拟模式
-        if suggestions.isEmpty {
+        if finalSuggestions.isEmpty {
             print("⚠️ AI 响应解析失败，使用默认建议")
             return category.defaultSuggestions
         }
         
-        return Array(suggestions)
+        return finalSuggestions
     }
 }
 

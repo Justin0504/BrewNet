@@ -11,6 +11,8 @@ struct ConnectionRequest: Identifiable, Codable {
     let createdAt: Date
     let isFeatured: Bool // "Featured Professional" tag
     var temporaryMessages: [TemporaryMessage] = [] // 临时消息列表
+    var isOnline: Bool = false // 用户在线状态
+    var lastSeen: Date? // 最后活跃时间
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -21,6 +23,8 @@ struct ConnectionRequest: Identifiable, Codable {
         case createdAt = "created_at"
         case isFeatured = "is_featured"
         case temporaryMessages = "temporary_messages"
+        case isOnline = "is_online"
+        case lastSeen = "last_seen"
     }
     
     var timeAgo: String {

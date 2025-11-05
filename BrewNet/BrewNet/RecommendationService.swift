@@ -28,20 +28,20 @@ class RecommendationService: ObservableObject {
         
         // 1. 检查缓存（如果 forceRefresh 为 true，跳过缓存）
         if !forceRefresh {
-            if let cached = try await supabaseService.getCachedRecommendations(userId: userId) {
-                let (cachedUserIds, cachedScores) = cached
-                
-                // 验证缓存数据的有效性：确保有 userIds 和 scores，且数量匹配
-                if !cachedUserIds.isEmpty && cachedUserIds.count == cachedScores.count && cachedScores.count > 0 {
-                    // 缓存有效，使用缓存
-                    print("✅ Using cached recommendations (validated: \(cachedUserIds.count) users)")
-                    return try await loadProfilesWithCache(cached, userId: userId)
-                } else {
-                    // 缓存无效，清除并继续生成新的推荐
-                    print("⚠️ Invalid cache data, regenerating recommendations...")
-                    try? await supabaseService.clearRecommendationCache(userId: userId)
-                    // 继续执行下面的代码生成新的推荐
-                }
+        if let cached = try await supabaseService.getCachedRecommendations(userId: userId) {
+            let (cachedUserIds, cachedScores) = cached
+            
+            // 验证缓存数据的有效性：确保有 userIds 和 scores，且数量匹配
+            if !cachedUserIds.isEmpty && cachedUserIds.count == cachedScores.count && cachedScores.count > 0 {
+                // 缓存有效，使用缓存
+                print("✅ Using cached recommendations (validated: \(cachedUserIds.count) users)")
+                return try await loadProfilesWithCache(cached, userId: userId)
+            } else {
+                // 缓存无效，清除并继续生成新的推荐
+                print("⚠️ Invalid cache data, regenerating recommendations...")
+                try? await supabaseService.clearRecommendationCache(userId: userId)
+                // 继续执行下面的代码生成新的推荐
+            }
             }
         } else {
             print("🔄 Force refresh: skipping cache check")
@@ -144,8 +144,8 @@ class RecommendationService: ObservableObject {
         for item in topK {
             if let supabaseProfile = profilesDict[item.userId] {
                 do {
-                    let brewNetProfile = supabaseProfile.toBrewNetProfile()
-                    results.append((item.userId, item.score, brewNetProfile))
+                let brewNetProfile = supabaseProfile.toBrewNetProfile()
+                results.append((item.userId, item.score, brewNetProfile))
                 } catch {
                     print("⚠️ Failed to convert profile for user \(item.userId): \(error.localizedDescription)")
                     missingProfiles.append(item.userId)

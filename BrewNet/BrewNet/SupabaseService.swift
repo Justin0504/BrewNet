@@ -2518,6 +2518,36 @@ class SupabaseService: ObservableObject {
         print("✅ [临时消息] 最终返回 \(messages.count) 条临时消息（双向）")
         return messages
     }
+    
+    /// 获取我发送的所有临时消息
+    func getSentTemporaryMessages(senderId: String) async throws -> [SupabaseMessage] {
+        print("🔍 [临时消息] Fetching sent temporary messages from sender: \(senderId)")
+        
+        let response = try await client
+            .from(SupabaseTable.messages.rawValue)
+            .select()
+            .eq("sender_id", value: senderId)
+            .eq("message_type", value: "temporary")
+            .order("timestamp", ascending: false)
+            .execute()
+        
+        let data = response.data
+        
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw ProfileError.fetchFailed("Failed to parse sent temporary messages response")
+        }
+        
+        var messages: [SupabaseMessage] = []
+        for json in jsonArray {
+            if let messageData = try? JSONSerialization.data(withJSONObject: json),
+               let message = try? JSONDecoder().decode(SupabaseMessage.self, from: messageData) {
+                messages.append(message)
+            }
+        }
+        
+        print("✅ [临时消息] 找到 \(messages.count) 条我发送的临时消息")
+        return messages
+    }
 }
 
 // MARK: - Profile Error Types
@@ -3051,26 +3081,58 @@ extension SupabaseService {
     func updateLastSeen(userId: String) async {
         do {
             let now = ISO8601DateFormatter().string(from: Date())
-            // 尝试更新 last_seen_at（如果字段存在）
+            // 尝试更新 last_seen_at 和 is_online（如果字段存在）
+            // 用户活跃时，应该同时更新 is_online 为 true
+            // 需要分开更新，因为类型不同（String vs Bool）
+            
+            // 先更新 last_seen_at
             try await client
                 .from("users")
                 .update(["last_seen_at": now])
                 .eq("id", value: userId)
                 .execute()
-        } catch {
-            // 如果字段不存在，静默失败（不打印错误，因为这是可选功能）
-            if error.localizedDescription.contains("last_seen_at") || error.localizedDescription.contains("does not exist") {
-                // 字段不存在，这是正常的（如果还没运行迁移脚本）
-                return
+            print("✅ [Heartbeat] 更新 last_seen_at: \(now)")
+            
+            // 再更新 is_online
+            try await client
+                .from("users")
+                .update(["is_online": true])
+                .eq("id", value: userId)
+                .execute()
+            print("✅ [Heartbeat] 更新 is_online: true")
+            
+            // 更新本地状态
+            await MainActor.run {
+                userOnlineStatuses[userId] = (true, Date())
             }
-            print("⚠️ Failed to update last seen: \(error.localizedDescription)")
+        } catch {
+            // 如果字段不存在，尝试只更新 last_seen_at
+            if error.localizedDescription.contains("last_seen_at") || error.localizedDescription.contains("is_online") || error.localizedDescription.contains("does not exist") {
+                print("⚠️ [Heartbeat] 字段可能不存在，尝试只更新 last_seen_at: \(error.localizedDescription)")
+                // 尝试只更新 last_seen_at
+                do {
+                    let now = ISO8601DateFormatter().string(from: Date())
+                    try await client
+                        .from("users")
+                        .update(["last_seen_at": now])
+                        .eq("id", value: userId)
+                        .execute()
+                    print("✅ [Heartbeat] 仅更新 last_seen_at 成功: \(now)")
+                } catch {
+                    // 静默失败（字段不存在）
+                    print("❌ [Heartbeat] 更新失败: \(error.localizedDescription)")
+                    return
+                }
+            } else {
+                print("⚠️ [Heartbeat] Failed to update last seen: \(error.localizedDescription)")
+            }
         }
     }
     
     /// 获取用户在线状态
     func getUserOnlineStatus(userId: String) async -> (isOnline: Bool, lastSeen: Date)? {
         do {
-            // 先尝试获取包含新字段的数据
+            // 从数据库获取用户在线状态相关字段
             let response = try await client
                 .from("users")
                 .select("is_online,last_seen_at,last_login_at")
@@ -3080,35 +3142,112 @@ extension SupabaseService {
             
             let data = response.data
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                // 尝试获取 is_online，如果字段不存在则默认为 false
-                let isOnline = json["is_online"] as? Bool ?? false
-                
+                // 创建 ISO8601 日期格式化器，明确设置为 UTC 时区
                 let formatter = ISO8601DateFormatter()
                 formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                formatter.timeZone = TimeZone(secondsFromGMT: 0) // 明确使用 UTC
                 
                 var lastSeen = Date()
+                var lastLoginAt: Date? = nil
                 
-                // 优先使用 last_seen_at，如果不存在则使用 last_login_at
+                // 解析 last_seen_at（优先使用）
                 if let lastSeenString = json["last_seen_at"] as? String {
                     if let date = formatter.date(from: lastSeenString) {
                         lastSeen = date
+                        print("✅ [在线状态] 解析 last_seen_at: \(lastSeenString) -> \(date) (UTC)")
                     } else {
+                        // 尝试不带小数秒的格式
                         formatter.formatOptions = [.withInternetDateTime]
                         if let date = formatter.date(from: lastSeenString) {
                             lastSeen = date
-                        }
-                    }
-                } else if let lastLoginString = json["last_login_at"] as? String {
-                    // 回退到 last_login_at
-                    if let date = formatter.date(from: lastLoginString) {
-                        lastSeen = date
-                    } else {
-                        formatter.formatOptions = [.withInternetDateTime]
-                        if let date = formatter.date(from: lastLoginString) {
-                            lastSeen = date
+                            print("✅ [在线状态] 解析 last_seen_at (无小数秒): \(lastSeenString) -> \(date) (UTC)")
+                        } else {
+                            print("⚠️ [在线状态] 无法解析 last_seen_at: \(lastSeenString)")
                         }
                     }
                 }
+                
+                // 解析 last_login_at
+                if let lastLoginString = json["last_login_at"] as? String {
+                    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                    if let date = formatter.date(from: lastLoginString) {
+                        lastLoginAt = date
+                        // 如果没有 last_seen_at，使用 last_login_at 作为 lastSeen
+                        if json["last_seen_at"] == nil {
+                            lastSeen = date
+                        }
+                        print("✅ [在线状态] 解析 last_login_at: \(lastLoginString) -> \(date) (UTC)")
+                    } else {
+                        formatter.formatOptions = [.withInternetDateTime]
+                        if let date = formatter.date(from: lastLoginString) {
+                            lastLoginAt = date
+                            if json["last_seen_at"] == nil {
+                                lastSeen = date
+                            }
+                            print("✅ [在线状态] 解析 last_login_at (无小数秒): \(lastLoginString) -> \(date) (UTC)")
+                        } else {
+                            print("⚠️ [在线状态] 无法解析 last_login_at: \(lastLoginString)")
+                        }
+                    }
+                }
+                
+                // 获取数据库中的 is_online 值
+                let dbIsOnline = json["is_online"] as? Bool ?? false
+                
+                // 基于时间判断在线状态：如果 last_seen_at 在合理时间内，认为在线
+                // 注意：Date() 在 Swift 中已经是 UTC 时间的内部表示，所以可以直接比较
+                let currentTime = Date()
+                let timeSinceLastSeen = currentTime.timeIntervalSince(lastSeen)
+                let onlineThreshold: TimeInterval = 300 // 5分钟（允许一定的延迟）
+                let strictThreshold: TimeInterval = 60 // 1分钟（严格判断）
+                
+                print("🔍 [在线状态] 时间判断: currentTime=\(currentTime), lastSeen=\(lastSeen), timeSinceLastSeen=\(timeSinceLastSeen)秒, dbIsOnline=\(dbIsOnline)")
+                
+                // 判断逻辑：
+                // 1. 优先使用数据库中的 is_online 值
+                // 2. 如果 is_online 是 true，还需要验证 last_seen_at 是否在合理范围内（5分钟内）
+                // 3. 如果 is_online 是 false，但 last_seen_at 在 1 分钟内，也认为在线（防止数据库未及时更新）
+                // 4. 如果 last_seen_at 超过 5 分钟，即使 is_online 是 true，也认为离线（数据可能过时）
+                var isOnline = false
+                
+                if dbIsOnline {
+                    // 数据库标记为在线，验证时间是否合理
+                    if timeSinceLastSeen < onlineThreshold {
+                        // 数据库标记在线且时间在 5 分钟内，认为在线
+                        isOnline = true
+                        print("✅ [在线状态] 数据库标记在线，last_seen_at 在 \(Int(timeSinceLastSeen))秒前，判断为在线")
+                    } else {
+                        // 数据库标记在线但时间超过 5 分钟，认为离线（数据可能过时）
+                        isOnline = false
+                        print("⚠️ [在线状态] 数据库标记在线，但 last_seen_at 在 \(Int(timeSinceLastSeen))秒前（超过5分钟），判断为离线")
+                    }
+                } else {
+                    // 数据库标记为离线，但检查时间戳（可能数据库未及时更新）
+                    if timeSinceLastSeen < strictThreshold {
+                        // 时间在 1 分钟内，即使数据库标记离线，也认为在线
+                        isOnline = true
+                        print("✅ [在线状态] 数据库标记离线，但 last_seen_at 在 \(Int(timeSinceLastSeen))秒前（1分钟内），判断为在线")
+                    } else if let loginTime = lastLoginAt {
+                        // 如果 last_seen_at 超过 1 分钟，检查 last_login_at
+                        let timeSinceLastLogin = currentTime.timeIntervalSince(loginTime)
+                        print("🔍 [在线状态] timeSinceLastLogin=\(timeSinceLastLogin)秒")
+                        if timeSinceLastLogin < strictThreshold {
+                            // last_login_at 在 1 分钟内，认为在线
+                            isOnline = true
+                            print("✅ [在线状态] last_login_at 在 \(Int(timeSinceLastLogin))秒前，判断为在线")
+                        } else {
+                            // 超过 1 分钟，认为离线
+                            isOnline = false
+                            print("❌ [在线状态] last_login_at 在 \(Int(timeSinceLastLogin))秒前，判断为离线")
+                        }
+                    } else {
+                        // 没有登录时间信息，认为离线
+                        isOnline = false
+                        print("❌ [在线状态] 数据库标记离线且没有最近活动，判断为离线")
+                    }
+                }
+                
+                print("✅ [在线状态] 用户 \(userId): db_is_online=\(dbIsOnline), last_seen=\(lastSeen), 最终结果=\(isOnline ? "在线" : "离线")")
                 
                 return (isOnline, lastSeen)
             }
@@ -3121,20 +3260,21 @@ extension SupabaseService {
                     if let user = try? await getUser(id: userId) {
                         let formatter = ISO8601DateFormatter()
                         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                        formatter.timeZone = TimeZone(secondsFromGMT: 0) // 明确使用 UTC
                         
                         var lastSeen = Date()
                         if let lastLoginAt = formatter.date(from: user.lastLoginAt) {
                             lastSeen = lastLoginAt
                             let timeSinceLastLogin = Date().timeIntervalSince(lastLoginAt)
-                            // 5分钟内活跃视为在线
-                            let isOnline = timeSinceLastLogin < 300
+                            // 1分钟内活跃视为在线
+                            let isOnline = timeSinceLastLogin < 60
                             return (isOnline, lastSeen)
                         } else {
                             formatter.formatOptions = [.withInternetDateTime]
                             if let lastLoginAt = formatter.date(from: user.lastLoginAt) {
                                 lastSeen = lastLoginAt
                                 let timeSinceLastLogin = Date().timeIntervalSince(lastLoginAt)
-                                let isOnline = timeSinceLastLogin < 300
+                                let isOnline = timeSinceLastLogin < 60
                                 return (isOnline, lastSeen)
                             }
                         }
@@ -3225,6 +3365,324 @@ enum InteractionType: String, Codable {
     case like = "like"
     case pass = "pass"
     case match = "match"
+}
+
+// MARK: - Points System Functions
+extension SupabaseService {
+    /// 获取用户积分
+    func getUserPoints(userId: String) async throws -> Int {
+        print("🔍 [积分系统] 获取用户积分: \(userId)")
+        
+        // 从 coffee_chat_records 表计算总积分
+        let response = try await client
+            .from("coffee_chat_records")
+            .select("points_earned")
+            .eq("user_id", value: userId)
+            .eq("status", value: "completed")
+            .execute()
+        
+        let data = response.data
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return 0
+        }
+        
+        let totalPoints = jsonArray.compactMap { json -> Int? in
+            if let points = json["points_earned"] as? Int {
+                return points
+            } else if let pointsString = json["points_earned"] as? String {
+                return Int(pointsString)
+            }
+            return nil
+        }.reduce(0, +)
+        
+        print("✅ [积分系统] 用户 \(userId) 总积分: \(totalPoints)")
+        return totalPoints
+    }
+    
+    /// 获取 Coffee Chat 历史记录
+    func getCoffeeChatHistory(userId: String) async throws -> [CoffeeChatRecord] {
+        print("🔍 [积分系统] 获取 Coffee Chat 历史: \(userId)")
+        
+        let response = try await client
+            .from("coffee_chat_records")
+            .select()
+            .eq("user_id", value: userId)
+            .order("date", ascending: false)
+            .execute()
+        
+        let data = response.data
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        
+        var records: [CoffeeChatRecord] = []
+        for json in jsonArray {
+            guard let id = json["id"] as? String,
+                  let partnerId = json["partner_id"] as? String,
+                  let statusString = json["status"] as? String,
+                  let status = CoffeeChatRecord.CoffeeChatStatus(rawValue: statusString) else {
+                continue
+            }
+            
+            let pointsEarned: Int
+            if let points = json["points_earned"] as? Int {
+                pointsEarned = points
+            } else if let pointsString = json["points_earned"] as? String, let points = Int(pointsString) {
+                pointsEarned = points
+            } else {
+                pointsEarned = 0
+            }
+            
+            // 获取 partner 名称
+            var partnerName = "Unknown"
+            if let partnerProfile = try? await getProfile(userId: partnerId) {
+                partnerName = partnerProfile.coreIdentity.name
+            }
+            
+            // 解析日期
+            var date = Date()
+            if let dateString = json["date"] as? String {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                date = formatter.date(from: dateString) ?? Date()
+            }
+            
+            let record = CoffeeChatRecord(
+                id: id,
+                partnerId: partnerId,
+                partnerName: partnerName,
+                date: date,
+                pointsEarned: pointsEarned,
+                status: status
+            )
+            records.append(record)
+        }
+        
+        print("✅ [积分系统] 找到 \(records.count) 条 Coffee Chat 记录")
+        return records
+    }
+    
+    /// 记录完成一次 Coffee Chat（双方确认后调用）
+    func recordCoffeeChatCompletion(userId1: String, userId2: String) async throws {
+        print("🔍 [积分系统] 记录 Coffee Chat 完成: \(userId1) 和 \(userId2)")
+        
+        let pointsEarned = 10 // 每次完成获得 10 积分
+        let now = ISO8601DateFormatter().string(from: Date())
+        
+        // 为两个用户分别创建记录
+        let record1: [String: String] = [
+            "id": UUID().uuidString,
+            "user_id": userId1,
+            "partner_id": userId2,
+            "date": now,
+            "points_earned": String(pointsEarned),
+            "status": "completed",
+            "created_at": now,
+            "updated_at": now
+        ]
+        
+        let record2: [String: String] = [
+            "id": UUID().uuidString,
+            "user_id": userId2,
+            "partner_id": userId1,
+            "date": now,
+            "points_earned": String(pointsEarned),
+            "status": "completed",
+            "created_at": now,
+            "updated_at": now
+        ]
+        
+        // 插入两条记录
+        // 分别插入两条记录
+        try await client
+            .from("coffee_chat_records")
+            .insert(record1)
+            .execute()
+        
+        try await client
+            .from("coffee_chat_records")
+            .insert(record2)
+            .execute()
+        
+        print("✅ [积分系统] Coffee Chat 记录已创建，双方各获得 \(pointsEarned) 积分")
+    }
+    
+    /// 获取可兑换的奖励列表
+    func getAvailableRewards() async throws -> [Reward] {
+        print("🔍 [兑换系统] 获取可兑换奖励列表")
+        
+        let response = try await client
+            .from("rewards")
+            .select()
+            .eq("is_active", value: true)
+            .order("points_required", ascending: true)
+            .execute()
+        
+        let data = response.data
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        
+        var rewards: [Reward] = []
+        for json in jsonArray {
+            guard let id = json["id"] as? String,
+                  let name = json["name"] as? String,
+                  let description = json["description"] as? String,
+                  let categoryString = json["category"] as? String,
+                  let category = Reward.RewardCategory(rawValue: categoryString) else {
+                continue
+            }
+            
+            let pointsRequired: Int
+            if let points = json["points_required"] as? Int {
+                pointsRequired = points
+            } else if let pointsString = json["points_required"] as? String, let points = Int(pointsString) {
+                pointsRequired = points
+            } else {
+                pointsRequired = 0
+            }
+            
+            let imageUrl = json["image_url"] as? String
+            
+            let reward = Reward(
+                id: id,
+                name: name,
+                description: description,
+                pointsRequired: pointsRequired,
+                category: category,
+                imageUrl: imageUrl
+            )
+            rewards.append(reward)
+        }
+        
+        print("✅ [兑换系统] 找到 \(rewards.count) 个可用奖励")
+        return rewards
+    }
+    
+    /// 获取用户的兑换记录
+    func getUserRedemptions(userId: String) async throws -> [RedemptionRecord] {
+        print("🔍 [兑换系统] 获取用户兑换记录: \(userId)")
+        
+        let response = try await client
+            .from("redemptions")
+            .select()
+            .eq("user_id", value: userId)
+            .order("redeemed_at", ascending: false)
+            .execute()
+        
+        let data = response.data
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        
+        var records: [RedemptionRecord] = []
+        for json in jsonArray {
+            guard let id = json["id"] as? String,
+                  let rewardId = json["reward_id"] as? String,
+                  let statusString = json["status"] as? String,
+                  let status = RedemptionRecord.RedemptionStatus(rawValue: statusString) else {
+                continue
+            }
+            
+            let pointsUsed: Int
+            if let points = json["points_used"] as? Int {
+                pointsUsed = points
+            } else if let pointsString = json["points_used"] as? String, let points = Int(pointsString) {
+                pointsUsed = points
+            } else {
+                pointsUsed = 0
+            }
+            
+            // 获取奖励名称
+            var rewardName = "Unknown Reward"
+            if let rewardResponse = try? await client
+                .from("rewards")
+                .select("name")
+                .eq("id", value: rewardId)
+                .single()
+                .execute() {
+                let rewardData = rewardResponse.data
+                if let rewardJson = try? JSONSerialization.jsonObject(with: rewardData) as? [String: Any],
+                   let name = rewardJson["name"] as? String {
+                    rewardName = name
+                }
+            }
+            
+            // 解析日期
+            var date = Date()
+            if let dateString = json["redeemed_at"] as? String {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                date = formatter.date(from: dateString) ?? Date()
+            }
+            
+            let record = RedemptionRecord(
+                id: id,
+                rewardId: rewardId,
+                rewardName: rewardName,
+                pointsUsed: pointsUsed,
+                redeemedAt: date,
+                status: status
+            )
+            records.append(record)
+        }
+        
+        print("✅ [兑换系统] 找到 \(records.count) 条兑换记录")
+        return records
+    }
+    
+    /// 兑换奖励
+    func redeemReward(userId: String, rewardId: String) async throws {
+        print("🔍 [兑换系统] 用户 \(userId) 兑换奖励 \(rewardId)")
+        
+        // 1. 获取奖励信息
+        let rewardResponse = try await client
+            .from("rewards")
+            .select()
+            .eq("id", value: rewardId)
+            .single()
+            .execute()
+        
+        let rewardData = rewardResponse.data
+        guard let rewardJson = try? JSONSerialization.jsonObject(with: rewardData) as? [String: Any] else {
+            throw ProfileError.fetchFailed("Reward not found")
+        }
+        
+        let pointsRequired: Int
+        if let points = rewardJson["points_required"] as? Int {
+            pointsRequired = points
+        } else if let pointsString = rewardJson["points_required"] as? String, let points = Int(pointsString) {
+            pointsRequired = points
+        } else {
+            throw ProfileError.fetchFailed("Reward points_required invalid")
+        }
+        
+        // 2. 检查用户积分是否足够
+        let userPoints = try await getUserPoints(userId: userId)
+        guard userPoints >= pointsRequired else {
+            throw ProfileError.fetchFailed("Insufficient points")
+        }
+        
+        // 3. 创建兑换记录
+        let now = ISO8601DateFormatter().string(from: Date())
+        let redemption: [String: String] = [
+            "id": UUID().uuidString,
+            "user_id": userId,
+            "reward_id": rewardId,
+            "points_used": String(pointsRequired),
+            "status": "pending",
+            "redeemed_at": now,
+            "created_at": now,
+            "updated_at": now
+        ]
+        
+        try await client
+            .from("redemptions")
+            .insert(redemption)
+            .execute()
+        
+        print("✅ [兑换系统] 兑换记录已创建，消耗 \(pointsRequired) 积分")
+    }
 }
 
 // MARK: - DatabaseManager Extensions

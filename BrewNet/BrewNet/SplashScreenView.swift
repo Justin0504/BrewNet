@@ -133,17 +133,17 @@ struct SplashScreenView: View {
             } catch {
                 print("⚠️ Failed to preload profiles with recommendation system: \(error.localizedDescription)")
                 // 如果推荐系统失败，回退到传统方法
-                do {
-                    let (profiles, _, _) = try await supabaseService.getRecommendedProfiles(
-                        userId: currentUser.id,
-                        limit: 20,
-                        offset: 0
-                    )
-                    recommendedProfiles = profiles
+            do {
+                let (profiles, _, _) = try await supabaseService.getRecommendedProfiles(
+                    userId: currentUser.id,
+                    limit: 20,
+                    offset: 0
+                )
+                recommendedProfiles = profiles
                     brewNetProfiles = profiles.map { $0.toBrewNetProfile() }
                     await saveProfilesToCache(profiles: brewNetProfiles, userId: currentUser.id, isFromRecommendation: false)
                     print("✅ Fallback: Saved \(brewNetProfiles.count) profiles to cache using traditional method")
-                } catch {
+            } catch {
                     print("⚠️ Failed to preload profiles with fallback method: \(error.localizedDescription)")
                 }
             }

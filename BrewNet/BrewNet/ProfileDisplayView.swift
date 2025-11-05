@@ -20,6 +20,8 @@ struct ProfileDisplayView: View {
     
     // State variable for showing profile card
     @State private var showingProfileCard = false
+    @State private var showingPointsSystem = false
+    @State private var showingRedemptionSystem = false
     
     var body: some View {
         ScrollView {
@@ -39,6 +41,49 @@ struct ProfileDisplayView: View {
                 )
                 .padding(.horizontal, 16)
                 .padding(.top, 20)
+                
+                // Points System and Redemption System Buttons
+                HStack(spacing: 16) {
+                    // Points System Button
+                    Button(action: {
+                        showingPointsSystem = true
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            Text("Rewards")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.white)
+                        .cornerRadius(12)
+                        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+                    }
+                    
+                    // Redemption System Button
+                    Button(action: {
+                        showingRedemptionSystem = true
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "gift.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            Text("Shop")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.white)
+                        .cornerRadius(12)
+                        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
                 
                 // Networking Preferences Section
                 ProfileSectionView(
@@ -80,6 +125,16 @@ struct ProfileDisplayView: View {
                 profile: profile,
                 isConnection: true // 自己查看自己，所以 connections_only 的内容也应该显示
             )
+        }
+        .sheet(isPresented: $showingPointsSystem) {
+            PointsSystemView()
+                .environmentObject(authManager)
+                .environmentObject(supabaseService)
+        }
+        .sheet(isPresented: $showingRedemptionSystem) {
+            RedemptionSystemView()
+                .environmentObject(authManager)
+                .environmentObject(supabaseService)
         }
     }
     
@@ -659,6 +714,7 @@ struct NetworkingPreferencesDisplayView: View {
                 InfoRow(label: "Preferred Duration", value: duration)
             }
             
+            // Timeslot moved to the bottom
             AvailableTimeslotDisplayView(timeslot: preferences.availableTimeslot)
         }
     }
@@ -1269,10 +1325,40 @@ struct SentInvitationRowView: View {
             }
         }) {
             HStack(spacing: 12) {
-                // Avatar
-                Image(systemName: "person.circle.fill")
-                    .font(.system(size: 50))
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                // Avatar - 加载真实的用户头像
+                Group {
+                    if let profileImageURL = receiverProfile?.coreIdentity.profileImage, !profileImageURL.isEmpty {
+                        AsyncImage(url: URL(string: profileImageURL)) { phase in
+                            switch phase {
+                            case .empty:
+                                ProgressView()
+                                    .frame(width: 50, height: 50)
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 50, height: 50)
+                                    .clipShape(Circle())
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.white, lineWidth: 2)
+                                    )
+                            case .failure(_):
+                                Image(systemName: "person.circle.fill")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            @unknown default:
+                                Image(systemName: "person.circle.fill")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            }
+                        }
+                    } else {
+                        Image(systemName: "person.circle.fill")
+                            .font(.system(size: 50))
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    }
+                }
                 
                 // User Info
                 VStack(alignment: .leading, spacing: 4) {
@@ -1589,6 +1675,18 @@ struct UserProfileCardSheetView: View {
                         
                         // Level 3: Deep Understanding
                         level3DeepUnderstandingView
+                        
+                        // Available Timeslot Grid (moved to bottom)
+                        if shouldShowTimeslot {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Divider()
+                                AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 16)
+                                    .padding(.bottom, 30)
+                                    .background(Color.white)
+                            }
+                        }
                     }
                     .frame(maxWidth: screenWidth - 40)
                 }
@@ -1703,11 +1801,6 @@ struct UserProfileCardSheetView: View {
                     .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                 
                 Spacer()
-            }
-            
-            // Available Timeslot Grid (same UI as Profile page)
-            if shouldShowTimeslot {
-                AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
             }
         }
         .padding(20)
@@ -2043,6 +2136,596 @@ struct UserProfileCardSheetView: View {
 
 // Note: NetworkingIntentionBadgeView, WorkExperienceRowView, and FlowLayout are defined in UserProfileCardView.swift
 // They are reused here to avoid code duplication
+
+// MARK: - Points System View
+struct PointsSystemView: View {
+    @Environment(\.presentationMode) var presentationMode
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    @State private var totalPoints: Int = 0
+    @State private var coffeeChatHistory: [CoffeeChatRecord] = []
+    @State private var isLoading = true
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color(red: 0.98, green: 0.97, blue: 0.95)
+                    .ignoresSafeArea()
+                
+                if isLoading {
+                    ProgressView()
+                        .scaleEffect(1.2)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            // Points Display Card
+                            VStack(spacing: 16) {
+                                Image(systemName: "star.fill")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                
+                                Text("Total Points")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.gray)
+                                
+                                Text("\(totalPoints)")
+                                    .font(.system(size: 48, weight: .bold))
+                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 30)
+                            .background(Color.white)
+                            .cornerRadius(16)
+                            .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+                            
+                            // Coffee Chat History
+                            VStack(alignment: .leading, spacing: 16) {
+                                Text("Coffee Chat History")
+                                    .font(.system(size: 18, weight: .bold))
+                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                
+                                if coffeeChatHistory.isEmpty {
+                                    VStack(spacing: 12) {
+                                        Image(systemName: "cup.and.saucer.fill")
+                                            .font(.system(size: 40))
+                                            .foregroundColor(.gray.opacity(0.5))
+                                        Text("No Coffee Chats completed yet")
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.gray)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 40)
+                                } else {
+                                    ForEach(coffeeChatHistory) { record in
+                                        CoffeeChatRecordRow(record: record)
+                                    }
+                                }
+                            }
+                            .padding(20)
+                            .background(Color.white)
+                            .cornerRadius(16)
+                            .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+                            
+                            // Points Rules
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Points Rules")
+                                    .font(.system(size: 18, weight: .bold))
+                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                
+                                VStack(alignment: .leading, spacing: 8) {
+                                    PointsRuleRow(icon: "checkmark.circle.fill", text: "Complete an in-person Coffee Chat to earn 10 points")
+                                    PointsRuleRow(icon: "checkmark.circle.fill", text: "Both parties need to confirm the meeting completion")
+                                    PointsRuleRow(icon: "checkmark.circle.fill", text: "Points can be used to redeem coffee coupons or other gifts")
+                                }
+                            }
+                            .padding(20)
+                            .background(Color.white)
+                            .cornerRadius(16)
+                            .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+                        }
+                        .padding(16)
+                    }
+                }
+            }
+            .navigationTitle("Rewards")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                }
+            }
+            .onAppear {
+                loadPointsData()
+            }
+        }
+    }
+    
+    private func loadPointsData() {
+        guard let currentUser = authManager.currentUser else {
+            isLoading = false
+            return
+        }
+        
+        Task {
+            do {
+                // Load points and Coffee Chat history
+                let points = try await supabaseService.getUserPoints(userId: currentUser.id)
+                let history = try await supabaseService.getCoffeeChatHistory(userId: currentUser.id)
+                
+                await MainActor.run {
+                    totalPoints = points
+                    coffeeChatHistory = history
+                    isLoading = false
+                }
+            } catch {
+                print("❌ Failed to load points data: \(error.localizedDescription)")
+                await MainActor.run {
+                    isLoading = false
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Coffee Chat Record
+struct CoffeeChatRecord: Identifiable {
+    let id: String
+    let partnerId: String
+    let partnerName: String
+    let date: Date
+    let pointsEarned: Int
+    let status: CoffeeChatStatus
+    
+    enum CoffeeChatStatus: String, Codable {
+        case completed = "completed"
+        case pending = "pending"
+    }
+}
+
+// MARK: - Coffee Chat Record Row
+struct CoffeeChatRecordRow: View {
+    let record: CoffeeChatRecord
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "cup.and.saucer.fill")
+                .font(.system(size: 24))
+                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                .frame(width: 40, height: 40)
+                .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                .clipShape(Circle())
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Coffee Chat with \(record.partnerName)")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.black)
+                
+                Text(formatDate(record.date))
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+            }
+            
+            Spacer()
+            
+            VStack(alignment: .trailing, spacing: 4) {
+                HStack(spacing: 4) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    Text("+\(record.pointsEarned)")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                }
+                
+                if record.status == .pending {
+                    Text("Pending")
+                        .font(.system(size: 12))
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(4)
+                }
+            }
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+        .cornerRadius(12)
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        formatter.locale = Locale(identifier: "en_US")
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - Points Rule Row
+struct PointsRuleRow: View {
+    let icon: String
+    let text: String
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+            
+            Text(text)
+                .font(.system(size: 14))
+                .foregroundColor(.gray)
+            
+            Spacer()
+        }
+    }
+}
+
+// MARK: - Redemption System View
+struct RedemptionSystemView: View {
+    @Environment(\.presentationMode) var presentationMode
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    @State private var totalPoints: Int = 0
+    @State private var availableRewards: [Reward] = []
+    @State private var myRedemptions: [RedemptionRecord] = []
+    @State private var isLoading = true
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color(red: 0.98, green: 0.97, blue: 0.95)
+                    .ignoresSafeArea()
+                
+                if isLoading {
+                    ProgressView()
+                        .scaleEffect(1.2)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            // Current Points Display
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Current Points")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.gray)
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "star.fill")
+                                            .font(.system(size: 20))
+                                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                        Text("\(totalPoints)")
+                                            .font(.system(size: 24, weight: .bold))
+                                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    }
+                                }
+                                
+                                Spacer()
+                            }
+                            .padding(20)
+                            .background(Color.white)
+                            .cornerRadius(16)
+                            .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+                            
+                            // Available Rewards
+                            VStack(alignment: .leading, spacing: 16) {
+                                Text("Available Rewards")
+                                    .font(.system(size: 18, weight: .bold))
+                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                
+                                if availableRewards.isEmpty {
+                                    VStack(spacing: 12) {
+                                        Image(systemName: "gift.fill")
+                                            .font(.system(size: 40))
+                                            .foregroundColor(.gray.opacity(0.5))
+                                        Text("No rewards available")
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.gray)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 40)
+                                } else {
+                                    ForEach(availableRewards) { reward in
+                                        RewardCard(reward: reward, userPoints: totalPoints) {
+                                            redeemReward(reward)
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(20)
+                            .background(Color.white)
+                            .cornerRadius(16)
+                            .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+                            
+                            // My Redemptions
+                            VStack(alignment: .leading, spacing: 16) {
+                                Text("My Redemption History")
+                                    .font(.system(size: 18, weight: .bold))
+                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                
+                                if myRedemptions.isEmpty {
+                                    VStack(spacing: 12) {
+                                        Image(systemName: "list.bullet")
+                                            .font(.system(size: 40))
+                                            .foregroundColor(.gray.opacity(0.5))
+                                        Text("No redemption history")
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.gray)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 40)
+                                } else {
+                                    ForEach(myRedemptions) { redemption in
+                                        RedemptionRecordRow(record: redemption)
+                                    }
+                                }
+                            }
+                            .padding(20)
+                            .background(Color.white)
+                            .cornerRadius(16)
+                            .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+                        }
+                        .padding(16)
+                    }
+                }
+            }
+            .navigationTitle("Shop")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                }
+            }
+            .onAppear {
+                loadRedemptionData()
+            }
+        }
+    }
+    
+    private func loadRedemptionData() {
+        guard let currentUser = authManager.currentUser else {
+            isLoading = false
+            return
+        }
+        
+        Task {
+            do {
+                let points = try await supabaseService.getUserPoints(userId: currentUser.id)
+                let rewards = try await supabaseService.getAvailableRewards()
+                let redemptions = try await supabaseService.getUserRedemptions(userId: currentUser.id)
+                
+                await MainActor.run {
+                    totalPoints = points
+                    availableRewards = rewards
+                    myRedemptions = redemptions
+                    isLoading = false
+                }
+            } catch {
+                print("❌ Failed to load redemption data: \(error.localizedDescription)")
+                await MainActor.run {
+                    isLoading = false
+                }
+            }
+        }
+    }
+    
+    private func redeemReward(_ reward: Reward) {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        Task {
+            do {
+                try await supabaseService.redeemReward(userId: currentUser.id, rewardId: reward.id)
+                // 重新加载数据
+                await loadRedemptionData()
+            } catch {
+                print("❌ Failed to redeem reward: \(error.localizedDescription)")
+            }
+        }
+    }
+}
+
+// MARK: - Reward Model
+struct Reward: Identifiable, Codable {
+    let id: String
+    let name: String
+    let description: String
+    let pointsRequired: Int
+    let category: RewardCategory
+    let imageUrl: String?
+    
+    enum RewardCategory: String, Codable {
+        case coffee = "coffee"
+        case gift = "gift"
+        case other = "other"
+    }
+}
+
+// MARK: - Reward Card
+struct RewardCard: View {
+    let reward: Reward
+    let userPoints: Int
+    let onRedeem: () -> Void
+    
+    private var canRedeem: Bool {
+        userPoints >= reward.pointsRequired
+    }
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            // Reward Icon/Image
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                    .frame(width: 60, height: 60)
+                
+                Image(systemName: rewardIcon)
+                    .font(.system(size: 28))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+            }
+            
+            // Reward Info
+            VStack(alignment: .leading, spacing: 6) {
+                Text(reward.name)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.black)
+                
+                Text(reward.description)
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+                    .lineLimit(2)
+                
+                HStack(spacing: 4) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    Text("\(reward.pointsRequired) points")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                }
+            }
+            
+            Spacer()
+            
+            // Redeem Button
+            Button(action: {
+                if canRedeem {
+                    onRedeem()
+                }
+            }) {
+                Text(canRedeem ? "Redeem" : "Insufficient Points")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(canRedeem ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray)
+                    .cornerRadius(8)
+            }
+            .disabled(!canRedeem)
+        }
+        .padding(16)
+        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+        .cornerRadius(12)
+    }
+    
+    private var rewardIcon: String {
+        switch reward.category {
+        case .coffee:
+            return "cup.and.saucer.fill"
+        case .gift:
+            return "gift.fill"
+        case .other:
+            return "star.fill"
+        }
+    }
+}
+
+// MARK: - Redemption Record
+struct RedemptionRecord: Identifiable {
+    let id: String
+    let rewardId: String
+    let rewardName: String
+    let pointsUsed: Int
+    let redeemedAt: Date
+    let status: RedemptionStatus
+    
+    enum RedemptionStatus: String, Codable {
+        case pending = "pending"
+        case completed = "completed"
+        case cancelled = "cancelled"
+    }
+}
+
+// MARK: - Redemption Record Row
+struct RedemptionRecordRow: View {
+    let record: RedemptionRecord
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "gift.fill")
+                .font(.system(size: 24))
+                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                .frame(width: 40, height: 40)
+                .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                .clipShape(Circle())
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(record.rewardName)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.black)
+                
+                Text("\(record.pointsUsed) points")
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+                
+                Text(formatDate(record.redeemedAt))
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray.opacity(0.7))
+            }
+            
+            Spacer()
+            
+            StatusBadge(status: record.status)
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+        .cornerRadius(12)
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        formatter.locale = Locale(identifier: "en_US")
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - Status Badge
+struct StatusBadge: View {
+    let status: RedemptionRecord.RedemptionStatus
+    
+    var body: some View {
+        Text(statusText)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(statusColor)
+            .cornerRadius(8)
+    }
+    
+    private var statusText: String {
+        switch status {
+        case .pending:
+            return "Pending"
+        case .completed:
+            return "Completed"
+        case .cancelled:
+            return "Cancelled"
+        }
+    }
+    
+    private var statusColor: Color {
+        switch status {
+        case .pending:
+            return .orange
+        case .completed:
+            return .green
+        case .cancelled:
+            return .gray
+        }
+    }
+}
 
 // MARK: - Preview
 struct ProfileDisplayView_Previews: PreviewProvider {

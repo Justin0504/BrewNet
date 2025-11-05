@@ -1,5 +1,154 @@
 import SwiftUI
 
+// MARK: - Distance Display View
+struct DistanceDisplayView: View {
+    let otherUserLocation: String?
+    let currentUserLocation: String?
+    @StateObject private var locationService = LocationService.shared
+    @State private var distance: Double?
+    @State private var isLoading = false
+    
+    var body: some View {
+        Group {
+            if isLoading {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
+                        .scaleEffect(0.8)
+                    Text("Calculating...")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                .cornerRadius(8)
+                .onAppear {
+                    print("📊 [DistanceDisplay] UI显示: 加载中...")
+                }
+            } else if let distance = distance {
+                HStack(spacing: 6) {
+                    Image(systemName: "mappin.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    Text(locationService.formatDistance(distance))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                .cornerRadius(8)
+                .onAppear {
+                    print("📊 [DistanceDisplay] UI显示: 距离 = \(locationService.formatDistance(distance))")
+                }
+            } else {
+                // 如果距离计算失败或还在等待，显示提示信息
+                if let otherLocation = otherUserLocation, !otherLocation.isEmpty {
+                    if currentUserLocation == nil || currentUserLocation?.isEmpty == true {
+                        // 当前用户位置未加载或未设置
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.circle")
+                                .font(.system(size: 10))
+                                .foregroundColor(.gray.opacity(0.6))
+                            Text("Set your location to see distance")
+                                .font(.system(size: 11))
+                                .foregroundColor(.gray.opacity(0.6))
+                                .italic()
+                        }
+                        .padding(.top, 2)
+                    } else {
+                        // 计算失败，可能是地理编码问题 - 显示调试信息（开发时）
+                        #if DEBUG
+                        HStack(spacing: 4) {
+                            Image(systemName: "questionmark.circle")
+                                .font(.system(size: 10))
+                                .foregroundColor(.orange.opacity(0.6))
+                            Text("Calculating distance...")
+                                .font(.system(size: 11))
+                                .foregroundColor(.orange.opacity(0.6))
+                                .italic()
+                        }
+                        .padding(.top, 2)
+                        #else
+                        EmptyView()
+                        #endif
+                    }
+                }
+            }
+        }
+        .onAppear {
+            print("👁️ [DistanceDisplay] onAppear 触发")
+            print("   - otherUserLocation: \(otherUserLocation ?? "nil")")
+            print("   - currentUserLocation: \(currentUserLocation ?? "nil")")
+            calculateDistance()
+        }
+        .onChange(of: otherUserLocation) { newValue in
+            print("🔄 [DistanceDisplay] otherUserLocation 变化: \(newValue ?? "nil")")
+            calculateDistance()
+        }
+        .onChange(of: currentUserLocation) { newValue in
+            print("🔄 [DistanceDisplay] currentUserLocation 变化: \(newValue ?? "nil")")
+            calculateDistance()
+        }
+    }
+    
+    private func calculateDistance() {
+        print("🔍 [DistanceDisplay] 开始计算距离...")
+        print("   - 对方地址: \(otherUserLocation ?? "nil")")
+        print("   - 当前用户地址: \(currentUserLocation ?? "nil")")
+        
+        guard let otherLocation = otherUserLocation, !otherLocation.isEmpty else {
+            print("⚠️ [DistanceDisplay] 对方地址为空")
+            distance = nil
+            return
+        }
+        
+        guard let currentLocation = currentUserLocation, !currentLocation.isEmpty else {
+            print("⚠️ [DistanceDisplay] 当前用户地址为空，等待加载...")
+            distance = nil
+            return
+        }
+        
+        // 如果两个地址相同，距离为0
+        if otherLocation == currentLocation {
+            print("✅ [DistanceDisplay] 两个地址相同，距离为 0")
+            distance = 0.0
+            return
+        }
+        
+        print("📍 [DistanceDisplay] 开始地理编码和计算距离...")
+        print("   - 调用 locationService.calculateDistanceBetweenAddresses")
+        print("   - address1 (当前用户): '\(currentLocation)'")
+        print("   - address2 (对方): '\(otherLocation)'")
+        
+        isLoading = true
+        distance = nil // 清除之前的值
+        
+        locationService.calculateDistanceBetweenAddresses(
+            address1: currentLocation,
+            address2: otherLocation
+        ) { calculatedDistance in
+            print("🔔 [DistanceDisplay] 收到距离计算回调")
+            print("   - calculatedDistance: \(calculatedDistance != nil ? "\(calculatedDistance!) km" : "nil")")
+            
+            DispatchQueue.main.async {
+                print("🔄 [DistanceDisplay] 在主线程更新 UI")
+                self.isLoading = false
+                if let distance = calculatedDistance {
+                    self.distance = distance
+                    print("✅ [DistanceDisplay] ✅✅✅ 距离计算成功: \(self.locationService.formatDistance(distance)) ✅✅✅")
+                    print("   - distance 状态变量已设置为: \(self.distance != nil ? "\(self.distance!)" : "nil")")
+                } else {
+                    self.distance = nil
+                    print("⚠️ [DistanceDisplay] ⚠️⚠️⚠️ 距离计算失败 ⚠️⚠️⚠️")
+                    print("   - 可能原因：地理编码失败、网络问题或地址格式不正确")
+                }
+            }
+        }
+    }
+}
+
 // MARK: - User Profile Card View
 struct UserProfileCardView: View {
     let profile: BrewNetProfile
@@ -7,6 +156,11 @@ struct UserProfileCardView: View {
     @Binding var rotationAngle: Double
     let onSwipe: (SwipeDirection) -> Void
     let isConnection: Bool // Whether the current user is connected to this profile
+    
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    @State private var currentUserLocation: String?
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -45,6 +199,18 @@ struct UserProfileCardView: View {
                     
                     // Level 3: Deep Understanding
                     level3DeepUnderstandingView
+                    
+                    // Available Timeslot Grid (moved to bottom)
+                    if shouldShowTimeslot {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Divider()
+                            AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 16)
+                                .padding(.bottom, 30)
+                                .background(Color.white)
+                        }
+                    }
                 }
                 .frame(maxWidth: screenWidth - 40)
             }
@@ -103,6 +269,79 @@ struct UserProfileCardView: View {
                     }
                 }
         )
+        .onAppear {
+            loadCurrentUserLocation()
+        }
+    }
+    
+    // MARK: - Load Current User Location
+    private func loadCurrentUserLocation() {
+        guard let currentUser = authManager.currentUser else {
+            print("⚠️ [UserProfileCard] 没有当前用户，无法加载位置")
+            return
+        }
+        
+        print("📍 [UserProfileCard] 开始加载当前用户位置...")
+        print("   - 当前用户 ID: \(currentUser.id)")
+        print("   - 当前用户邮箱: \(currentUser.email)")
+        
+        Task {
+            do {
+                if let currentProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                    print("✅ [UserProfileCard] 成功获取 profile")
+                    print("   - Profile ID: \(currentProfile.id)")
+                    print("   - Core Identity Name: \(currentProfile.coreIdentity.name)")
+                    print("   - Core Identity Email: \(currentProfile.coreIdentity.email)")
+                    
+                    // 检查原始数据
+                    let rawLocation = currentProfile.coreIdentity.location
+                    print("   - [原始数据] coreIdentity.location: \(rawLocation ?? "nil")")
+                    print("   - [原始数据] location 是否为 nil: \(rawLocation == nil)")
+                    print("   - [原始数据] location 是否为空字符串: \(rawLocation?.isEmpty == true)")
+                    
+                    let brewNetProfile = currentProfile.toBrewNetProfile()
+                    await MainActor.run {
+                        let newLocation = brewNetProfile.coreIdentity.location
+                        print("   - [转换后] brewNetProfile.coreIdentity.location: \(newLocation ?? "nil")")
+                        
+                        // 检查值是否真的改变了
+                        let oldLocation = currentUserLocation
+                        print("   - [更新前] currentUserLocation: \(oldLocation ?? "nil")")
+                        
+                        currentUserLocation = newLocation
+                        print("✅ [UserProfileCard] 已设置 currentUserLocation: \(newLocation ?? "nil")")
+                        print("   - [更新后] currentUserLocation: \(self.currentUserLocation ?? "nil")")
+                        
+                        // 强制触发视图更新
+                        if oldLocation != newLocation {
+                            print("🔄 [UserProfileCard] 位置值已改变，应该触发 DistanceDisplayView 的 onChange")
+                        }
+                        
+                        if newLocation == nil || newLocation?.isEmpty == true {
+                            print("⚠️ [UserProfileCard] ⚠️⚠️⚠️ 当前用户没有设置位置信息 ⚠️⚠️⚠️")
+                            print("⚠️ [UserProfileCard] 请前往 Profile Setup → Core Identity → Location 填写位置")
+                            print("⚠️ [UserProfileCard] 或者点击 'Use Current Location' 按钮自动填充")
+                            print("⚠️ [UserProfileCard] 因此无法显示距离信息")
+                        } else {
+                            print("✅ [UserProfileCard] 当前用户位置已设置: '\(newLocation!)'")
+                            print("✅ [UserProfileCard] 可以计算距离")
+                            // 延迟一小段时间后再次检查，确保 DistanceDisplayView 已更新
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                print("🔍 [UserProfileCard] 延迟检查 - currentUserLocation: \(self.currentUserLocation ?? "nil")")
+                            }
+                        }
+                    }
+                } else {
+                    print("⚠️ [UserProfileCard] 无法获取当前用户 profile")
+                    print("⚠️ [UserProfileCard] 可能原因：")
+                    print("   1. 用户还没有完成 Profile Setup")
+                    print("   2. Profile 数据不存在于数据库中")
+                }
+            } catch {
+                print("⚠️ [UserProfileCard] 加载当前用户位置失败: \(error.localizedDescription)")
+                print("   - 错误类型: \(type(of: error))")
+            }
+        }
     }
     
     // MARK: - Level 1: Core Information Area
@@ -186,8 +425,32 @@ struct UserProfileCardView: View {
                 Spacer(minLength: 0)
             }
             
-            // Networking Intention Badge
-            NetworkingIntentionBadgeView(intention: profile.networkingIntention.selectedIntention)
+            // Networking Intention Badge with Location and Distance
+            VStack(alignment: .leading, spacing: 12) {
+                NetworkingIntentionBadgeView(intention: profile.networkingIntention.selectedIntention)
+                
+                // Location and Distance (下方显示，字体与 intention 一样大)
+                if shouldShowLocation, let location = profile.coreIdentity.location, !location.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        // Location
+                        HStack(spacing: 6) {
+                            Image(systemName: "location.fill")
+                                .font(.system(size: 16))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            Text(location)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        }
+                        
+                        // Distance display
+                        DistanceDisplayView(
+                            otherUserLocation: location,
+                            currentUserLocation: currentUserLocation
+                        )
+                        .id("distance-\(location)-\(currentUserLocation ?? "nil")")
+                    }
+                }
+            }
             
             // Preferred Chat Format
             HStack(spacing: 8) {
@@ -201,11 +464,6 @@ struct UserProfileCardView: View {
                     .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                 
                 Spacer()
-            }
-            
-            // Available Timeslot Grid (same UI as Profile page)
-            if shouldShowTimeslot {
-                AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
             }
         }
         .padding(20)
@@ -473,17 +731,6 @@ struct UserProfileCardView: View {
                 }
             }
             
-            // Location
-            if shouldShowLocation, let location = profile.coreIdentity.location, !location.isEmpty {
-                HStack {
-                    Image(systemName: "location.fill")
-                        .foregroundColor(.gray)
-                        .font(.system(size: 16))
-                    Text(location)
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray)
-                }
-            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -678,6 +925,11 @@ struct FlowLayout: Layout {
 struct PublicProfileCardView: View {
     let profile: BrewNetProfile
     
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    @State private var currentUserLocation: String?
+    
     // For public views, isConnection is always false (only show public fields)
     private let isConnection: Bool = false
     
@@ -714,6 +966,42 @@ struct PublicProfileCardView: View {
                 }
             }
             .cornerRadius(20)
+        }
+        .onAppear {
+            loadCurrentUserLocation()
+        }
+    }
+    
+    // MARK: - Load Current User Location
+    private func loadCurrentUserLocation() {
+        guard let currentUser = authManager.currentUser else {
+            print("⚠️ [PublicProfileCard] 没有当前用户，无法加载位置")
+            return
+        }
+        
+        print("📍 [PublicProfileCard] 开始加载当前用户位置...")
+        print("   - 当前用户 ID: \(currentUser.id)")
+        
+        Task {
+            do {
+                if let currentProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                    let rawLocation = currentProfile.coreIdentity.location
+                    print("   - [原始数据] coreIdentity.location: \(rawLocation ?? "nil")")
+                    
+                    let brewNetProfile = currentProfile.toBrewNetProfile()
+                    await MainActor.run {
+                        currentUserLocation = brewNetProfile.coreIdentity.location
+                        print("✅ [PublicProfileCard] 已加载当前用户位置: \(brewNetProfile.coreIdentity.location ?? "nil")")
+                        if brewNetProfile.coreIdentity.location == nil || brewNetProfile.coreIdentity.location?.isEmpty == true {
+                            print("⚠️ [PublicProfileCard] 当前用户没有设置位置信息，请前往 Profile Setup 填写位置")
+                        }
+                    }
+                } else {
+                    print("⚠️ [PublicProfileCard] 无法获取当前用户 profile")
+                }
+            } catch {
+                print("⚠️ [PublicProfileCard] 加载当前用户位置失败: \(error.localizedDescription)")
+            }
         }
     }
     
@@ -798,8 +1086,32 @@ struct PublicProfileCardView: View {
                 Spacer(minLength: 0)
             }
             
-            // Networking Intention Badge
-            NetworkingIntentionBadgeView(intention: profile.networkingIntention.selectedIntention)
+            // Networking Intention Badge with Location and Distance
+            VStack(alignment: .leading, spacing: 12) {
+                NetworkingIntentionBadgeView(intention: profile.networkingIntention.selectedIntention)
+                
+                // Location and Distance (下方显示，字体与 intention 一样大)
+                if shouldShowLocation, let location = profile.coreIdentity.location, !location.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        // Location
+                        HStack(spacing: 6) {
+                            Image(systemName: "location.fill")
+                                .font(.system(size: 16))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            Text(location)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        }
+                        
+                        // Distance display
+                        DistanceDisplayView(
+                            otherUserLocation: location,
+                            currentUserLocation: currentUserLocation
+                        )
+                        .id("distance-\(location)-\(currentUserLocation ?? "nil")")
+                    }
+                }
+            }
             
             // Preferred Chat Format
             HStack(spacing: 8) {
@@ -813,11 +1125,6 @@ struct PublicProfileCardView: View {
                     .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                 
                 Spacer()
-            }
-            
-            // Available Timeslot Grid (same UI as Profile page)
-            if shouldShowTimeslot {
-                AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
             }
         }
         .padding(20)
@@ -1085,17 +1392,6 @@ struct PublicProfileCardView: View {
                 }
             }
             
-            // Location (only if public)
-            if shouldShowLocation, let location = profile.coreIdentity.location, !location.isEmpty {
-                HStack {
-                    Image(systemName: "location.fill")
-                        .foregroundColor(.gray)
-                        .font(.system(size: 16))
-                    Text(location)
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray)
-                }
-            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)

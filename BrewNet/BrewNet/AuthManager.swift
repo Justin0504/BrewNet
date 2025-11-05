@@ -678,34 +678,42 @@ class AuthManager: ObservableObject {
     func logout() {
         print("🚪 Starting logout...")
         
-        // 从 Supabase 登出
+        // 保存当前用户ID（在清除 currentUser 之前）
+        let currentUserId = currentUser?.id
+        
+        // 先停止 heartbeat
         Task {
+            await supabaseService?.stopLastSeenHeartbeat()
+            
+            // 设置用户离线状态（在清除 currentUser 之前）
+            if let userId = currentUserId {
+                print("🔄 设置用户离线状态: \(userId)")
+                await supabaseService?.setUserOnlineStatus(userId: userId, isOnline: false)
+                print("✅ 用户离线状态已设置")
+            }
+            
+            // 从 Supabase 登出
             do {
                 try await SupabaseConfig.shared.client.auth.signOut()
                 print("✅ Supabase 登出成功")
             } catch {
                 print("⚠️ Supabase 登出失败: \(error.localizedDescription)")
             }
-        }
-        
-        // 设置用户离线状态（在清除 currentUser 之前）
-        if let currentUserId = currentUser?.id {
-            Task {
-                await supabaseService?.setUserOnlineStatus(userId: currentUserId, isOnline: false)
-                await supabaseService?.stopLastSeenHeartbeat()
+            
+            // 在主线程上清除用户数据和状态
+            await MainActor.run {
+                // Clear current user
+                currentUser = nil
+                
+                // Update authentication state
+                authState = .unauthenticated
+                
+                // Clear saved user data
+                clearUserData()
+                
+                print("✅ Logout completed")
             }
         }
-        
-        // Clear current user
-        currentUser = nil
-        
-        // Update authentication state
-        authState = .unauthenticated
-        
-        // Clear saved user data
-        clearUserData()
-        
-        print("✅ Logout completed")
     }
     
     // MARK: - Clear User Data
