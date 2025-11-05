@@ -11,6 +11,22 @@ struct UserProfileCardView: View {
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
     
+    // Verify privacy settings are loaded
+    private var privacySettings: VisibilitySettings {
+        let settings = profile.privacyTrust.visibilitySettings
+        // Log privacy settings for debugging
+        print("🔒 Privacy Settings for \(profile.coreIdentity.name):")
+        print("   - company: \(settings.company.rawValue)")
+        print("   - skills: \(settings.skills.rawValue)")
+        print("   - interests: \(settings.interests.rawValue)")
+        print("   - location: \(settings.location.rawValue)")
+        print("   - timeslot: \(settings.timeslot.rawValue)")
+        print("   - email: \(settings.email.rawValue)")
+        print("   - phone_number: \(settings.phoneNumber.rawValue)")
+        print("   - isConnection: \(isConnection)")
+        return settings
+    }
+    
     var body: some View {
         ZStack {
             // Background
@@ -173,29 +189,23 @@ struct UserProfileCardView: View {
             // Networking Intention Badge
             NetworkingIntentionBadgeView(intention: profile.networkingIntention.selectedIntention)
             
-            // Preferred Chat Format and Time Slot Summary
+            // Preferred Chat Format
+            HStack(spacing: 8) {
+                // Chat Format Icon
+                Image(systemName: chatFormatIcon)
+                    .font(.system(size: 16))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                
+                Text(profile.networkingPreferences.preferredChatFormat.displayName)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                
+                Spacer()
+            }
+            
+            // Available Timeslot Grid (same UI as Profile page)
             if shouldShowTimeslot {
-                HStack(spacing: 8) {
-                    // Chat Format Icon
-                    Image(systemName: chatFormatIcon)
-                        .font(.system(size: 16))
-                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                    
-                    Text(profile.networkingPreferences.preferredChatFormat.displayName)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                    
-                    Text("|")
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray)
-                    
-                    Text(profile.networkingPreferences.availableTimeslot.formattedSummary())
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray)
-                        .lineLimit(2)
-                    
-                    Spacer()
-                }
+                AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
             }
         }
         .padding(20)
@@ -481,25 +491,51 @@ struct UserProfileCardView: View {
         .background(Color.white)
     }
     
-    // MARK: - Privacy Visibility Checks
+    // MARK: - Privacy Visibility Checks (strictly follows database privacy_trust.visibility_settings)
+    // Only shows fields marked as "public" when isConnection is false
     private var shouldShowCompany: Bool {
-        profile.privacyTrust.visibilitySettings.company.isVisible(isConnection: isConnection)
+        let settings = privacySettings
+        let visible = settings.company.isVisible(isConnection: isConnection)
+        if !visible {
+            print("   ⚠️ Company hidden (not public): \(settings.company.rawValue)")
+        }
+        return visible
     }
     
     private var shouldShowSkills: Bool {
-        profile.privacyTrust.visibilitySettings.skills.isVisible(isConnection: isConnection)
+        let settings = privacySettings
+        let visible = settings.skills.isVisible(isConnection: isConnection)
+        if !visible {
+            print("   ⚠️ Skills hidden (not public): \(settings.skills.rawValue)")
+        }
+        return visible
     }
     
     private var shouldShowInterests: Bool {
-        profile.privacyTrust.visibilitySettings.interests.isVisible(isConnection: isConnection)
+        let settings = privacySettings
+        let visible = settings.interests.isVisible(isConnection: isConnection)
+        if !visible {
+            print("   ⚠️ Interests hidden (not public): \(settings.interests.rawValue)")
+        }
+        return visible
     }
     
     private var shouldShowLocation: Bool {
-        profile.privacyTrust.visibilitySettings.location.isVisible(isConnection: isConnection)
+        let settings = privacySettings
+        let visible = settings.location.isVisible(isConnection: isConnection)
+        if !visible {
+            print("   ⚠️ Location hidden (not public): \(settings.location.rawValue)")
+        }
+        return visible
     }
     
     private var shouldShowTimeslot: Bool {
-        profile.privacyTrust.visibilitySettings.timeslot.isVisible(isConnection: isConnection)
+        let settings = privacySettings
+        let visible = settings.timeslot.isVisible(isConnection: isConnection)
+        if !visible {
+            print("   ⚠️ Timeslot hidden (not public): \(settings.timeslot.rawValue)")
+        }
+        return visible
     }
 }
 
@@ -645,20 +681,40 @@ struct PublicProfileCardView: View {
     // For public views, isConnection is always false (only show public fields)
     private let isConnection: Bool = false
     
+    // Verify privacy settings are loaded from database
+    private var privacySettings: VisibilitySettings {
+        let settings = profile.privacyTrust.visibilitySettings
+        // Log privacy settings for debugging
+        print("🔒 Public Profile Privacy Settings for \(profile.coreIdentity.name):")
+        print("   - company: \(settings.company.rawValue) -> visible: \(settings.company.isVisible(isConnection: false))")
+        print("   - skills: \(settings.skills.rawValue) -> visible: \(settings.skills.isVisible(isConnection: false))")
+        print("   - interests: \(settings.interests.rawValue) -> visible: \(settings.interests.isVisible(isConnection: false))")
+        print("   - location: \(settings.location.rawValue) -> visible: \(settings.location.isVisible(isConnection: false))")
+        print("   - timeslot: \(settings.timeslot.rawValue) -> visible: \(settings.timeslot.isVisible(isConnection: false))")
+        return settings
+    }
+    
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                // Level 1: Core Information Area
-                level1CoreInfoView
-                
-                // Level 2: Matching Clues
-                level2MatchingCluesView
-                
-                // Level 3: Deep Understanding
-                level3DeepUnderstandingView
+        ZStack {
+            // Background - Same card style as UserProfileCardView
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color(red: 0.98, green: 0.97, blue: 0.95))
+                .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
+            
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Level 1: Core Information Area
+                    level1CoreInfoView
+                    
+                    // Level 2: Matching Clues
+                    level2MatchingCluesView
+                    
+                    // Level 3: Deep Understanding
+                    level3DeepUnderstandingView
+                }
             }
+            .cornerRadius(20)
         }
-        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
     }
     
     // MARK: - Level 1: Core Information Area (same as UserProfileCardView)
@@ -745,29 +801,23 @@ struct PublicProfileCardView: View {
             // Networking Intention Badge
             NetworkingIntentionBadgeView(intention: profile.networkingIntention.selectedIntention)
             
-            // Preferred Chat Format and Time Slot Summary (only if timeslot is public)
+            // Preferred Chat Format
+            HStack(spacing: 8) {
+                // Chat Format Icon
+                Image(systemName: chatFormatIcon)
+                    .font(.system(size: 16))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                
+                Text(profile.networkingPreferences.preferredChatFormat.displayName)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                
+                Spacer()
+            }
+            
+            // Available Timeslot Grid (same UI as Profile page)
             if shouldShowTimeslot {
-                HStack(spacing: 8) {
-                    // Chat Format Icon
-                    Image(systemName: chatFormatIcon)
-                        .font(.system(size: 16))
-                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                    
-                    Text(profile.networkingPreferences.preferredChatFormat.displayName)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                    
-                    Text("|")
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray)
-                    
-                    Text(profile.networkingPreferences.availableTimeslot.formattedSummary())
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray)
-                        .lineLimit(2)
-                    
-                    Spacer()
-                }
+                AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
             }
         }
         .padding(20)
@@ -1053,25 +1103,50 @@ struct PublicProfileCardView: View {
         .background(Color.white)
     }
     
-    // MARK: - Privacy Visibility Checks (only public fields)
+    // MARK: - Privacy Visibility Checks (strictly follows database privacy_trust.visibility_settings)
     private var shouldShowCompany: Bool {
-        profile.privacyTrust.visibilitySettings.company.isVisible(isConnection: isConnection)
+        let settings = privacySettings
+        let visible = settings.company.isVisible(isConnection: isConnection)
+        if !visible {
+            print("   ⚠️ Company hidden due to privacy: \(settings.company.rawValue), isConnection: \(isConnection)")
+        }
+        return visible
     }
     
     private var shouldShowSkills: Bool {
-        profile.privacyTrust.visibilitySettings.skills.isVisible(isConnection: isConnection)
+        let settings = privacySettings
+        let visible = settings.skills.isVisible(isConnection: isConnection)
+        if !visible {
+            print("   ⚠️ Skills hidden due to privacy: \(settings.skills.rawValue), isConnection: \(isConnection)")
+        }
+        return visible
     }
     
     private var shouldShowInterests: Bool {
-        profile.privacyTrust.visibilitySettings.interests.isVisible(isConnection: isConnection)
+        let settings = privacySettings
+        let visible = settings.interests.isVisible(isConnection: isConnection)
+        if !visible {
+            print("   ⚠️ Interests hidden due to privacy: \(settings.interests.rawValue), isConnection: \(isConnection)")
+        }
+        return visible
     }
     
     private var shouldShowLocation: Bool {
-        profile.privacyTrust.visibilitySettings.location.isVisible(isConnection: isConnection)
+        let settings = privacySettings
+        let visible = settings.location.isVisible(isConnection: isConnection)
+        if !visible {
+            print("   ⚠️ Location hidden due to privacy: \(settings.location.rawValue), isConnection: \(isConnection)")
+        }
+        return visible
     }
     
     private var shouldShowTimeslot: Bool {
-        profile.privacyTrust.visibilitySettings.timeslot.isVisible(isConnection: isConnection)
+        let settings = privacySettings
+        let visible = settings.timeslot.isVisible(isConnection: isConnection)
+        if !visible {
+            print("   ⚠️ Timeslot hidden due to privacy: \(settings.timeslot.rawValue), isConnection: \(isConnection)")
+        }
+        return visible
     }
 }
 
