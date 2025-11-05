@@ -525,15 +525,15 @@ struct ChatInterfaceView: View {
                                 .foregroundColor(realtimeIsOnline ? .green : .gray)
                             
                             // Match date
-                            if session.user.isMatched, let matchDate = session.user.matchDate {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 4, height: 4)
+                            // if session.user.isMatched, let matchDate = session.user.matchDate {
+                            //     Circle()
+                            //         .fill(Color.red)
+                            //         .frame(width: 4, height: 4)
                                 
-                                Text("Matched on \(formatMatchDate(matchDate))")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.red)
-                            }
+                            //     Text("Matched on \(formatMatchDate(matchDate))")
+                            //         .font(.system(size: 12))
+                            //         .foregroundColor(.red)
+                            // }
                         }
                     }
                     
