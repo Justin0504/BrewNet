@@ -443,6 +443,17 @@ struct ConnectionRequestsView: View {
                         print("⚠️ [请求页面] 加载临时消息失败: \(error.localizedDescription)")
                     }
                     
+                    // 获取请求者的在线状态
+                    var isOnline = false
+                    var lastSeen: Date? = nil
+                    if let onlineStatus = await supabaseService.getUserOnlineStatus(userId: invitation.senderId) {
+                        isOnline = onlineStatus.isOnline
+                        lastSeen = onlineStatus.lastSeen
+                        print("✅ [请求页面] \(requesterProfile.name) 在线状态: \(isOnline ? "在线" : "离线")")
+                    } else {
+                        print("⚠️ [请求页面] 无法获取 \(requesterProfile.name) 的在线状态")
+                    }
+                    
                     var connectionRequest = ConnectionRequest(
                         id: invitation.id,
                         requesterId: invitation.senderId,
@@ -453,6 +464,8 @@ struct ConnectionRequestsView: View {
                         isFeatured: false // 可以根据需要设置
                     )
                     connectionRequest.temporaryMessages = temporaryMessages
+                    connectionRequest.isOnline = isOnline
+                    connectionRequest.lastSeen = lastSeen
                     
                     convertedRequests.append(connectionRequest)
                 }
@@ -592,11 +605,41 @@ struct CompactRequestCard: View {
     
     var body: some View {
         HStack(spacing: 16) {
-            // Profile Photo
+            // Profile Photo - 加载真实的用户头像
             ZStack(alignment: .topTrailing) {
-                Image(systemName: "person.circle.fill")
-                    .font(.system(size: 70))
-                    .foregroundColor(BrewTheme.secondaryBrown)
+                Group {
+                    if let profileImageURL = request.requesterProfile.profilePhoto, !profileImageURL.isEmpty {
+                        AsyncImage(url: URL(string: profileImageURL)) { phase in
+                            switch phase {
+                            case .empty:
+                                ProgressView()
+                                    .frame(width: 70, height: 70)
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 70, height: 70)
+                                    .clipShape(Circle())
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.white, lineWidth: 2)
+                                    )
+                            case .failure(_):
+                                Image(systemName: "person.circle.fill")
+                                    .font(.system(size: 70))
+                                    .foregroundColor(BrewTheme.secondaryBrown)
+                            @unknown default:
+                                Image(systemName: "person.circle.fill")
+                                    .font(.system(size: 70))
+                                    .foregroundColor(BrewTheme.secondaryBrown)
+                            }
+                        }
+                    } else {
+                        Image(systemName: "person.circle.fill")
+                            .font(.system(size: 70))
+                            .foregroundColor(BrewTheme.secondaryBrown)
+                    }
+                }
                 
                 // Verified badge if featured
                 if request.isFeatured {
@@ -620,14 +663,14 @@ struct CompactRequestCard: View {
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(themeBrown)
                     
-                    // Online indicator
+                    // Online indicator - 根据实际状态显示
                     Circle()
-                        .fill(Color.green)
+                        .fill(request.isOnline ? Color.green : Color.gray)
                         .frame(width: 8, height: 8)
                     
-                    Text("Active now")
+                    Text(request.isOnline ? "Active" : "Offline")
                         .font(.system(size: 12))
-                        .foregroundColor(.gray)
+                        .foregroundColor(request.isOnline ? .green : .gray)
                 }
                 
                 // Temporary Message Bubble (if exists)
@@ -934,9 +977,39 @@ struct LeaveMessageView: View {
                 VStack(spacing: 16) {
                     // Profile info
                     VStack(spacing: 8) {
-                        Image(systemName: "person.circle.fill")
-                            .font(.system(size: 60))
-                            .foregroundColor(themeBrownLight)
+                        Group {
+                            if let profileImageURL = request.requesterProfile.profilePhoto, !profileImageURL.isEmpty {
+                                AsyncImage(url: URL(string: profileImageURL)) { phase in
+                                    switch phase {
+                                    case .empty:
+                                        ProgressView()
+                                            .frame(width: 60, height: 60)
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .frame(width: 60, height: 60)
+                                            .clipShape(Circle())
+                                            .overlay(
+                                                Circle()
+                                                    .stroke(Color.white, lineWidth: 2)
+                                            )
+                                    case .failure(_):
+                                        Image(systemName: "person.circle.fill")
+                                            .font(.system(size: 60))
+                                            .foregroundColor(themeBrownLight)
+                                    @unknown default:
+                                        Image(systemName: "person.circle.fill")
+                                            .font(.system(size: 60))
+                                            .foregroundColor(themeBrownLight)
+                                    }
+                                }
+                            } else {
+                                Image(systemName: "person.circle.fill")
+                                    .font(.system(size: 60))
+                                    .foregroundColor(themeBrownLight)
+                            }
+                        }
                         
                         Text("Leave a message for \(request.requesterProfile.name)")
                             .font(.system(size: 20, weight: .bold))
@@ -1197,29 +1270,121 @@ struct TemporaryChatsView: View {
         }
         
         do {
-            // 首先获取所有发送给我的临时消息（无论是否有连接请求）
-            let allTemporaryMessages = try await supabaseService.getTemporaryMessages(receiverId: currentUser.id)
-            print("🔍 [临时聊天] 查询到 \(allTemporaryMessages.count) 条发送给我的临时消息")
+            // 并行获取所有消息
+            async let receivedMessagesTask = supabaseService.getTemporaryMessages(receiverId: currentUser.id)
+            async let sentMessagesTask = supabaseService.getSentTemporaryMessages(senderId: currentUser.id)
             
-            // 按发送者分组
-            var messagesBySender: [String: [SupabaseMessage]] = [:]
-            for message in allTemporaryMessages {
-                if messagesBySender[message.senderId] == nil {
-                    messagesBySender[message.senderId] = []
+            let (receivedTemporaryMessages, sentTemporaryMessages) = try await (receivedMessagesTask, sentMessagesTask)
+            print("🔍 [临时聊天] 查询到 \(receivedTemporaryMessages.count) 条发送给我的临时消息，\(sentTemporaryMessages.count) 条我发送的临时消息")
+            
+            // 按对方用户ID分组
+            var messagesByOtherUser: [String: [SupabaseMessage]] = [:]
+            
+            // 处理发送给我的消息
+            for message in receivedTemporaryMessages {
+                let otherUserId = message.senderId
+                if messagesByOtherUser[otherUserId] == nil {
+                    messagesByOtherUser[otherUserId] = []
                 }
-                messagesBySender[message.senderId]?.append(message)
+                messagesByOtherUser[otherUserId]?.append(message)
             }
             
-            // 重新加载所有请求的临时消息
-            var updatedRequests: [ConnectionRequest] = []
+            // 处理我发送的消息
+            for message in sentTemporaryMessages {
+                let otherUserId = message.receiverId
+                if messagesByOtherUser[otherUserId] == nil {
+                    messagesByOtherUser[otherUserId] = []
+                }
+                messagesByOtherUser[otherUserId]?.append(message)
+            }
+            
+            print("🔍 [临时聊天] 共有 \(messagesByOtherUser.count) 个用户有临时消息")
+            
+            // 收集所有需要处理的用户ID
+            var allUserIds: Set<String> = []
+            for request in requests {
+                allUserIds.insert(request.requesterId)
+            }
+            for (userId, _) in messagesByOtherUser {
+                allUserIds.insert(userId)
+            }
+            
+            // 批量并行获取所有用户的消息、profile 和在线状态
+            var messagesMap: [String: [SupabaseMessage]] = [:]
+            var profilesMap: [String: BrewNetProfile] = [:]
+            var onlineStatusMap: [String: (isOnline: Bool, lastSeen: Date)] = [:]
+            
+            await withTaskGroup(of: Void.self) { group in
+                // 并行获取所有用户的消息
+                for userId in allUserIds {
+                    group.addTask {
+                        do {
+                            let messages = try await supabaseService.getTemporaryMessagesFromSender(
+                                receiverId: currentUser.id,
+                                senderId: userId
+                            )
+                            await MainActor.run {
+                                messagesMap[userId] = messages
+                            }
+                        } catch {
+                            print("⚠️ Failed to get messages for \(userId): \(error.localizedDescription)")
+                        }
+                    }
+                }
+                
+                // 并行获取所有用户的 profile（只获取虚拟请求需要的）
+                let virtualUserIds = messagesByOtherUser.keys.filter { userId in
+                    !requests.contains { $0.requesterId == userId }
+                }
+                for userId in virtualUserIds {
+                    group.addTask {
+                        if let profile = try? await supabaseService.getProfile(userId: userId) {
+                            await MainActor.run {
+                                profilesMap[userId] = profile.toBrewNetProfile()
+                            }
+                        }
+                    }
+                }
+                
+                // 并行获取所有用户的在线状态
+                for userId in allUserIds {
+                    group.addTask {
+                        if let status = await supabaseService.getUserOnlineStatus(userId: userId) {
+                            await MainActor.run {
+                                onlineStatusMap[userId] = (status.isOnline, status.lastSeen)
+                            }
+                        }
+                    }
+                }
+            }
             
             // 处理已有请求的消息
+            var updatedRequests: [ConnectionRequest] = []
             for request in requests {
-                do {
-                    let messages = try await supabaseService.getTemporaryMessagesFromSender(
-                        receiverId: currentUser.id,
-                        senderId: request.requesterId
-                    )
+                let messages = messagesMap[request.requesterId] ?? []
+                var temporaryMessages = messages.map { TemporaryMessage(from: $0) }
+                
+                // 限制最多10条消息（保留最新的10条）
+                if temporaryMessages.count > 10 {
+                    temporaryMessages.sort(by: { $0.timestamp < $1.timestamp })
+                    temporaryMessages = Array(temporaryMessages.suffix(10))
+                }
+                
+                let status = onlineStatusMap[request.requesterId]
+                var updatedRequest = request
+                updatedRequest.temporaryMessages = temporaryMessages
+                updatedRequest.isOnline = status?.isOnline ?? false
+                updatedRequest.lastSeen = status?.lastSeen
+                updatedRequests.append(updatedRequest)
+            }
+            
+            // 为没有连接请求但有临时消息的用户创建虚拟请求
+            for (otherUserId, _) in messagesByOtherUser {
+                // 检查是否已经有对应的请求
+                let hasRequest = updatedRequests.contains { $0.requesterId == otherUserId }
+                
+                if !hasRequest, let profile = profilesMap[otherUserId] {
+                    let messages = messagesMap[otherUserId] ?? []
                     var temporaryMessages = messages.map { TemporaryMessage(from: $0) }
                     
                     // 限制最多10条消息（保留最新的10条）
@@ -1228,68 +1393,34 @@ struct TemporaryChatsView: View {
                         temporaryMessages = Array(temporaryMessages.suffix(10))
                     }
                     
-                    var updatedRequest = request
-                    updatedRequest.temporaryMessages = temporaryMessages
-                    updatedRequests.append(updatedRequest)
-                } catch {
-                    print("⚠️ Failed to refresh messages for \(request.requesterProfile.name): \(error.localizedDescription)")
-                    updatedRequests.append(request)
-                }
-            }
-            
-            // 为没有连接请求但收到消息的发送者创建虚拟请求
-            for (senderId, messages) in messagesBySender {
-                // 检查是否已经有对应的请求
-                let hasRequest = updatedRequests.contains { $0.requesterId == senderId }
-                
-                if !hasRequest && !messages.isEmpty {
-                    // 为这个发送者创建虚拟请求
-                    do {
-                        // 获取发送者的 profile
-                        if let senderProfile = try? await supabaseService.getProfile(userId: senderId) {
-                            let brewNetProfile = senderProfile.toBrewNetProfile()
-                            let requesterProfile = ConnectionRequestProfile(
-                                profilePhoto: brewNetProfile.coreIdentity.profileImage,
-                                name: brewNetProfile.coreIdentity.name,
-                                jobTitle: brewNetProfile.professionalBackground.jobTitle ?? "",
-                                company: brewNetProfile.professionalBackground.currentCompany ?? "",
-                                location: brewNetProfile.coreIdentity.location ?? "",
-                                bio: brewNetProfile.coreIdentity.bio ?? "",
-                                expertise: brewNetProfile.professionalBackground.skills,
-                                backgroundImage: nil
-                            )
-                            
-                            // 获取双向消息
-                            let allMessages = try await supabaseService.getTemporaryMessagesFromSender(
-                                receiverId: currentUser.id,
-                                senderId: senderId
-                            )
-                            var temporaryMessages = allMessages.map { TemporaryMessage(from: $0) }
-                            
-                            // 限制最多10条消息（保留最新的10条）
-                            if temporaryMessages.count > 10 {
-                                temporaryMessages.sort(by: { $0.timestamp < $1.timestamp })
-                                temporaryMessages = Array(temporaryMessages.suffix(10))
-                            }
-                            
-                            let virtualRequest = ConnectionRequest(
-                                id: UUID().uuidString, // 虚拟ID
-                                requesterId: senderId,
-                                requesterName: requesterProfile.name,
-                                requesterProfile: requesterProfile,
-                                reasonForInterest: nil,
-                                createdAt: temporaryMessages.first?.timestamp ?? Date(),
-                                isFeatured: false
-                            )
-                            var mutableRequest = virtualRequest
-                            mutableRequest.temporaryMessages = temporaryMessages
-                            updatedRequests.append(mutableRequest)
-                            
-                            print("✅ [临时聊天] 为发送者 \(requesterProfile.name) 创建虚拟请求，包含 \(temporaryMessages.count) 条消息")
-                        }
-                    } catch {
-                        print("⚠️ Failed to create virtual request for sender \(senderId): \(error.localizedDescription)")
-                    }
+                    let requesterProfile = ConnectionRequestProfile(
+                        profilePhoto: profile.coreIdentity.profileImage,
+                        name: profile.coreIdentity.name,
+                        jobTitle: profile.professionalBackground.jobTitle ?? "",
+                        company: profile.professionalBackground.currentCompany ?? "",
+                        location: profile.coreIdentity.location ?? "",
+                        bio: profile.coreIdentity.bio ?? "",
+                        expertise: profile.professionalBackground.skills,
+                        backgroundImage: nil
+                    )
+                    
+                    let status = onlineStatusMap[otherUserId]
+                    let virtualRequest = ConnectionRequest(
+                        id: UUID().uuidString,
+                        requesterId: otherUserId,
+                        requesterName: requesterProfile.name,
+                        requesterProfile: requesterProfile,
+                        reasonForInterest: nil,
+                        createdAt: temporaryMessages.first?.timestamp ?? Date(),
+                        isFeatured: false
+                    )
+                    var mutableRequest = virtualRequest
+                    mutableRequest.temporaryMessages = temporaryMessages
+                    mutableRequest.isOnline = status?.isOnline ?? false
+                    mutableRequest.lastSeen = status?.lastSeen
+                    updatedRequests.append(mutableRequest)
+                    
+                    print("✅ [临时聊天] 为用户 \(requesterProfile.name) 创建虚拟请求，包含 \(temporaryMessages.count) 条消息")
                 }
             }
             
@@ -1392,10 +1523,40 @@ struct TemporaryChatCard: View {
     
     var body: some View {
         HStack(spacing: 16) {
-            // Profile Avatar
-            Image(systemName: "person.circle.fill")
-                .font(.system(size: 50))
-                .foregroundColor(themeBrownLight)
+            // Profile Avatar - 加载真实的用户头像
+            Group {
+                if let profileImageURL = request.requesterProfile.profilePhoto, !profileImageURL.isEmpty {
+                    AsyncImage(url: URL(string: profileImageURL)) { phase in
+                        switch phase {
+                        case .empty:
+                            ProgressView()
+                                .frame(width: 50, height: 50)
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 50, height: 50)
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.white, lineWidth: 2)
+                                )
+                        case .failure(_):
+                            Image(systemName: "person.circle.fill")
+                                .font(.system(size: 50))
+                                .foregroundColor(themeBrownLight)
+                        @unknown default:
+                            Image(systemName: "person.circle.fill")
+                                .font(.system(size: 50))
+                                .foregroundColor(themeBrownLight)
+                        }
+                    }
+                } else {
+                    Image(systemName: "person.circle.fill")
+                        .font(.system(size: 50))
+                        .foregroundColor(themeBrownLight)
+                }
+            }
             
             // Message Info
             VStack(alignment: .leading, spacing: 6) {

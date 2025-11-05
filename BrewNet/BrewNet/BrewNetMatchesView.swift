@@ -27,6 +27,8 @@ struct BrewNetMatchesView: View {
     @State private var savedFirstProfile: BrewNetProfile? = nil // 保存切换前的第一个profile
     @State private var hasAppearedBefore = false // 标记是否已经显示过
     @State private var shouldForceRefresh = false // 标记是否强制刷新（忽略缓存）
+    @State private var showingTemporaryChat = false
+    @State private var selectedProfileForChat: BrewNetProfile?
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -110,7 +112,24 @@ struct BrewNetMatchesView: View {
                     Spacer()
                     actionButtonsView
                         .padding(.bottom, 40) // 放在底部，距离底部一点距离
+                        .zIndex(100) // 确保按钮在最上层
                 }
+            }
+        }
+        .sheet(isPresented: $showingTemporaryChat) {
+            if let profile = selectedProfileForChat {
+                TemporaryChatFromProfileView(
+                    profile: profile,
+                    onDismiss: {
+                        showingTemporaryChat = false
+                        selectedProfileForChat = nil
+                    },
+                    onSend: { message in
+                        handleTemporaryChatSend(message: message, profile: profile)
+                    }
+                )
+                .environmentObject(authManager)
+                .environmentObject(supabaseService)
             }
         }
         .onAppear {
@@ -157,7 +176,7 @@ struct BrewNetMatchesView: View {
                         }
                     } else {
                         // 缓存为空或不是来自推荐系统，显示加载状态
-                        isLoading = true
+                    isLoading = true
                         
                         // 如果缓存为空，直接加载新数据
                         if cachedProfiles.isEmpty {
@@ -176,18 +195,18 @@ struct BrewNetMatchesView: View {
                                     } else {
                                         // 有有效数据，更新显示
                                         isLoading = false
-                                        if currentIndex < profiles.count {
-                                            let profile = profiles[currentIndex]
+                    if currentIndex < profiles.count {
+                        let profile = profiles[currentIndex]
                                             print("⚡ Display after quick validation: showing profile at index \(currentIndex) (\(profile.coreIdentity.name)) from last session")
                                         } else if !profiles.isEmpty {
                                             currentIndex = 0
                                             isLoading = false
                                         }
                                     }
-                                }
-                                
+                    }
+                    
                                 // 后台完整验证并更新（会进一步过滤并更新缓存）
-                                await validateAndDisplayCache()
+                        await validateAndDisplayCache()
                             }
                         }
                     }
@@ -254,11 +273,11 @@ struct BrewNetMatchesView: View {
                             .foregroundColor(.gray.opacity(0.8))
                             .multilineTextAlignment(.leading)
                     }
-                } else {
-                    Text("You've seen all available profiles!\n\(profiles.count) profiles loaded.")
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray)
-                        .multilineTextAlignment(.center)
+            } else {
+                Text("You've seen all available profiles!\n\(profiles.count) profiles loaded.")
+                    .font(.system(size: 16))
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
                 }
             }
             
@@ -303,7 +322,7 @@ struct BrewNetMatchesView: View {
     }
     
     private var actionButtonsView: some View {
-        HStack(spacing: 40) {
+        HStack(spacing: 30) {
             // Pass button
             Button(action: {
                 swipeLeft()
@@ -317,6 +336,23 @@ struct BrewNetMatchesView: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 24, weight: .bold))
                         .foregroundColor(.red)
+                }
+            }
+            .disabled(currentIndex >= profiles.count)
+            
+            // Temporary Chat button (新增)
+            Button(action: {
+                openTemporaryChat()
+            }) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 60, height: 60)
+                        .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 3)
+                    
+                    Image(systemName: "message.fill")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                 }
             }
             .disabled(currentIndex >= profiles.count)
@@ -337,6 +373,72 @@ struct BrewNetMatchesView: View {
                 }
             }
             .disabled(currentIndex >= profiles.count)
+        }
+    }
+    
+    private func openTemporaryChat() {
+        guard currentIndex < profiles.count else { return }
+        let profile = profiles[currentIndex]
+        selectedProfileForChat = profile
+        showingTemporaryChat = true
+    }
+    
+    private func handleTemporaryChatSend(message: String, profile: BrewNetProfile) {
+        guard let currentUser = authManager.currentUser else {
+            print("❌ No current user found")
+            return
+        }
+        
+        // 关闭聊天界面
+        showingTemporaryChat = false
+        selectedProfileForChat = nil
+        
+        // 发送临时消息并创建 connection request
+        Task {
+            do {
+                // 1. 发送临时消息
+                let _ = try await supabaseService.sendMessage(
+                    senderId: currentUser.id,
+                    receiverId: profile.userId,
+                    content: message,
+                    messageType: "temporary"
+                )
+                print("✅ Temporary message sent successfully")
+                
+                // 2. 创建 connection request (invitation)
+                var senderProfile: InvitationProfile? = nil
+                if let currentUserProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                    let brewNetProfile = currentUserProfile.toBrewNetProfile()
+                    senderProfile = brewNetProfile.toInvitationProfile()
+                }
+                
+                let invitation = try await supabaseService.sendInvitation(
+                    senderId: currentUser.id,
+                    receiverId: profile.userId,
+                    reasonForInterest: nil,
+                    senderProfile: senderProfile
+                )
+                
+                print("✅ Connection request created: \(invitation.id)")
+                
+                // 3. 记录 Like 交互（因为发送临时消息相当于表达兴趣）
+                await recommendationService.recordLike(
+                    userId: currentUser.id,
+                    targetUserId: profile.userId
+                )
+                
+                // 4. 跳到下一个 profile
+                await MainActor.run {
+                    moveToNextProfile()
+                }
+                
+            } catch {
+                print("❌ Failed to send temporary chat: \(error.localizedDescription)")
+                // 即使失败也跳到下一个 profile
+                await MainActor.run {
+                    moveToNextProfile()
+                }
+            }
         }
     }
     
@@ -380,9 +482,9 @@ struct BrewNetMatchesView: View {
             return
         }
         
-        let profile = profiles[currentIndex]
-        passedProfiles.append(profile)
-        
+            let profile = profiles[currentIndex]
+            passedProfiles.append(profile)
+            
         // 立即从列表中移除已拒绝的 profile，避免连续闪过
         profiles.remove(at: currentIndex)
         
@@ -407,14 +509,14 @@ struct BrewNetMatchesView: View {
         saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
         
         // 记录 Pass 交互（异步，不阻塞UI）
-        Task {
-            await recommendationService.recordPass(
-                userId: currentUser.id,
-                targetUserId: profile.userId
-            )
-        }
-        
-        print("❌ Passed profile: \(profile.coreIdentity.name)")
+                Task {
+                    await recommendationService.recordPass(
+                        userId: currentUser.id,
+                        targetUserId: profile.userId
+                    )
+            }
+            
+            print("❌ Passed profile: \(profile.coreIdentity.name)")
     }
     
     private func likeProfile() {
@@ -469,14 +571,14 @@ struct BrewNetMatchesView: View {
                         print("✅ Updated cache after sending invitation (removed \(profile.coreIdentity.name))")
                     } else {
                         // 如果缓存为空，清除持久化缓存
-                        if let currentUser = authManager.currentUser {
-                            let cacheKey = "matches_cache_\(currentUser.id)"
-                            let timeKey = "matches_cache_time_\(currentUser.id)"
-                            let sourceKey = "matches_cache_source_\(currentUser.id)"
-                            UserDefaults.standard.removeObject(forKey: cacheKey)
-                            UserDefaults.standard.removeObject(forKey: timeKey)
-                            UserDefaults.standard.removeObject(forKey: sourceKey)
-                            isCacheFromRecommendation = false
+                    if let currentUser = authManager.currentUser {
+                        let cacheKey = "matches_cache_\(currentUser.id)"
+                        let timeKey = "matches_cache_time_\(currentUser.id)"
+                        let sourceKey = "matches_cache_source_\(currentUser.id)"
+                        UserDefaults.standard.removeObject(forKey: cacheKey)
+                        UserDefaults.standard.removeObject(forKey: timeKey)
+                        UserDefaults.standard.removeObject(forKey: sourceKey)
+                        isCacheFromRecommendation = false
                             print("🗑️ Cleared local cache (empty after removing invited user)")
                         }
                     }
@@ -1097,30 +1199,30 @@ struct BrewNetMatchesView: View {
                         hasMoreProfiles = false
                         // 不保存空缓存
                     } else {
-                        // 确保按照推荐分数排序显示（只显示最终验证后的结果）
-                        profiles = finalValidProfiles
-                        cachedProfiles = finalValidProfiles
-                        lastLoadTime = Date()
-                        isLoading = false
-                        saveCachedProfilesToStorage(isFromRecommendation: true) // 标记为来自推荐系统
-                        hasMoreProfiles = false // Two-Tower 返回固定数量
-                        
-                        // 尝试保持当前索引（如果有效），否则使用保存的索引
-                        let savedIndex = restoreCurrentIndex()
-                        if savedIndex < finalValidProfiles.count {
-                            currentIndex = savedIndex
-                            print("📌 Restored index from previous session: \(savedIndex)")
-                        } else {
-                            currentIndex = 0
-                        }
-                        
-                        // 保存当前状态
-                        saveCachedProfilesToStorage(isFromRecommendation: true)
-                        
-                        print("✅ Two-Tower recommendations loaded: \(finalValidProfiles.count) profiles (filtered from \(brewNetProfiles.count))")
-                        print("📊 Top 5 Scores: \(sortedRecommendations.prefix(5).map { String(format: "%.3f", $0.score) }.joined(separator: ", "))")
-                        if let firstProfile = finalValidProfiles.first {
-                            print("📊 First profile: \(firstProfile.coreIdentity.name) (score: \(sortedRecommendations.first?.score ?? 0.0))")
+                    // 确保按照推荐分数排序显示（只显示最终验证后的结果）
+                    profiles = finalValidProfiles
+                    cachedProfiles = finalValidProfiles
+                    lastLoadTime = Date()
+                    isLoading = false
+                    saveCachedProfilesToStorage(isFromRecommendation: true) // 标记为来自推荐系统
+                    hasMoreProfiles = false // Two-Tower 返回固定数量
+                    
+                    // 尝试保持当前索引（如果有效），否则使用保存的索引
+                    let savedIndex = restoreCurrentIndex()
+                    if savedIndex < finalValidProfiles.count {
+                        currentIndex = savedIndex
+                        print("📌 Restored index from previous session: \(savedIndex)")
+                    } else {
+                        currentIndex = 0
+                    }
+                    
+                    // 保存当前状态
+                    saveCachedProfilesToStorage(isFromRecommendation: true)
+                    
+                    print("✅ Two-Tower recommendations loaded: \(finalValidProfiles.count) profiles (filtered from \(brewNetProfiles.count))")
+                    print("📊 Top 5 Scores: \(sortedRecommendations.prefix(5).map { String(format: "%.3f", $0.score) }.joined(separator: ", "))")
+                    if let firstProfile = finalValidProfiles.first {
+                        print("📊 First profile: \(firstProfile.coreIdentity.name) (score: \(sortedRecommendations.first?.score ?? 0.0))")
                         }
                     }
                 }
@@ -1261,7 +1363,7 @@ struct BrewNetMatchesView: View {
                 
                 // 清除完成后，重新加载（会使用 forceRefresh）
                 await MainActor.run {
-                    loadProfiles()
+        loadProfiles()
                 }
             } catch {
                 print("⚠️ Failed to clear server-side cache: \(error.localizedDescription)")

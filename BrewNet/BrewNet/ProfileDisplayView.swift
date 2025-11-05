@@ -1247,10 +1247,40 @@ struct SentInvitationRowView: View {
             }
         }) {
             HStack(spacing: 12) {
-                // Avatar
-                Image(systemName: "person.circle.fill")
-                    .font(.system(size: 50))
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                // Avatar - 加载真实的用户头像
+                Group {
+                    if let profileImageURL = receiverProfile?.coreIdentity.profileImage, !profileImageURL.isEmpty {
+                        AsyncImage(url: URL(string: profileImageURL)) { phase in
+                            switch phase {
+                            case .empty:
+                                ProgressView()
+                                    .frame(width: 50, height: 50)
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 50, height: 50)
+                                    .clipShape(Circle())
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.white, lineWidth: 2)
+                                    )
+                            case .failure(_):
+                                Image(systemName: "person.circle.fill")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            @unknown default:
+                                Image(systemName: "person.circle.fill")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            }
+                        }
+                    } else {
+                        Image(systemName: "person.circle.fill")
+                            .font(.system(size: 50))
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    }
+                }
                 
                 // User Info
                 VStack(alignment: .leading, spacing: 4) {
