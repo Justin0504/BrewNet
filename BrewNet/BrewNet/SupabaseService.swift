@@ -682,12 +682,28 @@ class SupabaseService: ObservableObject {
                     return nil
                 } else if profiles.count == 1 {
                     let profile = profiles.first!
+                    // Verify privacy_trust is loaded from database
                     print("✅ Profile fetched successfully: \(profile.id)")
+                    print("🔒 Privacy Trust loaded - visibility_settings:")
+                    print("   - company: \(profile.privacyTrust.visibilitySettings.company.rawValue)")
+                    print("   - skills: \(profile.privacyTrust.visibilitySettings.skills.rawValue)")
+                    print("   - interests: \(profile.privacyTrust.visibilitySettings.interests.rawValue)")
+                    print("   - location: \(profile.privacyTrust.visibilitySettings.location.rawValue)")
+                    print("   - timeslot: \(profile.privacyTrust.visibilitySettings.timeslot.rawValue)")
+                    print("   - email: \(profile.privacyTrust.visibilitySettings.email.rawValue)")
+                    print("   - phone_number: \(profile.privacyTrust.visibilitySettings.phoneNumber.rawValue)")
                     return profile
                 } else {
                     print("⚠️ Multiple profiles found for user: \(userId), returning the first one")
                     let profile = profiles.first!
                     print("✅ Profile fetched successfully: \(profile.id)")
+                    // Verify privacy_trust is loaded from database
+                    print("🔒 Privacy Trust loaded - visibility_settings:")
+                    print("   - company: \(profile.privacyTrust.visibilitySettings.company.rawValue)")
+                    print("   - skills: \(profile.privacyTrust.visibilitySettings.skills.rawValue)")
+                    print("   - interests: \(profile.privacyTrust.visibilitySettings.interests.rawValue)")
+                    print("   - location: \(profile.privacyTrust.visibilitySettings.location.rawValue)")
+                    print("   - timeslot: \(profile.privacyTrust.visibilitySettings.timeslot.rawValue)")
                     return profile
                 }
             } catch let decodeError {

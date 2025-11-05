@@ -18,6 +18,9 @@ struct ProfileDisplayView: View {
     @State private var sentInvitations: [SupabaseInvitation] = []
     @State private var isLoadingInvitations = false
     
+    // State variable for showing profile card
+    @State private var showingProfileCard = false
+    
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
@@ -29,6 +32,9 @@ struct ProfileDisplayView: View {
                         profile = updatedProfile
                         // 同时调用父视图的回调，确保更新同步
                         onProfileUpdated?(updatedProfile)
+                    },
+                    onShowProfileCard: {
+                        showingProfileCard = true
                     }
                 )
                 .padding(.horizontal, 16)
@@ -65,6 +71,15 @@ struct ProfileDisplayView: View {
                     .environmentObject(authManager)
                     .environmentObject(supabaseService)
             }
+        }
+        .sheet(isPresented: $showingProfileCard) {
+            // 显示用户自己的 profile 卡片
+            // 使用 isConnection: true 来显示 connections_only 的内容（因为是自己查看自己）
+            // 但 private 的内容仍然不会显示（符合隐私设置）
+            UserProfileCardSheetView(
+                profile: profile,
+                isConnection: true // 自己查看自己，所以 connections_only 的内容也应该显示
+            )
         }
     }
     
@@ -181,6 +196,7 @@ struct ProfileHeaderView: View {
     let profile: BrewNetProfile
     var onEditProfile: (() -> Void)?
     var onProfileUpdated: ((BrewNetProfile) -> Void)?
+    var onShowProfileCard: (() -> Void)?
     
     @EnvironmentObject var supabaseService: SupabaseService
     @EnvironmentObject var authManager: AuthManager
@@ -219,149 +235,155 @@ struct ProfileHeaderView: View {
     var body: some View {
         VStack(spacing: 12) {
             // Top Row: Avatar + Progress Circle on left, Name + Age + Icons on right
-            HStack(alignment: .top, spacing: 16) {
-                // Left: Profile Image with Progress Circle
-                ZStack {
-                    // Progress Circle (outer, red)
-                    Circle()
-                        .stroke(Color.red.opacity(0.3), lineWidth: 4)
-                        .frame(width: 100, height: 100)
-                    
-                    // Progress Circle (filled portion, red)
-                    Circle()
-                        .trim(from: 0, to: CGFloat(profileCompletionPercentage) / 100)
-                        .stroke(Color.red, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                        .frame(width: 100, height: 100)
-                        .rotationEffect(.degrees(-90))
-                    
-                    // Profile Image (inner)
-                    AsyncImage(url: URL(string: profile.coreIdentity.profileImage ?? "")) { image in
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        Image(systemName: "person.circle.fill")
-                            .font(.system(size: 60))
-                            .foregroundColor(.gray)
-                    }
-                    .frame(width: 84, height: 84)
-                    .clipShape(Circle())
-                    .overlay(
+            // 整个区域包装成可点击的 Button
+            Button(action: {
+                onShowProfileCard?()
+            }) {
+                HStack(alignment: .top, spacing: 16) {
+                    // Left: Profile Image with Progress Circle
+                    ZStack {
+                        // Progress Circle (outer, red)
                         Circle()
-                            .stroke(Color.white, lineWidth: 2)
-                    )
-                    
-                    // Percentage badge at bottom
-                    VStack {
-                        Spacer()
-                        Text("\(profileCompletionPercentage)%")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.black)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(Color.white)
-                            .cornerRadius(8)
-                            .offset(y: 5)
-                    }
-                    .frame(width: 100, height: 100)
-                }
-                
-                // Right: Name, Age, Icons, and Company/Title button
-                VStack(alignment: .leading, spacing: 8) {
-                    // Name and Age (横向并列)
-                    HStack(spacing: 4) {
-                        Text(profile.coreIdentity.name)
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundColor(.black)
+                            .stroke(Color.red.opacity(0.3), lineWidth: 4)
+                            .frame(width: 100, height: 100)
                         
-                        // Age would need to be calculated from birthdate if available
-                        // For now, we'll skip it if not available
-                    }
-                    
-                    // Icons row (横向并列)
-                    HStack(spacing: 12) {
-                        // Camera icon (blue) - 可点击更换头像
-                        PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                            ZStack {
-                                if isUploadingImage {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .blue))
-                                        .scaleEffect(0.8)
-                                } else {
-                                    Image(systemName: "camera.fill")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.blue)
-                                }
-                            }
-                            .frame(width: 24, height: 24)
-                            .background(Color.blue.opacity(0.1))
-                            .clipShape(Circle())
-                        }
+                        // Progress Circle (filled portion, red)
+                        Circle()
+                            .trim(from: 0, to: CGFloat(profileCompletionPercentage) / 100)
+                            .stroke(Color.red, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                            .frame(width: 100, height: 100)
+                            .rotationEffect(.degrees(-90))
                         
-                        // Verification icon (grey)
-                        Image(systemName: "person.badge.shield.checkmark.fill")
-                            .font(.system(size: 14))
-                            .foregroundColor(.gray)
-                            .frame(width: 24, height: 24)
-                            .background(Color.gray.opacity(0.1))
-                            .clipShape(Circle())
-                    }
-                    
-                    // Company/School and Title display (仅显示，不可点击)
-                    HStack {
-                        // 优先显示公司，如果没有则显示学校
-                        if let company = profile.professionalBackground.currentCompany, !company.isEmpty {
-                            if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
-                                Text("\(company) · \(jobTitle)")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.black)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                            } else {
-                                Text(company)
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.black)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                            }
-                        } else if let education = profile.professionalBackground.education, !education.isEmpty {
-                            // 如果没有公司，显示学校
-                            if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
-                                Text("\(education) · \(jobTitle)")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.black)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                            } else {
-                                Text(education)
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.black)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                            }
-                        } else {
-                            // 如果都没有，显示占位符
-                            Text("Complete Your Profile")
-                                .font(.system(size: 16, weight: .medium))
+                        // Profile Image (inner)
+                        AsyncImage(url: URL(string: profile.coreIdentity.profileImage ?? "")) { image in
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            Image(systemName: "person.circle.fill")
+                                .font(.system(size: 60))
                                 .foregroundColor(.gray)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
+                        }
+                        .frame(width: 84, height: 84)
+                        .clipShape(Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white, lineWidth: 2)
+                        )
+                        
+                        // Percentage badge at bottom
+                        VStack {
+                            Spacer()
+                            Text("\(profileCompletionPercentage)%")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(Color.white)
+                                .cornerRadius(8)
+                                .offset(y: 5)
+                        }
+                        .frame(width: 100, height: 100)
+                    }
+                    
+                    // Right: Name, Age, Icons, and Company/Title button
+                    VStack(alignment: .leading, spacing: 8) {
+                        // Name and Age (横向并列)
+                        HStack(spacing: 4) {
+                            Text(profile.coreIdentity.name)
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundColor(.black)
+                            
+                            // Age would need to be calculated from birthdate if available
+                            // For now, we'll skip it if not available
                         }
                         
-                        Spacer()
+                        // Icons row (横向并列)
+                        HStack(spacing: 12) {
+                            // Camera icon (blue) - 可点击更换头像
+                            PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                                ZStack {
+                                    if isUploadingImage {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Image(systemName: "camera.fill")
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.blue)
+                                    }
+                                }
+                                .frame(width: 24, height: 24)
+                                .background(Color.blue.opacity(0.1))
+                                .clipShape(Circle())
+                            }
+                            
+                            // Verification icon (grey)
+                            Image(systemName: "person.badge.shield.checkmark.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(.gray)
+                                .frame(width: 24, height: 24)
+                                .background(Color.gray.opacity(0.1))
+                                .clipShape(Circle())
+                        }
+                        
+                        // Company/School and Title display (仅显示，不可点击)
+                        HStack {
+                            // 优先显示公司，如果没有则显示学校
+                            if let company = profile.professionalBackground.currentCompany, !company.isEmpty {
+                                if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
+                                    Text("\(company) · \(jobTitle)")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.black)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                } else {
+                                    Text(company)
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.black)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                }
+                            } else if let education = profile.professionalBackground.education, !education.isEmpty {
+                                // 如果没有公司，显示学校
+                                if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
+                                    Text("\(education) · \(jobTitle)")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.black)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                } else {
+                                    Text(education)
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.black)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                }
+                            } else {
+                                // 如果都没有，显示占位符
+                                Text("Complete Your Profile")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.gray)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                            
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(Color.white)
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                        )
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(Color.white)
-                    .cornerRadius(12)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-                    )
+                    
+                    Spacer()
                 }
-                
-                Spacer()
             }
+            .buttonStyle(PlainButtonStyle())
         }
         .padding(20)
         .background(Color.white)
@@ -1553,6 +1575,504 @@ struct PublicProfileHeaderView: View {
         }
     }
 }
+
+// MARK: - User Profile Card Sheet View
+struct UserProfileCardSheetView: View {
+    let profile: BrewNetProfile
+    let isConnection: Bool // Whether the current user is connected to this profile
+    
+    @Environment(\.dismiss) var dismiss
+    
+    // Verify privacy settings are loaded from database
+    private var privacySettings: VisibilitySettings {
+        let settings = profile.privacyTrust.visibilitySettings
+        // Log privacy settings for debugging
+        print("🔒 Profile Page Privacy Settings for \(profile.coreIdentity.name):")
+        print("   - company: \(settings.company.rawValue) -> visible: \(settings.company.isVisible(isConnection: isConnection))")
+        print("   - skills: \(settings.skills.rawValue) -> visible: \(settings.skills.isVisible(isConnection: isConnection))")
+        print("   - interests: \(settings.interests.rawValue) -> visible: \(settings.interests.isVisible(isConnection: isConnection))")
+        print("   - location: \(settings.location.rawValue) -> visible: \(settings.location.isVisible(isConnection: isConnection))")
+        print("   - timeslot: \(settings.timeslot.rawValue) -> visible: \(settings.timeslot.isVisible(isConnection: isConnection))")
+        print("   - isConnection: \(isConnection)")
+        return settings
+    }
+    
+    private let screenWidth = UIScreen.main.bounds.width
+    private let screenHeight = UIScreen.main.bounds.height
+    
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                // Background
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color(red: 0.98, green: 0.97, blue: 0.95))
+                    .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
+                    .frame(width: screenWidth - 40, height: screenHeight * 0.85)
+                
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Level 1: Core Information Area
+                        level1CoreInfoView
+                        
+                        // Level 2: Matching Clues
+                        level2MatchingCluesView
+                        
+                        // Level 3: Deep Understanding
+                        level3DeepUnderstandingView
+                    }
+                    .frame(maxWidth: screenWidth - 40)
+                }
+                .frame(height: screenHeight * 0.85)
+                .cornerRadius(20)
+            }
+            .navigationTitle("Profile")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Level 1: Core Information Area
+    private var level1CoreInfoView: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Profile Image and Name Section
+            HStack(alignment: .top, spacing: 16) {
+                // Profile Image
+                profileImageView
+                
+                // Name and Pronouns
+                VStack(alignment: .leading, spacing: 8) {
+                    // Name - 独立换行
+                    Text(profile.coreIdentity.name)
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .lineLimit(nil)
+                    
+                    // Pronouns - 独立一行
+                    if let pronouns = profile.coreIdentity.pronouns {
+                        Text(pronouns)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.gray)
+                    }
+                    
+                    // Headline / Bio
+                    if let bio = profile.coreIdentity.bio, !bio.isEmpty {
+                        Text(bio)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .lineLimit(nil)
+                    }
+                }
+                
+                Spacer()
+            }
+            
+            // Professional Info (only if company visibility is public or connections_only)
+            if shouldShowCompany {
+                HStack(spacing: 8) {
+                    if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
+                        Text(jobTitle)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.primary)
+                            .lineLimit(nil)
+                        
+                        if let company = profile.professionalBackground.currentCompany, !company.isEmpty {
+                            Text("@")
+                                .font(.system(size: 18))
+                                .foregroundColor(.gray)
+                            Text(company)
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.primary)
+                                .lineLimit(nil)
+                        }
+                    }
+                    
+                    Spacer(minLength: 0)
+                }
+            }
+            
+            // Industry and Experience Level
+            HStack(spacing: 8) {
+                if let industry = profile.professionalBackground.industry, !industry.isEmpty {
+                    Text(industry)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.gray)
+                        .lineLimit(nil)
+                    
+                    if profile.professionalBackground.experienceLevel != .entry {
+                        Text("·")
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray)
+                        
+                        Text(profile.professionalBackground.experienceLevel.displayName)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.gray)
+                    }
+                }
+                
+                Spacer(minLength: 0)
+            }
+            
+            // Networking Intention Badge
+            NetworkingIntentionBadgeView(intention: profile.networkingIntention.selectedIntention)
+            
+            // Preferred Chat Format
+            HStack(spacing: 8) {
+                // Chat Format Icon
+                Image(systemName: chatFormatIcon)
+                    .font(.system(size: 16))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                
+                Text(profile.networkingPreferences.preferredChatFormat.displayName)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                
+                Spacer()
+            }
+            
+            // Available Timeslot Grid (same UI as Profile page)
+            if shouldShowTimeslot {
+                AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
+            }
+        }
+        .padding(20)
+        .background(Color.white)
+    }
+    
+    private var profileImageView: some View {
+        ZStack {
+            if let imageUrl = profile.coreIdentity.profileImage, !imageUrl.isEmpty,
+               let url = URL(string: imageUrl) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    case .failure(_), .empty:
+                        placeholderImageView
+                    @unknown default:
+                        placeholderImageView
+                    }
+                }
+            } else {
+                placeholderImageView
+            }
+        }
+        .frame(width: 80, height: 80)
+        .clipShape(Circle())
+        .overlay(
+            Circle()
+                .stroke(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.3), lineWidth: 2)
+        )
+    }
+    
+    private var placeholderImageView: some View {
+        LinearGradient(
+            gradient: Gradient(colors: [
+                Color(red: 0.6, green: 0.4, blue: 0.2),
+                Color(red: 0.4, green: 0.2, blue: 0.1)
+            ]),
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .overlay(
+            Image(systemName: "person.fill")
+                .font(.system(size: 40))
+                .foregroundColor(.white)
+        )
+    }
+    
+    private var chatFormatIcon: String {
+        switch profile.networkingPreferences.preferredChatFormat {
+        case .virtual:
+            return "video.fill"
+        case .inPerson:
+            return "person.2.fill"
+        case .either:
+            return "repeat"
+        }
+    }
+    
+    // MARK: - Level 2: Matching Clues
+    private var level2MatchingCluesView: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Divider()
+            
+            // Sub-Intentions
+            if !profile.networkingIntention.selectedSubIntentions.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "sparkles")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("What I'm Looking For")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    
+                    FlowLayout(spacing: 8) {
+                        ForEach(profile.networkingIntention.selectedSubIntentions, id: \.self) { subIntention in
+                            Text(subIntention.displayName)
+                                .font(.system(size: 15))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                                .cornerRadius(12)
+                        }
+                    }
+                }
+            }
+            
+            // Skills (only if public or connections_only)
+            if shouldShowSkills && !profile.professionalBackground.skills.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "wrench.and.screwdriver.fill")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("Skills & Expertise")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    
+                    FlowLayout(spacing: 8) {
+                        ForEach(profile.professionalBackground.skills, id: \.self) { skill in
+                            Text(skill)
+                                .font(.system(size: 15))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .cornerRadius(12)
+                        }
+                    }
+                }
+            }
+            
+            // Values
+            if !profile.personalitySocial.valuesTags.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "message.fill")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("Vibe & Values")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    
+                    FlowLayout(spacing: 8) {
+                        ForEach(profile.personalitySocial.valuesTags, id: \.self) { value in
+                            Text(value)
+                                .font(.system(size: 15))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                                .cornerRadius(12)
+                        }
+                    }
+                }
+            }
+            
+            // Hobbies & Interests (only if public or connections_only)
+            if shouldShowInterests && !profile.personalitySocial.hobbies.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "target")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("Interests")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(profile.personalitySocial.hobbies, id: \.self) { hobby in
+                                Text(hobby)
+                                    .font(.system(size: 15))
+                                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                                    .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                                    .cornerRadius(12)
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Preferred Meeting Vibe
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Meeting Vibe:")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.gray)
+                    Text(profile.personalitySocial.preferredMeetingVibe.displayName)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(Color.white)
+    }
+    
+    // MARK: - Level 3: Deep Understanding
+    private var level3DeepUnderstandingView: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Divider()
+            
+            // Self Introduction
+            if let selfIntro = profile.personalitySocial.selfIntroduction, !selfIntro.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "hand.wave.fill")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("About Me")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    
+                    Text(selfIntro)
+                        .font(.system(size: 16))
+                        .foregroundColor(.gray)
+                        .lineSpacing(4)
+                }
+            }
+            
+            // Education
+            if let education = profile.professionalBackground.education, !education.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "graduationcap.fill")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("Education")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    
+                    Text(education)
+                        .font(.system(size: 16))
+                        .foregroundColor(.gray)
+                }
+            }
+            
+            // Work Experience (summary)
+            if !profile.professionalBackground.workExperiences.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Image(systemName: "briefcase.fill")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("Experience")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    
+                    ForEach(profile.professionalBackground.workExperiences.prefix(3), id: \.id) { workExp in
+                        WorkExperienceRowView(workExp: workExp)
+                    }
+                    
+                    if let yearsOfExp = profile.professionalBackground.yearsOfExperience {
+                        Text("Total: \(String(format: "%.1f", yearsOfExp)) years of experience")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(.gray)
+                            .italic()
+                    }
+                }
+            }
+            
+            // Personal Website
+            if let website = profile.coreIdentity.personalWebsite, !website.isEmpty,
+               let websiteUrl = URL(string: website) {
+                Link(destination: websiteUrl) {
+                    HStack {
+                        Image(systemName: "globe")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("View Portfolio")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                    .cornerRadius(12)
+                }
+            }
+            
+            // Location (only if public or connections_only)
+            if shouldShowLocation, let location = profile.coreIdentity.location, !location.isEmpty {
+                HStack {
+                    Image(systemName: "location.fill")
+                        .foregroundColor(.gray)
+                        .font(.system(size: 16))
+                    Text(location)
+                        .font(.system(size: 16))
+                        .foregroundColor(.gray)
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .padding(.bottom, 30)
+        .background(Color.white)
+    }
+    
+    // MARK: - Privacy Visibility Checks (strictly follows database privacy_trust.visibility_settings)
+    // Shows fields marked as "public" or "connections_only" when isConnection is true
+    private var shouldShowCompany: Bool {
+        let settings = privacySettings
+        let visible = settings.company.isVisible(isConnection: isConnection)
+        if !visible {
+            print("   ⚠️ Company hidden: \(settings.company.rawValue), isConnection: \(isConnection)")
+        }
+        return visible
+    }
+    
+    private var shouldShowSkills: Bool {
+        let settings = privacySettings
+        let visible = settings.skills.isVisible(isConnection: isConnection)
+        if !visible {
+            print("   ⚠️ Skills hidden: \(settings.skills.rawValue), isConnection: \(isConnection)")
+        }
+        return visible
+    }
+    
+    private var shouldShowInterests: Bool {
+        let settings = privacySettings
+        let visible = settings.interests.isVisible(isConnection: isConnection)
+        if !visible {
+            print("   ⚠️ Interests hidden: \(settings.interests.rawValue), isConnection: \(isConnection)")
+        }
+        return visible
+    }
+    
+    private var shouldShowLocation: Bool {
+        let settings = privacySettings
+        let visible = settings.location.isVisible(isConnection: isConnection)
+        if !visible {
+            print("   ⚠️ Location hidden: \(settings.location.rawValue), isConnection: \(isConnection)")
+        }
+        return visible
+    }
+    
+    private var shouldShowTimeslot: Bool {
+        let settings = privacySettings
+        let visible = settings.timeslot.isVisible(isConnection: isConnection)
+        if !visible {
+            print("   ⚠️ Timeslot hidden: \(settings.timeslot.rawValue), isConnection: \(isConnection)")
+        }
+        return visible
+    }
+}
+
+// Note: NetworkingIntentionBadgeView, WorkExperienceRowView, and FlowLayout are defined in UserProfileCardView.swift
+// They are reused here to avoid code duplication
 
 // MARK: - Preview
 struct ProfileDisplayView_Previews: PreviewProvider {

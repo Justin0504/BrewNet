@@ -18,7 +18,8 @@ struct BrewNetMatchesView: View {
     @State private var isLoadingMore = false
     @State private var isRefreshing = false // 后台刷新标识
     @State private var hasMoreProfiles = true
-    @State private var isConnection: Bool = false // Whether the viewer is connected to profiles
+    // For main matching page, isConnection is always false (only show public fields)
+    private let isConnection: Bool = false
     @State private var errorMessage: String?
     @State private var totalFetched = 0
     @State private var totalFiltered = 0
