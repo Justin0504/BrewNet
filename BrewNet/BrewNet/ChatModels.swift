@@ -280,8 +280,9 @@ struct ChatSession: Identifiable, Codable {
     let createdAt: Date
     var lastMessageAt: Date
     var isActive: Bool
+    var isHidden: Bool // 是否被归档到 Hidden
     
-    init(user: ChatUser, messages: [ChatMessage] = [], aiSuggestions: [AISuggestion] = [], isActive: Bool = true) {
+    init(user: ChatUser, messages: [ChatMessage] = [], aiSuggestions: [AISuggestion] = [], isActive: Bool = true, isHidden: Bool = false) {
         self.id = UUID()
         self.user = user
         self.messages = messages
@@ -290,6 +291,7 @@ struct ChatSession: Identifiable, Codable {
         // 使用最后一条消息的时间，如果没有消息则使用当前时间
         self.lastMessageAt = messages.last?.timestamp ?? Date()
         self.isActive = isActive
+        self.isHidden = isHidden
     }
     
     mutating func addMessage(_ message: ChatMessage) {
@@ -312,8 +314,14 @@ struct ChatSession: Identifiable, Codable {
     }
     
     // 计算未读消息数（来自对方且未读的消息）
+    // 注意：Hidden 的聊天不计算未读消息数，由调用方控制
     var unreadCount: Int {
         return messages.filter { !$0.isFromUser && !$0.isRead }.count
+    }
+    
+    // 判断最后一条消息是否来自用户
+    var lastMessageIsFromUser: Bool {
+        return messages.last?.isFromUser ?? false
     }
 }
 

@@ -166,7 +166,7 @@ struct BrewNetMatchesView: View {
                 VStack {
                     Spacer()
                     actionButtonsView
-                        .padding(.bottom, 40) // 放在底部，距离底部一点距离
+                        .padding(.bottom, 55) // 放在底部，距离底部一点距离，避免与导航栏重叠
                         .zIndex(100) // 确保按钮在最上层
                 }
             }

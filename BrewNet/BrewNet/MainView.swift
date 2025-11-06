@@ -151,6 +151,10 @@ struct MainView: View {
             return
         }
         
+        // 获取 hidden 用户 ID 列表（从 UserDefaults 读取）
+        let hiddenUsersKey = "hidden_chat_users_\(currentUser.id)"
+        let hiddenUserIds = Set(UserDefaults.standard.stringArray(forKey: hiddenUsersKey) ?? [])
+        
         do {
             // 获取所有活跃的匹配
             let matches = try await supabaseService.getActiveMatches(userId: currentUser.id)
@@ -166,6 +170,13 @@ struct MainView: View {
                 if processedUserIds.contains(otherUserId) {
                     continue
                 }
+                
+                // 跳过 hidden 的用户，不计算其未读消息数
+                if hiddenUserIds.contains(otherUserId) {
+                    print("⏭️ Skipping hidden user \(otherUserId) for unread count")
+                    continue
+                }
+                
                 processedUserIds.insert(otherUserId)
                 
                 // 获取该用户的所有消息
@@ -193,7 +204,7 @@ struct MainView: View {
             }
             
             unreadMessageCount = totalUnread
-            print("✅ Updated unread message count: \(totalUnread)")
+            print("✅ Updated unread message count: \(totalUnread) (excluded \(hiddenUserIds.count) hidden chats)")
         } catch {
             print("⚠️ Failed to update unread message count: \(error.localizedDescription)")
         }

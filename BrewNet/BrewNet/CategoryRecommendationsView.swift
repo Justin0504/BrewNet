@@ -692,6 +692,7 @@ struct TemporaryChatFromProfileView: View {
     
     @State private var messageText = ""
     @FocusState private var isTextFieldFocused: Bool
+    @State private var isSending = false
     
     private var themeBrown: Color { BrewTheme.primaryBrown }
     private var themeBrownLight: Color { BrewTheme.secondaryBrown }
@@ -748,6 +749,8 @@ struct TemporaryChatFromProfileView: View {
                             .font(.system(size: 14))
                             .foregroundColor(.gray)
                             .multilineTextAlignment(.center)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.top, 20)
                     
@@ -847,22 +850,42 @@ struct TemporaryChatFromProfileView: View {
                     Divider()
                     
                     Button(action: {
-                        if !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            onSend(messageText.trimmingCharacters(in: .whitespacesAndNewlines))
-                            onDismiss()
+                        let trimmedMessage = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmedMessage.isEmpty && !isSending {
+                            isSending = true
+                            Task {
+                                // 发送消息和连接请求（onSend 回调会处理）
+                                onSend(trimmedMessage)
+                                // 等待一小段时间确保操作开始
+                                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5秒
+                                await MainActor.run {
+                                    isSending = false
+                                    onDismiss()
+                                }
+                            }
                         }
                     }) {
                         HStack {
                             Spacer()
-                            Text("Send Message")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(.white)
+                            if isSending {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                                Text("Sending...")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.leading, 8)
+                            } else {
+                                Text("Send Message and Connection Request")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundColor(.white)
+                            }
                             Spacer()
                         }
                         .frame(height: 56)
                         .background(
                             Group {
-                                if messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                if messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending {
                                     Color.gray.opacity(0.5)
                                 } else {
                                     BrewTheme.gradientPrimary()
@@ -871,7 +894,7 @@ struct TemporaryChatFromProfileView: View {
                         )
                         .cornerRadius(12)
                     }
-                    .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 16)
                 }
