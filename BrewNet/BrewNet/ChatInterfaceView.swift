@@ -36,14 +36,23 @@ struct ChatInterfaceView: View {
     
     var body: some View {
         mainContent
-            .navigationTitle("Chat")
+            .navigationTitle(selectedSession == nil ? "Chat" : "")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                toolbarContent
+                if selectedSession == nil {
+                    toolbarContent
+                } else {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        EmptyView()
+                    }
+                }
             }
+            .toolbar(selectedSession != nil ? .hidden : .visible, for: .navigationBar)
             .onAppear {
                 loadChatSessions()
                 startMessageRefreshTimer()
+                // 确保初始状态正确
+                updateTabBarVisibility()
             }
             .onDisappear {
             stopMessageRefreshTimer()
@@ -87,6 +96,8 @@ struct ChatInterfaceView: View {
         .onChange(of: selectedSession?.id) { newSessionId in
             // 当会话切换时，重置滚动状态
             scrollToBottomId = nil
+            // 更新 TabBar 可见性
+            updateTabBarVisibility()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToChat"))) { notification in
             // 当收到导航到 Chat 的通知时，刷新匹配列表并自动选择匹配的用户
@@ -254,6 +265,17 @@ struct ChatInterfaceView: View {
                 }
             }
         }
+    }
+    
+    // MARK: - TabBar Visibility Helper
+    private func updateTabBarVisibility() {
+        let shouldHide = selectedSession != nil
+        print("🔔 Updating TabBar visibility: shouldHide = \(shouldHide)")
+        NotificationCenter.default.post(
+            name: NSNotification.Name("HideTabBar"),
+            object: nil,
+            userInfo: ["shouldHide": shouldHide]
+        )
     }
     
     private var toolbarContent: some ToolbarContent {
@@ -3581,6 +3603,14 @@ struct ProfileCardSheetView: View {
 struct ScrollViewHeightPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+// MARK: - Preference Key for Hiding Tab Bar
+struct HideTabBarPreferenceKey: PreferenceKey {
+    static var defaultValue: Bool = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
         value = nextValue()
     }
 }

@@ -280,8 +280,23 @@ struct MatchesView: View {
 
 // MARK: - Chat View
 struct ChatView: View {
+    @State private var shouldHideTabBar = false
+    
     var body: some View {
         ChatInterfaceView()
+            .toolbar(shouldHideTabBar ? .hidden : .visible, for: .tabBar)
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("HideTabBar"))) { notification in
+                if let shouldHide = notification.userInfo?["shouldHide"] as? Bool {
+                    print("📱 ChatView received HideTabBar notification: shouldHide = \(shouldHide)")
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        shouldHideTabBar = shouldHide
+                    }
+                }
+            }
+            .onAppear {
+                // 确保初始状态正确
+                shouldHideTabBar = false
+            }
     }
 }
 
