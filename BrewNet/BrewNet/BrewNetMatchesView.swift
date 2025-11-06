@@ -1663,41 +1663,54 @@ struct BrewNetMatchesView: View {
         
         // 重新过滤当前profiles（包括距离过滤）
         if let filter = currentFilter {
+            // 保存当前profiles的副本，避免在异步操作中访问可变状态
+            let currentProfiles = profiles
+            
             Task {
                 // 如果有距离限制，需要异步计算距离
                 var filteredProfiles: [BrewNetProfile]
                 
-                if let maxDistance = filter.maxDistance {
-                    // 需要计算距离，异步处理
-                    filteredProfiles = await filterProfilesWithDistance(
-                        profiles: profiles,
-                        filter: filter,
-                        maxDistance: maxDistance
-                    )
-                } else {
-                    // 不需要距离计算，直接过滤
-                    filteredProfiles = profiles.filter { filter.matches($0) }
-                }
-                
-                let filteredCount = profiles.count - filteredProfiles.count
-                
-                await MainActor.run {
-                    profiles = filteredProfiles
-                    cachedProfiles = cachedProfiles.filter { filter.matches($0) }
-                    
-                    // 调整索引
-                    if currentIndex >= profiles.count && !profiles.isEmpty {
-                        currentIndex = 0
-                    } else if profiles.isEmpty {
-                        currentIndex = 0
-                        // 如果没有匹配的profiles，尝试加载更多
-                        if hasMoreProfiles {
-                            loadMoreProfiles()
-                        }
+                do {
+                    if let maxDistance = filter.maxDistance {
+                        // 需要计算距离，异步处理
+                        filteredProfiles = await filterProfilesWithDistance(
+                            profiles: currentProfiles,
+                            filter: filter,
+                            maxDistance: maxDistance
+                        )
+                    } else {
+                        // 不需要距离计算，直接过滤
+                        filteredProfiles = currentProfiles.filter { filter.matches($0) }
                     }
                     
-                    print("✅ Applied filter: \(filteredCount) profiles filtered out, \(profiles.count) remain")
-                    saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
+                    let filteredCount = currentProfiles.count - filteredProfiles.count
+                    
+                    await MainActor.run {
+                        profiles = filteredProfiles
+                        cachedProfiles = cachedProfiles.filter { filter.matches($0) }
+                        
+                        // 调整索引
+                        if currentIndex >= profiles.count && !profiles.isEmpty {
+                            currentIndex = 0
+                        } else if profiles.isEmpty {
+                            currentIndex = 0
+                            // 如果没有匹配的profiles，尝试加载更多
+                            if hasMoreProfiles {
+                                loadMoreProfiles()
+                            }
+                        }
+                        
+                        print("✅ Applied filter: \(filteredCount) profiles filtered out, \(profiles.count) remain")
+                        saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
+                    }
+                } catch {
+                    print("❌ Error applying filter: \(error.localizedDescription)")
+                    // 出错时至少应用基本过滤
+                    await MainActor.run {
+                        let basicFiltered = currentProfiles.filter { filter.matches($0) }
+                        profiles = basicFiltered
+                        print("⚠️ Applied basic filter only due to error")
+                    }
                 }
             }
         }
@@ -1713,37 +1726,64 @@ struct BrewNetMatchesView: View {
             return profiles.filter { filter.matches($0) }
         }
         
+        // 先进行基本过滤
+        let basicFilteredProfiles = profiles.filter { filter.matches($0) }
+        
+        // 如果没有设置距离限制或没有profiles，直接返回
+        guard !basicFilteredProfiles.isEmpty else {
+            return []
+        }
+        
         // 获取当前用户的位置
         var currentUserLocation: CLLocation? = nil
-        if let currentUserProfile = try? await supabaseService.getProfile(userId: currentUser.id) {
-            let brewNetProfile = currentUserProfile.toBrewNetProfile()
-            if let userLocationString = brewNetProfile.coreIdentity.location, !userLocationString.isEmpty {
-                // 使用LocationService获取当前用户位置的坐标
-                let locationService = LocationService.shared
-                await withCheckedContinuation { continuation in
-                    locationService.geocodeAddress(userLocationString) { location in
-                        currentUserLocation = location
-                        continuation.resume()
+        do {
+            if let currentUserProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                let brewNetProfile = currentUserProfile.toBrewNetProfile()
+                if let userLocationString = brewNetProfile.coreIdentity.location, !userLocationString.isEmpty {
+                    // 使用LocationService获取当前用户位置的坐标
+                    let locationService = LocationService.shared
+                    currentUserLocation = await withCheckedContinuation { (continuation: CheckedContinuation<CLLocation?, Never>) in
+                        let queue = DispatchQueue(label: "com.brewnet.geocode.queue")
+                        var hasResumed = false
+                        
+                        let timeoutTask = Task {
+                            try? await Task.sleep(nanoseconds: 5_000_000_000) // 5秒
+                            queue.sync {
+                                if !hasResumed {
+                                    hasResumed = true
+                                    continuation.resume(returning: nil)
+                                }
+                            }
+                        }
+                        
+                        locationService.geocodeAddress(userLocationString) { location in
+                            queue.sync {
+                                if !hasResumed {
+                                    hasResumed = true
+                                    timeoutTask.cancel()
+                                    continuation.resume(returning: location)
+                                }
+                            }
+                        }
                     }
                 }
             }
+        } catch {
+            print("⚠️ Failed to get current user profile: \(error.localizedDescription)")
         }
         
         // 如果无法获取当前用户位置，无法进行距离过滤，返回基本过滤结果
         guard let userLocation = currentUserLocation else {
             print("⚠️ Cannot get current user location, skipping distance filter")
-            return profiles.filter { filter.matches($0) }
+            return basicFilteredProfiles
         }
         
         var filteredProfiles: [BrewNetProfile] = []
         let locationService = LocationService.shared
         
-        // 并行处理所有profiles的距离计算
+        // 并行处理所有profiles的距离计算（限制并发数量避免过多请求）
         await withTaskGroup(of: (BrewNetProfile, Double?).self) { group in
-            for profile in profiles {
-                // 先进行基本过滤
-                guard filter.matches(profile) else { continue }
-                
+            for profile in basicFilteredProfiles {
                 group.addTask {
                     // 计算距离
                     guard let profileLocationString = profile.coreIdentity.location,
@@ -1752,11 +1792,28 @@ struct BrewNetMatchesView: View {
                         return (profile, nil)
                     }
                     
-                    var profileLocation: CLLocation? = nil
-                    await withCheckedContinuation { continuation in
+                    let profileLocation = await withCheckedContinuation { (continuation: CheckedContinuation<CLLocation?, Never>) in
+                        let queue = DispatchQueue(label: "com.brewnet.geocode.queue.\(UUID().uuidString)")
+                        var hasResumed = false
+                        
+                        let timeoutTask = Task {
+                            try? await Task.sleep(nanoseconds: 5_000_000_000) // 5秒
+                            queue.sync {
+                                if !hasResumed {
+                                    hasResumed = true
+                                    continuation.resume(returning: nil)
+                                }
+                            }
+                        }
+                        
                         locationService.geocodeAddress(profileLocationString) { location in
-                            profileLocation = location
-                            continuation.resume()
+                            queue.sync {
+                                if !hasResumed {
+                                    hasResumed = true
+                                    timeoutTask.cancel()
+                                    continuation.resume(returning: location)
+                                }
+                            }
                         }
                     }
                     
