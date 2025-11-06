@@ -3166,10 +3166,17 @@ extension SupabaseService {
                 date = formatter.date(from: dateString) ?? Date()
             }
             
+            // 获取参与者头像
+            var avatarURL: String? = nil
+            if let profile = try? await getProfile(userId: partnerId) {
+                avatarURL = profile.coreIdentity.profileImage
+            }
+            
             let record = CoffeeChatRecord(
                 id: id,
                 partnerId: partnerId,
                 partnerName: partnerName,
+                partnerAvatar: avatarURL,
                 date: date,
                 pointsEarned: pointsEarned,
                 status: status
@@ -3466,10 +3473,28 @@ extension SupabaseService {
         let data = response.data
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let senderId = json["sender_id"] as? String,
-              let receiverId = json["receiver_id"] as? String,
-              let senderName = json["sender_name"] as? String,
-              let receiverName = json["receiver_name"] as? String else {
+              let receiverId = json["receiver_id"] as? String else {
             throw ProfileError.fetchFailed("Failed to fetch invitation")
+        }
+        
+        // 从 profile 获取双方的真实名字，确保一致性
+        var senderName = json["sender_name"] as? String ?? "Unknown"
+        var receiverName = json["receiver_name"] as? String ?? "Unknown"
+        
+        // 从 profile 获取发送者的名字
+        if let senderProfile = try? await getProfile(userId: senderId) {
+            senderName = senderProfile.coreIdentity.name
+            print("✅ [咖啡聊天] 从 profile 获取发送者名字: \(senderName)")
+        } else {
+            print("⚠️ [咖啡聊天] 无法获取发送者 profile，使用邀请中的名字: \(senderName)")
+        }
+        
+        // 从 profile 获取接收者的名字
+        if let receiverProfile = try? await getProfile(userId: receiverId) {
+            receiverName = receiverProfile.coreIdentity.name
+            print("✅ [咖啡聊天] 从 profile 获取接收者名字: \(receiverName)")
+        } else {
+            print("⚠️ [咖啡聊天] 无法获取接收者 profile，使用邀请中的名字: \(receiverName)")
         }
         
         let now = ISO8601DateFormatter().string(from: Date())
@@ -3568,11 +3593,39 @@ extension SupabaseService {
         print("✅ [咖啡聊天] 邀请已拒绝")
     }
     
+    /// 查找待处理的咖啡聊天邀请ID
+    func findPendingInvitationId(senderId: String, receiverId: String) async throws -> String? {
+        print("🔍 [咖啡聊天] 查找待处理的邀请: senderId=\(senderId), receiverId=\(receiverId)")
+        
+        let response = try await client
+            .from("coffee_chat_invitations")
+            .select("id")
+            .eq("sender_id", value: senderId)
+            .eq("receiver_id", value: receiverId)
+            .eq("status", value: "pending")
+            .order("created_at", ascending: false)
+            .limit(1)
+            .execute()
+        
+        let data = response.data
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              let firstInvitation = jsonArray.first,
+              let invitationId = firstInvitation["id"] as? String else {
+            print("⚠️ [咖啡聊天] 未找到待处理的邀请")
+            return nil
+        }
+        
+        print("✅ [咖啡聊天] 找到待处理的邀请ID: \(invitationId)")
+        return invitationId
+    }
+    
     /// 获取用户的咖啡聊天日程列表
     func getCoffeeChatSchedules(userId: String) async throws -> [CoffeeChatSchedule] {
         print("📅 [咖啡聊天] 获取日程列表，用户ID: \(userId)")
         print("📅 [咖啡聊天] 用户ID类型: \(type(of: userId))")
         
+        // 只查询 user_id 等于当前用户 ID 的记录
+        // 因为每个用户都有自己的日程记录（在 acceptCoffeeChatInvitation 中为双方各创建一条）
         let response = try await client
             .from("coffee_chat_schedules")
             .select()
@@ -3594,13 +3647,27 @@ extension SupabaseService {
         
         print("📅 [咖啡聊天] 解析到 \(jsonArray.count) 条原始记录")
         
+        // 使用 Set 来去重，确保同一个 schedule ID 只处理一次
+        var seenScheduleIds = Set<String>()
         var schedules: [CoffeeChatSchedule] = []
+        
         for (index, json) in jsonArray.enumerated() {
             print("📅 [咖啡聊天] 处理第 \(index + 1) 条记录")
             print("📅 [咖啡聊天] 记录内容: \(json)")
             
             guard let id = json["id"] as? String else {
                 print("❌ [咖啡聊天] 第 \(index + 1) 条记录缺少 id")
+                continue
+            }
+            
+            // 检查是否已经处理过这个 schedule ID
+            if seenScheduleIds.contains(id) {
+                print("⚠️ [咖啡聊天] 跳过重复的 schedule ID: \(id)")
+                continue
+            }
+            seenScheduleIds.insert(id)
+            guard let recordUserId = json["user_id"] as? String else {
+                print("❌ [咖啡聊天] 第 \(index + 1) 条记录缺少 user_id")
                 continue
             }
             guard let participantId = json["participant_id"] as? String else {
@@ -3611,6 +3678,43 @@ extension SupabaseService {
                 print("❌ [咖啡聊天] 第 \(index + 1) 条记录缺少 participant_name")
                 continue
             }
+            
+            // 确定当前用户在这个 schedule 中的角色
+            // 如果当前用户是 user_id，那么 participant 是对方
+            // 如果当前用户是 participant_id，那么 participant 是 user_id（需要获取对方的名称）
+            let isCurrentUserOwner = recordUserId == userId
+            let actualParticipantId: String
+            let actualParticipantName: String
+            
+            if isCurrentUserOwner {
+                // 当前用户是 owner，participant 就是对方
+                actualParticipantId = participantId
+                // 从 profile 获取 participant 的真实名字，确保一致性
+                if let participantProfile = try? await getProfile(userId: participantId) {
+                    actualParticipantName = participantProfile.coreIdentity.name
+                    print("✅ [咖啡聊天] 从 profile 获取 participant 名字: \(actualParticipantName)")
+                } else {
+                    // 如果无法获取，使用数据库中的名字作为后备
+                    actualParticipantName = participantName
+                    print("⚠️ [咖啡聊天] 无法获取 participant profile，使用数据库中的名字: \(actualParticipantName)")
+                }
+            } else {
+                // 当前用户是 participant，需要获取 owner 的信息作为 participant
+                actualParticipantId = recordUserId
+                // 从 profile 获取 owner 的真实名字，确保一致性
+                if let ownerProfile = try? await getProfile(userId: recordUserId) {
+                    actualParticipantName = ownerProfile.coreIdentity.name
+                    print("✅ [咖啡聊天] 从 profile 获取 owner 名字: \(actualParticipantName)")
+                } else {
+                    // 如果无法获取，使用 "Unknown"
+                    actualParticipantName = "Unknown"
+                    print("⚠️ [咖啡聊天] 无法获取 user_id \(recordUserId) 的名称，使用 Unknown")
+                }
+            }
+            
+            print("📅 [咖啡聊天] 当前用户角色: \(isCurrentUserOwner ? "owner" : "participant")")
+            print("📅 [咖啡聊天] actualParticipantId: \(actualParticipantId)")
+            print("📅 [咖啡聊天] actualParticipantName: \(actualParticipantName)")
             guard let location = json["location"] as? String else {
                 print("❌ [咖啡聊天] 第 \(index + 1) 条记录缺少 location")
                 continue
@@ -3673,11 +3777,14 @@ extension SupabaseService {
             
             let hasMet = json["has_met"] as? Bool ?? false
             
+            print("📅 [咖啡聊天] user_id: \(recordUserId), participant_id: \(participantId), 当前用户: \(userId)")
+            print("📅 [咖啡聊天] isCurrentUserOwner: \(isCurrentUserOwner), hasMet: \(hasMet)")
+            
             let schedule = CoffeeChatSchedule(
                 id: scheduleId,
-                userId: userId,
-                participantId: participantId,
-                participantName: participantName,
+                userId: userId, // 当前用户的 ID
+                participantId: actualParticipantId,
+                participantName: actualParticipantName,
                 scheduledDate: finalScheduledDate,
                 location: location,
                 notes: notes,
@@ -3685,7 +3792,7 @@ extension SupabaseService {
                 hasMet: hasMet
             )
             schedules.append(schedule)
-            print("✅ [咖啡聊天] 成功解析日程: \(participantName) at \(location) on \(dateString)")
+            print("✅ [咖啡聊天] 成功解析日程: \(actualParticipantName) at \(location) on \(dateString), hasMet: \(hasMet)")
         }
         
         print("✅ [咖啡聊天] 总共找到 \(schedules.count) 个有效日程")
@@ -3813,6 +3920,137 @@ extension SupabaseService {
             }
             
             print("✅ [咖啡聊天] 日程已标记为已见面")
+            
+            // 获取 schedule 信息以确定双方用户和对应的另一条记录
+            let scheduleResponse = try await client
+                .from("coffee_chat_schedules")
+                .select("user_id, participant_id, scheduled_date, location")
+                .eq("id", value: scheduleId)
+                .single()
+                .execute()
+            
+            if let scheduleData = try? JSONSerialization.jsonObject(with: scheduleResponse.data) as? [String: Any],
+               let userId = scheduleData["user_id"] as? String,
+               let participantId = scheduleData["participant_id"] as? String,
+               let scheduledDate = scheduleData["scheduled_date"] as? String,
+               let location = scheduleData["location"] as? String {
+                
+                // 查找对应的另一条记录（user_id 和 participant_id 互换）
+                // 同时匹配 scheduled_date 和 location 以确保是同一场 coffee chat
+                print("🔄 [咖啡聊天] 查找对应的另一条记录...")
+                print("   - 当前记录: user_id=\(userId), participant_id=\(participantId)")
+                print("   - 查找: user_id=\(participantId), participant_id=\(userId)")
+                
+                let correspondingResponse = try await client
+                    .from("coffee_chat_schedules")
+                    .select("id, has_met")
+                    .eq("user_id", value: participantId)
+                    .eq("participant_id", value: userId)
+                    .eq("scheduled_date", value: scheduledDate)
+                    .eq("location", value: location)
+                    .limit(1)
+                    .execute()
+                
+                print("🔄 [咖啡聊天] 查找对应记录的响应状态码: \(correspondingResponse.status)")
+                if let responseString = String(data: correspondingResponse.data, encoding: .utf8) {
+                    print("🔄 [咖啡聊天] 查找对应记录的响应内容: \(responseString)")
+                }
+                
+                if let correspondingData = try? JSONSerialization.jsonObject(with: correspondingResponse.data) as? [[String: Any]],
+                   let correspondingId = correspondingData.first?["id"] as? String,
+                   correspondingId != scheduleId {
+                    
+                    let currentHasMet = correspondingData.first?["has_met"] as? Bool ?? false
+                    print("✅ [咖啡聊天] 找到对应的另一条记录: \(correspondingId), 当前 has_met: \(currentHasMet)")
+                    
+                    // 更新对应的另一条记录
+                    // 注意：当前用户是 participant_id，所以可以更新这条记录（RLS 策略允许）
+                    print("🔄 [咖啡聊天] 开始更新对应的另一条记录...")
+                    print("   - 当前用户ID: \(currentUserId)")
+                    print("   - 目标记录的 user_id: \(participantId)")
+                    print("   - 目标记录的 participant_id: \(userId)")
+                    print("   - 当前用户是 participant_id，应该可以更新")
+                    
+                    let correspondingUpdateResponse = try await client
+                        .from("coffee_chat_schedules")
+                        .update(update)
+                        .eq("id", value: correspondingId)
+                        .execute()
+                    
+                    print("✅ [咖啡聊天] 对应的另一条记录已更新，状态码: \(correspondingUpdateResponse.status)")
+                    
+                    // 验证更新是否成功
+                    if let updateString = String(data: correspondingUpdateResponse.data, encoding: .utf8) {
+                        print("✅ [咖啡聊天] 更新响应内容: \(updateString)")
+                        
+                        if updateString == "[]" || updateString.trimmingCharacters(in: .whitespacesAndNewlines) == "[]" {
+                            print("❌ [咖啡聊天] 警告：更新对应的另一条记录时响应为空数组")
+                            print("❌ [咖啡聊天] 这可能是因为 RLS 策略阻止了更新")
+                            print("❌ [咖啡聊天] 当前用户ID: \(currentUserId)")
+                            print("❌ [咖啡聊天] 目标记录的 user_id: \(participantId)")
+                            print("❌ [咖啡聊天] 如果当前用户不是目标记录的 user_id，RLS 可能会阻止更新")
+                        }
+                    }
+                    
+                    // 等待一小段时间后验证
+                    try? await Task.sleep(nanoseconds: 500_000_000) // 0.5秒
+                    
+                    let verifyCorrespondingResponse = try await client
+                        .from("coffee_chat_schedules")
+                        .select("id, has_met")
+                        .eq("id", value: correspondingId)
+                        .execute()
+                    
+                    if let verifyData = try? JSONSerialization.jsonObject(with: verifyCorrespondingResponse.data) as? [[String: Any]],
+                       let verifyRecord = verifyData.first,
+                       let verifyHasMet = verifyRecord["has_met"] as? Bool {
+                        print("✅ [咖啡聊天] 验证对应的另一条记录: has_met = \(verifyHasMet)")
+                        if !verifyHasMet {
+                            print("❌ [咖啡聊天] 警告：对应的另一条记录的 has_met 仍然是 false")
+                            print("❌ [咖啡聊天] 这可能是 RLS 策略问题，需要确保当前用户有权限更新对方的记录")
+                        }
+                    }
+                } else {
+                    print("⚠️ [咖啡聊天] 未找到对应的另一条记录")
+                    if let correspondingData = try? JSONSerialization.jsonObject(with: correspondingResponse.data) as? [[String: Any]] {
+                        print("⚠️ [咖啡聊天] 查询返回了 \(correspondingData.count) 条记录")
+                        if let firstRecord = correspondingData.first {
+                            print("⚠️ [咖啡聊天] 第一条记录的 id: \(firstRecord["id"] ?? "nil")")
+                            print("⚠️ [咖啡聊天] 当前 scheduleId: \(scheduleId)")
+                        }
+                    }
+                }
+                
+                // 更新双方的 credits（严格根据 hasMet 数量重新计算并同步）
+                
+                print("🔄 [积分] 开始同步双方 credits（基于 hasMet 数量）: user_id=\(userId), participant_id=\(participantId)")
+                
+                // 更新 user_id 的 credits（重新计算，不累加）
+                do {
+                    // 使用 getUserCredits 会自动根据 hasMet 数量同步 credits
+                    let updatedCredits = try await getUserCredits(userId: userId)
+                    print("✅ [积分] 用户 \(userId) 的 credits 已同步: \(updatedCredits)（基于 hasMet 数量）")
+                } catch {
+                    print("⚠️ [积分] 同步用户 \(userId) 的 credits 失败: \(error.localizedDescription)")
+                }
+                
+                // 更新 participant_id 的 credits（重新计算，不累加）
+                do {
+                    // 使用 getUserCredits 会自动根据 hasMet 数量同步 credits
+                    let updatedCredits = try await getUserCredits(userId: participantId)
+                    print("✅ [积分] 用户 \(participantId) 的 credits 已同步: \(updatedCredits)（基于 hasMet 数量）")
+                } catch {
+                    print("⚠️ [积分] 同步用户 \(participantId) 的 credits 失败: \(error.localizedDescription)")
+                }
+                
+                // 发送通知，触发 UI 刷新
+                await MainActor.run {
+                    NotificationCenter.default.post(name: NSNotification.Name("UserCreditsUpdated"), object: nil)
+                    print("🔄 [积分] 已发送积分更新通知")
+                }
+            } else {
+                print("⚠️ [积分] 无法获取 schedule 信息，跳过 credits 更新")
+            }
         } catch {
             print("❌ [咖啡聊天] 标记失败: \(error.localizedDescription)")
             print("❌ [咖啡聊天] 错误类型: \(type(of: error))")
@@ -3823,6 +4061,117 @@ extension SupabaseService {
             }
             throw error
         }
+    }
+    
+    // MARK: - Credits Management
+    
+    /// 获取用户的 credits，并自动同步已 met 的 coffee chat 数量
+    /// 严格根据 hasMet 的数量来计算和同步 credits
+    func getUserCredits(userId: String) async throws -> Int {
+        print("🔍 [积分] 获取用户 \(userId) 的 credits")
+        
+        // 获取已 met 的 coffee chat 数量（这是唯一真实来源）
+        let allSchedules = try await getCoffeeChatSchedules(userId: userId)
+        let metSchedules = allSchedules.filter { $0.hasMet }
+        let expectedCredits = metSchedules.count * 10
+        
+        print("🔍 [积分] 已 met 的 coffee chat 数量: \(metSchedules.count)")
+        print("🔍 [积分] 根据 hasMet 计算的期望 credits: \(expectedCredits)")
+        
+        // 获取数据库中的当前 credits
+        let response = try await client
+            .from("users")
+            .select("credits")
+            .eq("id", value: userId)
+            .single()
+            .execute()
+        
+        let data = response.data
+        var currentCredits: Int = 0
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            currentCredits = json["credits"] as? Int ?? 0
+            print("✅ [积分] 数据库中的当前 credits: \(currentCredits)")
+        } else {
+            print("⚠️ [积分] 无法解析 credits，使用默认值 0")
+        }
+        
+        // 强制同步：无论 credits 是大于还是小于期望值，都更新到正确值
+        if currentCredits != expectedCredits {
+            print("🔄 [积分] credits 不匹配，强制同步更新...")
+            print("   - 当前 credits: \(currentCredits)")
+            print("   - 期望 credits（基于 hasMet）: \(expectedCredits)")
+            print("   - 差异: \(currentCredits > expectedCredits ? "多" : "少") \(abs(currentCredits - expectedCredits))")
+            
+            // 直接设置 credits 为期望值（严格根据 hasMet 数量）
+            try await setUserCredits(userId: userId, credits: expectedCredits)
+            print("✅ [积分] credits 已强制同步: \(currentCredits) -> \(expectedCredits)")
+            return expectedCredits
+        } else {
+            print("✅ [积分] credits 已同步，无需更新")
+            return currentCredits
+        }
+    }
+    
+    /// 给用户添加 credits
+    func addCreditsToUser(userId: String, amount: Int) async throws {
+        print("🔄 [积分] 给用户 \(userId) 添加 \(amount) credits")
+        
+        // 先获取当前 credits
+        let currentCredits = try await getUserCredits(userId: userId)
+        let newCredits = currentCredits + amount
+        
+        // 更新 credits
+        struct CreditsUpdate: Encodable {
+            let credits: Int
+        }
+        
+        let update = CreditsUpdate(credits: newCredits)
+        
+        let response = try await client
+            .from("users")
+            .update(update)
+            .eq("id", value: userId)
+            .execute()
+        
+        print("✅ [积分] 用户 \(userId) 的 credits 已更新: \(currentCredits) -> \(newCredits)")
+        
+        // 验证更新
+        if response.status < 200 || response.status >= 300 {
+            print("❌ [积分] 更新失败，HTTP 状态码: \(response.status)")
+            throw NSError(domain: "CreditsError", code: 1, userInfo: [NSLocalizedDescriptionKey: "更新 credits 失败：HTTP 状态码 \(response.status)"])
+        }
+    }
+    
+    /// 设置用户的 credits（直接设置值，不累加）
+    func setUserCredits(userId: String, credits: Int) async throws {
+        print("🔄 [积分] 设置用户 \(userId) 的 credits 为 \(credits)")
+        
+        struct CreditsUpdate: Encodable {
+            let credits: Int
+        }
+        
+        let update = CreditsUpdate(credits: credits)
+        
+        let response = try await client
+            .from("users")
+            .update(update)
+            .eq("id", value: userId)
+            .execute()
+        
+        print("✅ [积分] 用户 \(userId) 的 credits 已设置为: \(credits)")
+        
+        // 验证更新
+        if response.status < 200 || response.status >= 300 {
+            print("❌ [积分] 更新失败，HTTP 状态码: \(response.status)")
+            throw NSError(domain: "CreditsError", code: 1, userInfo: [NSLocalizedDescriptionKey: "设置 credits 失败：HTTP 状态码 \(response.status)"])
+        }
+    }
+    
+    /// 同步用户的 credits 到数据库（严格根据 hasMet 数量计算）
+    /// 这是 credits 更新的主要方法，确保 credits 始终与 hasMet 数量一致
+    func syncUserCredits(userId: String) async throws -> Int {
+        print("🔄 [积分] 同步用户 \(userId) 的 credits（基于 hasMet 数量）")
+        return try await getUserCredits(userId: userId)
     }
 }
 

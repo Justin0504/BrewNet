@@ -145,6 +145,61 @@ struct ScheduleCardView: View {
         schedules.first(where: { $0.id == schedule.id }) ?? schedule
     }
     
+    // 计算属性：是否显示 ✅
+    private var shouldShowCheckmark: Bool {
+        hasMet || currentSchedule.hasMet
+    }
+    
+    // 子视图：Met 状态指示器（✅ 或 "We Met" 按钮）
+    @ViewBuilder
+    private var metStatusView: some View {
+        if shouldShowCheckmark {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 20))
+                .foregroundColor(Color(red: 0.4, green: 0.6, blue: 0.3))
+                .id("met-status-\(shouldShowCheckmark)")
+                .onAppear {
+                    print("✅ [UI] ✅ 图标已显示，hasMet = \(hasMet), currentSchedule.hasMet = \(currentSchedule.hasMet)")
+                }
+        } else {
+            Button(action: {
+                markAsMet(scheduleId: schedule.id.uuidString)
+            }) {
+                Text("We Met")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(Color(red: 0.5, green: 0.4, blue: 0.3))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.98, green: 0.96, blue: 0.94),
+                                Color(red: 0.95, green: 0.92, blue: 0.88)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.8, green: 0.7, blue: 0.6),
+                                        Color(red: 0.7, green: 0.6, blue: 0.5)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                ),
+                                lineWidth: 1
+                            )
+                    )
+            }
+            .id("met-status-\(shouldShowCheckmark)")
+        }
+    }
+    
     enum DistanceCheckResult: Equatable {
         case withinRange(distance: Double)
         case tooFar(distance: Double)
@@ -164,200 +219,217 @@ struct ScheduleCardView: View {
         }
     }
     
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Header with Avatar and Name
-            HStack(spacing: 14) {
-                // Avatar with gradient background
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.9, green: 0.85, blue: 0.8),
-                                    Color(red: 0.85, green: 0.8, blue: 0.75)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
+    // 子视图：Header（头像和名字）
+    @ViewBuilder
+    private var headerView: some View {
+        HStack(spacing: 14) {
+            // Avatar with gradient background
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.9, green: 0.85, blue: 0.8),
+                                Color(red: 0.85, green: 0.8, blue: 0.75)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
                         )
-                        .frame(width: 56, height: 56)
-                    
-                    AvatarView(avatarString: participantAvatar, size: 50)
-                }
+                    )
+                    .frame(width: 56, height: 56)
                 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(schedule.participantName)
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                AvatarView(avatarString: participantAvatar, size: 50)
+            }
+            
+            VStack(alignment: .leading, spacing: 6) {
+                Text(schedule.participantName)
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                
+                HStack(spacing: 6) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(red: 0.6, green: 0.5, blue: 0.4))
                     
-                    HStack(spacing: 6) {
-                        Image(systemName: "calendar")
-                            .font(.system(size: 12))
-                            .foregroundColor(Color(red: 0.6, green: 0.5, blue: 0.4))
-                        
-                        Text(formatDate(schedule.scheduledDate))
-                            .font(.system(size: 14))
-                            .foregroundColor(Color(red: 0.6, green: 0.5, blue: 0.4))
-                        
-                        Spacer()
-                        
-                        // 根据 hasMet 显示 ✅ 或 "We Met" 按钮
-                        // 使用最新的 schedule 数据或本地 hasMet 状态
-                        let shouldShowCheckmark = hasMet || currentSchedule.hasMet
-                        
-                        if shouldShowCheckmark {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 20))
-                                .foregroundColor(Color(red: 0.4, green: 0.6, blue: 0.3))
-                                .id("met-status-\(shouldShowCheckmark)")
-                                .onAppear {
-                                    print("✅ [UI] ✅ 图标已显示，hasMet = \(hasMet), currentSchedule.hasMet = \(currentSchedule.hasMet)")
-                                }
-                        } else {
-                            Button(action: {
-                                markAsMet(scheduleId: schedule.id.uuidString)
-                            }) {
-                                Text("We Met")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundColor(Color(red: 0.5, green: 0.4, blue: 0.3))
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(
-                                        LinearGradient(
-                                            colors: [
-                                                Color(red: 0.98, green: 0.96, blue: 0.94),
-                                                Color(red: 0.95, green: 0.92, blue: 0.88)
-                                            ],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-                                    .cornerRadius(12)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(
-                                                LinearGradient(
-                                                    colors: [
-                                                        Color(red: 0.8, green: 0.7, blue: 0.6),
-                                                        Color(red: 0.7, green: 0.6, blue: 0.5)
-                                                    ],
-                                                    startPoint: .leading,
-                                                    endPoint: .trailing
-                                                ),
-                                                lineWidth: 1
-                                            )
-                                    )
-                            }
-                            .id("met-status-\(shouldShowCheckmark)")
+                    Text(formatDate(schedule.scheduledDate))
+                        .font(.system(size: 14))
+                        .foregroundColor(Color(red: 0.6, green: 0.5, blue: 0.4))
+                    
+                    Spacer()
+                    
+                    // 根据 hasMet 显示 ✅ 或 "We Met" 按钮
+                    metStatusView
+                }
+            }
+            
+            Spacer()
+        }
+    }
+    
+    // 子视图：分隔线
+    private var dividerView: some View {
+        LinearGradient(
+            colors: [
+                Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.3),
+                Color(red: 0.85, green: 0.8, blue: 0.75).opacity(0.3)
+            ],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+        .frame(height: 1)
+        .padding(.vertical, 4)
+    }
+    
+    // 子视图：位置信息
+    private var locationView: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.3))
+                    .frame(width: 32, height: 32)
+                
+                Image(systemName: "mappin.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(Color(red: 0.6, green: 0.45, blue: 0.3))
+            }
+            
+            Text(schedule.location)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+        }
+    }
+    
+    // 子视图：备注信息
+    @ViewBuilder
+    private var notesView: some View {
+        if let notes = schedule.notes, !notes.isEmpty {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "note.text")
+                    .font(.system(size: 14))
+                    .foregroundColor(Color(red: 0.6, green: 0.5, blue: 0.4))
+                    .padding(.top, 2)
+                
+                Text(notes)
+                    .font(.system(size: 14))
+                    .foregroundColor(Color(red: 0.5, green: 0.4, blue: 0.3))
+                    .lineLimit(3)
+            }
+            .padding(.top, 4)
+        }
+    }
+    
+    // 基础卡片视图
+    private var baseCardView: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            headerView
+            dividerView
+            locationView
+            notesView
+        }
+        .padding(20)
+    }
+    
+    // 带样式的卡片视图
+    private var styledCardView: some View {
+        baseCardView
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.white)
+                    .shadow(color: Color(red: 0.4, green: 0.3, blue: 0.2).opacity(0.12), radius: 10, x: 0, y: 4)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.4),
+                                Color(red: 0.85, green: 0.8, blue: 0.75).opacity(0.2)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            )
+    }
+    
+    // 带标识符和生命周期的视图
+    private var cardWithLifecycle: some View {
+        styledCardView
+            .id("schedule-card-\(schedule.id)-\(hasMet)-\(viewRefreshID)")
+            .onAppear {
+                loadParticipantAvatar()
+            }
+    }
+    
+    // 带距离检查的视图
+    private var cardWithDistanceCheck: some View {
+        cardWithLifecycle
+            .overlay {
+                if showingDistanceAlert {
+                    customDistanceAlert
+                }
+            }
+            .onChange(of: distanceCheckResult) { newValue in
+                print("🔄 [We Met] distanceCheckResult 变化: \(newValue != nil ? "有值" : "nil")")
+                if newValue != nil {
+                    // 当有结果时，无论 isCheckingDistance 状态如何，都显示 alert
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        alertRefreshID = UUID()
+                        showingDistanceAlert = true
+                        print("✅ [We Met] onChange: 已设置 showingDistanceAlert = true")
+                    }
+                }
+            }
+            .onChange(of: isCheckingDistance) { newValue in
+                print("🔄 [We Met] isCheckingDistance 变化: \(newValue)")
+                if !newValue && distanceCheckResult != nil {
+                    // 当检查完成且有结果时，确保 alert 显示
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        alertRefreshID = UUID()
+                        showingDistanceAlert = true
+                        print("✅ [We Met] onChange isCheckingDistance: 已设置 showingDistanceAlert = true")
+                    }
+                }
+            }
+    }
+    
+    // 带庆祝动画的视图
+    private var cardWithCelebration: some View {
+        cardWithDistanceCheck
+            .overlay {
+                if showingCelebration {
+                    celebrationView
+                }
+            }
+    }
+    
+    var body: some View {
+        cardWithCelebration
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CoffeeChatScheduleUpdated"))) { _ in
+                print("🔄 [ScheduleCardView] 收到日程更新通知，重新检查 hasMet 状态")
+                // 延迟重新检查，确保数据库更新已完成
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    // 从 schedules 数组中获取最新的 hasMet 状态
+                    if let updatedSchedule = schedules.first(where: { $0.id == schedule.id }) {
+                        if updatedSchedule.hasMet != hasMet {
+                            print("🔄 [ScheduleCardView] 检测到 hasMet 变化: \(hasMet) -> \(updatedSchedule.hasMet)")
+                            hasMet = updatedSchedule.hasMet
+                            viewRefreshID = UUID()
                         }
                     }
                 }
-                
-                Spacer()
             }
-            
-            // Divider with gradient
-            LinearGradient(
-                colors: [
-                    Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.3),
-                    Color(red: 0.85, green: 0.8, blue: 0.75).opacity(0.3)
-                ],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-            .frame(height: 1)
-            .padding(.vertical, 4)
-            
-            // Location
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.3))
-                        .frame(width: 32, height: 32)
-                    
-                    Image(systemName: "mappin.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(Color(red: 0.6, green: 0.45, blue: 0.3))
-                }
-                
-                Text(schedule.location)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-            }
-            
-            // Notes
-            if let notes = schedule.notes, !notes.isEmpty {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "note.text")
-                        .font(.system(size: 14))
-                        .foregroundColor(Color(red: 0.6, green: 0.5, blue: 0.4))
-                        .padding(.top, 2)
-                    
-                    Text(notes)
-                        .font(.system(size: 14))
-                        .foregroundColor(Color(red: 0.5, green: 0.4, blue: 0.3))
-                        .lineLimit(3)
-                }
-                .padding(.top, 4)
-            }
-        }
-        .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color.white)
-                .shadow(color: Color(red: 0.4, green: 0.3, blue: 0.2).opacity(0.12), radius: 10, x: 0, y: 4)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20)
-                .stroke(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.4),
-                            Color(red: 0.85, green: 0.8, blue: 0.75).opacity(0.2)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
-        )
-        .id("schedule-card-\(schedule.id)-\(hasMet)-\(viewRefreshID)")
-        .onAppear {
-            loadParticipantAvatar()
-        }
-        .overlay {
-            if showingDistanceAlert {
-                customDistanceAlert
-            }
-        }
-        .onChange(of: distanceCheckResult) { newValue in
-            print("🔄 [We Met] distanceCheckResult 变化: \(newValue != nil ? "有值" : "nil")")
-            if newValue != nil {
-                // 当有结果时，无论 isCheckingDistance 状态如何，都显示 alert
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    alertRefreshID = UUID()
-                    showingDistanceAlert = true
-                    print("✅ [We Met] onChange: 已设置 showingDistanceAlert = true")
+            .onChange(of: schedules) { _ in
+                // 当 schedules 数组更新时，同步更新本地 hasMet 状态
+                if let updatedSchedule = schedules.first(where: { $0.id == schedule.id }) {
+                    if updatedSchedule.hasMet != hasMet {
+                        print("🔄 [ScheduleCardView] schedules 数组更新，hasMet 变化: \(hasMet) -> \(updatedSchedule.hasMet)")
+                        hasMet = updatedSchedule.hasMet
+                        viewRefreshID = UUID()
+                    }
                 }
             }
-        }
-        .onChange(of: isCheckingDistance) { newValue in
-            print("🔄 [We Met] isCheckingDistance 变化: \(newValue)")
-            if !newValue && distanceCheckResult != nil {
-                // 当检查完成且有结果时，确保 alert 显示
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    alertRefreshID = UUID()
-                    showingDistanceAlert = true
-                    print("✅ [We Met] onChange isCheckingDistance: 已设置 showingDistanceAlert = true")
-                }
-            }
-        }
-        .overlay {
-            if showingCelebration {
-                celebrationView
-            }
-        }
     }
     
     // MARK: - Custom Distance Alert
@@ -671,6 +743,10 @@ struct ScheduleCardView: View {
                     // 立即发送通知触发重新加载（不等待3秒）
                     print("🔄 [We Met] 立即发送通知触发重新加载")
                     NotificationCenter.default.post(name: NSNotification.Name("CoffeeChatScheduleUpdated"), object: nil)
+                    
+                    // 注意：loadSchedules 是 CoffeeChatScheduleView 的方法，不是 ScheduleCardView 的方法
+                    // 这里通过通知机制触发父视图重新加载
+                    // 父视图的 onReceive 会处理重新加载
                     
                     // 3秒后自动关闭庆祝视图
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {

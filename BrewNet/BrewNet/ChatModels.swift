@@ -304,7 +304,7 @@ struct CoffeeChatInvitation: Identifiable, Codable {
 }
 
 // MARK: - Coffee Chat Schedule Model
-struct CoffeeChatSchedule: Identifiable, Codable {
+struct CoffeeChatSchedule: Identifiable, Codable, Equatable {
     let id: UUID
     let userId: String
     let participantId: String
