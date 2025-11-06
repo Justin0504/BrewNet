@@ -32,6 +32,7 @@ struct ChatInterfaceView: View {
     @State private var showingCoffeeInviteAlert = false // 显示发送咖啡邀请的确认对话框
     @State private var showingCoffeeInviteAnimation = false // 显示发送动画
     @State private var showingCoffeeChatSchedule = false // 显示咖啡聊天日程列表
+    @State private var textAnimationState: (line1: Bool, line2: Bool, question: Bool) = (false, false, false) // 文字动画状态
     
     var body: some View {
         mainContent
@@ -222,15 +223,10 @@ struct ChatInterfaceView: View {
                 Text("Are you sure you want to unmatch with \(session.user.name)? This action cannot be undone.")
             }
         }
-        .alert("Send Coffee Chat Invitation", isPresented: $showingCoffeeInviteAlert) {
-            Button("Cancel", role: .cancel) {
-            }
-            Button("Send", role: .none) {
-                sendCoffeeChatInvitation()
-            }
-        } message: {
-            if let session = selectedSession {
-                Text("Do you want to send a coffee chat invitation to \(session.user.name)?")
+        .overlay {
+            // Custom Coffee Chat Invitation Alert
+            if showingCoffeeInviteAlert {
+                customCoffeeInviteAlert
             }
         }
         .overlay {
@@ -283,6 +279,193 @@ struct ChatInterfaceView: View {
                 } else {
                     chatListView
                 }
+            }
+        }
+    }
+    
+    // MARK: - Custom Coffee Invite Alert
+    private var customCoffeeInviteAlert: some View {
+        ZStack {
+            // 背景遮罩
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    withAnimation {
+                        showingCoffeeInviteAlert = false
+                    }
+                }
+            
+            // 自定义Alert卡片
+            ZStack(alignment: .topTrailing) {
+                // 主内容
+                VStack(spacing: 0) {
+                    // 渐变背景区域（包含slogan）
+                    ZStack {
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.95, green: 0.9, blue: 0.85),
+                                Color(red: 0.98, green: 0.96, blue: 0.94)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                        
+                        // 艺术字 Slogan
+                        VStack(spacing: 8) {
+                            VStack(spacing: 2) {
+                                Text("BrewNet brings us together,")
+                                    .font(.system(size: 18, weight: .bold, design: .serif))
+                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    .opacity(textAnimationState.line1 ? 1.0 : 0.0)
+                                    .offset(y: textAnimationState.line1 ? 0 : 10)
+                                
+                                Text("Conversation makes it better.")
+                                    .font(.system(size: 18, weight: .bold, design: .serif))
+                                    .foregroundColor(Color(red: 0.5, green: 0.35, blue: 0.25))
+                                    .opacity(textAnimationState.line2 ? 1.0 : 0.0)
+                                    .offset(y: textAnimationState.line2 ? 0 : 10)
+                            }
+                            
+                            if let session = selectedSession {
+                                Text("Do you want to invite \(session.user.name) to a coffee chat?")
+                                    .font(.system(size: 15, weight: .regular))
+                                    .foregroundColor(Color(red: 0.5, green: 0.4, blue: 0.3))
+                                    .multilineTextAlignment(.center)
+                                    .opacity(textAnimationState.question ? 1.0 : 0.0)
+                                    .offset(y: textAnimationState.question ? 0 : 10)
+                            }
+                        }
+                        .padding(.vertical, 20)
+                        .padding(.horizontal, 20)
+                        .onAppear {
+                            // 重置动画状态
+                            textAnimationState = (false, false, false)
+                            
+                            // 依次触发动画
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
+                                    textAnimationState.line1 = true
+                                }
+                            }
+                            
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
+                                    textAnimationState.line2 = true
+                                }
+                            }
+                            
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
+                                    textAnimationState.question = true
+                                }
+                            }
+                        }
+                        .onChange(of: showingCoffeeInviteAlert) { newValue in
+                            if !newValue {
+                                // 对话框关闭时重置动画状态
+                                textAnimationState = (false, false, false)
+                            }
+                        }
+                    }
+                    
+                    // 按钮区域
+                    HStack(spacing: 10) {
+                        // Cancel 按钮
+                        Button(action: {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                showingCoffeeInviteAlert = false
+                            }
+                        }) {
+                            Text("Cancel")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(Color(red: 0.5, green: 0.4, blue: 0.3))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 38)
+                                .background(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 0.98, green: 0.96, blue: 0.94),
+                                            Color(red: 0.95, green: 0.92, blue: 0.88)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .cornerRadius(16)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(
+                                            LinearGradient(
+                                                colors: [
+                                                    Color(red: 0.8, green: 0.7, blue: 0.6),
+                                                    Color(red: 0.7, green: 0.6, blue: 0.5)
+                                                ],
+                                                startPoint: .leading,
+                                                endPoint: .trailing
+                                            ),
+                                            lineWidth: 1.5
+                                        )
+                                )
+                        }
+                        
+                        // Send 按钮
+                        Button(action: {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                showingCoffeeInviteAlert = false
+                            }
+                            sendCoffeeChatInvitation()
+                        }) {
+                            Text("Send")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 38)
+                                .background(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 0.6, green: 0.4, blue: 0.2),
+                                            Color(red: 0.4, green: 0.2, blue: 0.1)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .cornerRadius(16)
+                                .shadow(color: Color(red: 0.4, green: 0.2, blue: 0.1).opacity(0.4), radius: 8, x: 0, y: 4)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 10)
+                }
+                .frame(width: 320)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(Color.white)
+                .cornerRadius(20)
+                .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 10)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.5),
+                                    Color(red: 0.85, green: 0.8, blue: 0.75).opacity(0.3)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+                .opacity(showingCoffeeInviteAlert ? 1.0 : 0.0)
+                
+                // 右上角咖啡图标装饰
+                Image(systemName: "cup.and.saucer.fill")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.6))
+                    .padding(.top, 10)
+                    .padding(.trailing, 10)
+                    .opacity(showingCoffeeInviteAlert ? 1.0 : 0.0)
             }
         }
     }
@@ -2197,7 +2380,7 @@ struct MessageBubbleView: View {
                 .padding(.vertical, 12)
                 .background(
                     message.isFromUser
-                        ? Color(red: 0.4, green: 0.2, blue: 0.1)
+                        ? Color(red: 0.7, green: 0.55, blue: 0.45)
                         : Color(red: 0.95, green: 0.92, blue: 0.88)
                 )
                 .cornerRadius(20, corners: message.isFromUser ? [.topLeft, .topRight, .bottomLeft] : [.topLeft, .topRight, .bottomRight])
