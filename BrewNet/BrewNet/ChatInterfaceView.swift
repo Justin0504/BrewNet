@@ -27,6 +27,9 @@ struct ChatInterfaceView: View {
     @State private var scrollViewHeight: CGFloat = 0 // ScrollView 高度
     @State private var contentHeight: CGFloat = 0 // 内容高度
     @State private var scrollOffset: CGFloat = 0 // 滚动偏移量
+    @State private var isYourTurnExpanded: Bool = true // Your Turn 分类展开状态
+    @State private var isTheirTurnExpanded: Bool = true // Their Turn 分类展开状态
+    @State private var isHiddenExpanded: Bool = false // Hidden 分类展开状态
     
     var body: some View {
         mainContent
@@ -258,6 +261,33 @@ struct ChatInterfaceView: View {
         }
     }
     
+    // MARK: - 分类计算属性
+    /// Your Turn: 最后一条消息是对方发送的（用户还没回复）
+    private var yourTurnSessions: [ChatSession] {
+        chatSessions.filter { session in
+            !session.isHidden && !session.lastMessageIsFromUser
+        }
+    }
+    
+    /// Their Turn: 最后一条消息是用户发送的（对方还没回复）
+    private var theirTurnSessions: [ChatSession] {
+        chatSessions.filter { session in
+            !session.isHidden && session.lastMessageIsFromUser
+        }
+    }
+    
+    /// Hidden: 被归档的聊天
+    private var hiddenSessions: [ChatSession] {
+        chatSessions.filter { session in
+            session.isHidden
+        }
+    }
+    
+    // MARK: - 未读消息总数（排除 Hidden）
+    private var totalUnreadCount: Int {
+        chatSessions.filter { !$0.isHidden }.reduce(0) { $0 + $1.unreadCount }
+    }
+    
     private var chatListView: some View {
         VStack {
             if isLoadingMatches && chatSessions.isEmpty {
@@ -268,8 +298,57 @@ struct ChatInterfaceView: View {
                 // 只有在确实没有任何聊天且不在加载状态时才显示空状态
                 emptyStateView
             } else {
-                // 有聊天记录时，始终显示列表（即使正在刷新也保持显示）
-                List(chatSessions) { session in
+                // 有聊天记录时，显示分类列表
+                List {
+                    // Your Turn 分类
+                    if !yourTurnSessions.isEmpty {
+                        categorySection(
+                            title: "Your Turn",
+                            count: yourTurnSessions.count,
+                            isExpanded: $isYourTurnExpanded,
+                            sessions: yourTurnSessions
+                        )
+                    }
+                    
+                    // Their Turn 分类
+                    if !theirTurnSessions.isEmpty {
+                        categorySection(
+                            title: "Their Turn",
+                            count: theirTurnSessions.count,
+                            isExpanded: $isTheirTurnExpanded,
+                            sessions: theirTurnSessions
+                        )
+                    }
+                    
+                    // Hidden 分类
+                    if !hiddenSessions.isEmpty {
+                        categorySection(
+                            title: "Hidden",
+                            count: hiddenSessions.count,
+                            isExpanded: $isHiddenExpanded,
+                            sessions: hiddenSessions,
+                            isHiddenCategory: true
+                        )
+                    }
+                }
+                .scrollContentBackground(.hidden)
+                .listStyle(.plain)
+            }
+        }
+    }
+    
+    // MARK: - 分类章节视图
+    private func categorySection(
+        title: String,
+        count: Int,
+        isExpanded: Binding<Bool>,
+        sessions: [ChatSession],
+        isHiddenCategory: Bool = false
+    ) -> some View {
+        Section {
+            // 聊天列表（展开时显示）
+            if isExpanded.wrappedValue {
+                ForEach(sessions) { session in
                     ChatSessionRowView(
                         session: session,
                         onTap: {
@@ -277,14 +356,38 @@ struct ChatInterfaceView: View {
                         },
                         onUnmatch: {
                             handleUnmatchForSession(session)
-                        }
+                        },
+                        onHide: isHiddenCategory ? nil : {
+                            handleHideSession(session)
+                        },
+                        onUnhide: isHiddenCategory ? {
+                            handleUnhideSession(session)
+                        } : nil
                     )
-                    .listRowBackground(Color.clear) // 使列表项背景透明
+                    .listRowBackground(Color.clear)
                 }
-                .scrollContentBackground(.hidden) // 隐藏列表默认背景
-                .listStyle(.plain) // 使用plain样式，减少默认间距
-                .padding(.top, -8) // 减小顶部间距，使Chat标题和列表更近
             }
+        } header: {
+            // 分类标题（可点击展开/收起）
+            Button(action: {
+                withAnimation {
+                    isExpanded.wrappedValue.toggle()
+                }
+            }) {
+                HStack {
+                    Text("\(title) (\(count))")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.black)
+                    
+                    Spacer()
+                    
+                    Image(systemName: isExpanded.wrappedValue ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.gray)
+                }
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(PlainButtonStyle())
         }
     }
     
@@ -714,7 +817,8 @@ struct ChatInterfaceView: View {
                     user: updatedChatUser,
                     messages: session.messages,
                     aiSuggestions: session.aiSuggestions,
-                    isActive: session.isActive
+                    isActive: session.isActive,
+                    isHidden: session.isHidden
                 )
                 updatedSession.lastMessageAt = session.lastMessageAt
                 updatedSessions.append(updatedSession)
@@ -777,6 +881,7 @@ struct ChatInterfaceView: View {
         
         let cacheKey = "chat_sessions_cache_\(currentUser.id)"
         let timeKey = "chat_sessions_cache_time_\(currentUser.id)"
+        let hiddenUsersKey = "hidden_chat_users_\(currentUser.id)"
         
         do {
             let encoder = JSONEncoder()
@@ -785,7 +890,12 @@ struct ChatInterfaceView: View {
             UserDefaults.standard.set(Date(), forKey: timeKey)
             lastChatLoadTime = Date()
             cachedChatSessions = chatSessions
-            print("✅ Saved \(chatSessions.count) chat sessions to persistent cache")
+            
+            // 保存 hidden 用户 ID 列表，供 MainView 使用
+            let hiddenUserIds = chatSessions.filter { $0.isHidden }.compactMap { $0.user.userId }
+            UserDefaults.standard.set(hiddenUserIds, forKey: hiddenUsersKey)
+            
+            print("✅ Saved \(chatSessions.count) chat sessions to persistent cache (hidden: \(hiddenUserIds.count))")
         } catch {
             print("⚠️ Failed to save cached chat sessions: \(error)")
         }
@@ -804,6 +914,8 @@ struct ChatInterfaceView: View {
         
         // 保存当前聊天列表，避免刷新时显示空状态
         let previousSessions = chatSessions
+        // 保存当前 hidden 会话的 userId 列表，以便在刷新后恢复 hidden 状态
+        let hiddenUserIds = Set(previousSessions.filter { $0.isHidden }.compactMap { $0.user.userId })
         // 只有在首次加载（没有现有聊天记录）时才显示加载状态
         // 如果有现有聊天记录，刷新时不显示加载状态，保持列表显示
         if previousSessions.isEmpty {
@@ -1051,14 +1163,19 @@ struct ChatInterfaceView: View {
                     userId: matchedUserId
                 )
                 
+                // 检查该用户之前的会话是否是 hidden 的
+                let wasHidden = hiddenUserIds.contains(matchedUserId)
+                
                 var session = ChatSession(
                     user: chatUser,
                     messages: messageData.messages,
-                    aiSuggestions: []
+                    aiSuggestions: [],
+                    isActive: true,
+                    isHidden: wasHidden // 保留之前的 hidden 状态
                 )
                 session.lastMessageAt = messageData.lastMessageTime
                 
-                print("✅ Created session for \(matchedUserName): matchDate=\(matchDate), isOnline=\(isOnline), lastSeen=\(lastSeen)")
+                print("✅ Created session for \(matchedUserName): matchDate=\(matchDate), isOnline=\(isOnline), lastSeen=\(lastSeen), isHidden=\(wasHidden)")
                 
                 sessions.append(session)
             }
@@ -1397,9 +1514,13 @@ struct ChatInterfaceView: View {
         }
         
         // 只刷新有未读消息的会话，或者最近有消息的会话
+        // 注意：hidden 的会话也会刷新消息，但不会自动取消 hidden 状态
         for index in chatSessions.indices {
             let session = chatSessions[index]
             guard let receiverUserId = session.user.userId else { continue }
+            
+            // 保存当前的 hidden 状态
+            let wasHidden = session.isHidden
             
             do {
                 let supabaseMessages = try await supabaseService.getMessages(
@@ -1421,10 +1542,25 @@ struct ChatInterfaceView: View {
                     }
                 }
                 
-                // 更新会话消息
+                // 更新会话消息，但保留 hidden 状态
+                // hidden 的会话即使收到新消息，也保持 hidden 状态
                 chatSessions[index].messages = uniqueMessages
                 if let lastMessage = uniqueMessages.last {
                     chatSessions[index].lastMessageAt = lastMessage.timestamp
+                }
+                // 确保 hidden 状态不会被改变
+                if wasHidden {
+                    // 如果原来是 hidden，创建一个新的 session 保持 hidden 状态
+                    let updatedSession = ChatSession(
+                        user: chatSessions[index].user,
+                        messages: chatSessions[index].messages,
+                        aiSuggestions: chatSessions[index].aiSuggestions,
+                        isActive: chatSessions[index].isActive,
+                        isHidden: true
+                    )
+                    var sessionWithHidden = updatedSession
+                    sessionWithHidden.lastMessageAt = chatSessions[index].lastMessageAt
+                    chatSessions[index] = sessionWithHidden
                 }
             } catch {
                 print("⚠️ Failed to refresh messages for session \(session.user.name): \(error.localizedDescription)")
@@ -1626,12 +1762,13 @@ struct ChatInterfaceView: View {
                 userId: session.user.userId
             )
             
-            // 创建新的 ChatSession
+            // 创建新的 ChatSession，保留 hidden 状态
             var updatedSession = ChatSession(
                 user: updatedChatUser,
                 messages: session.messages,
                 aiSuggestions: session.aiSuggestions,
-                isActive: session.isActive
+                isActive: session.isActive,
+                isHidden: session.isHidden
             )
             updatedSession.lastMessageAt = session.lastMessageAt
             updatedSessions.append(updatedSession)
@@ -1711,11 +1848,29 @@ struct ChatInterfaceView: View {
             
             // 更新会话消息（使用去重后的消息）
             if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
+                // 保存当前的 hidden 状态
+                let wasHidden = chatSessions[index].isHidden
+                
                 chatSessions[index].messages = uniqueMessages
                 // 更新最后消息时间
                 if let lastMessage = uniqueMessages.last {
                     chatSessions[index].lastMessageAt = lastMessage.timestamp
                 }
+                
+                // 确保 hidden 状态不会被改变
+                if wasHidden {
+                    let updatedSession = ChatSession(
+                        user: chatSessions[index].user,
+                        messages: chatSessions[index].messages,
+                        aiSuggestions: chatSessions[index].aiSuggestions,
+                        isActive: chatSessions[index].isActive,
+                        isHidden: true
+                    )
+                    var sessionWithHidden = updatedSession
+                    sessionWithHidden.lastMessageAt = chatSessions[index].lastMessageAt
+                    chatSessions[index] = sessionWithHidden
+                }
+                
                 // 更新选中会话（用于聊天视图）
                 selectedSession = chatSessions[index]
                 
@@ -1815,6 +1970,55 @@ struct ChatInterfaceView: View {
         showingUnmatchConfirmAlert = true
     }
     
+    /// 处理隐藏聊天（归档到 Hidden）
+    private func handleHideSession(_ session: ChatSession) {
+        // 找到对应的会话并更新 isHidden 状态
+        if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
+            var updatedSession = chatSessions[index]
+            // 由于 ChatSession 的 isHidden 是 var，我们需要创建一个新的会话
+            let newSession = ChatSession(
+                user: updatedSession.user,
+                messages: updatedSession.messages,
+                aiSuggestions: updatedSession.aiSuggestions,
+                isActive: updatedSession.isActive,
+                isHidden: true
+            )
+            chatSessions[index] = newSession
+            
+            // 如果当前正在查看这个会话，先关闭它
+            if selectedSession?.id == session.id {
+                selectedSession = nil
+            }
+            
+            // 更新缓存
+            saveCachedChatSessionsToStorage()
+            
+            print("✅ Session with \(session.user.name) has been hidden")
+        }
+    }
+    
+    /// 处理取消隐藏聊天（从 Hidden 移回对应分类）
+    private func handleUnhideSession(_ session: ChatSession) {
+        // 找到对应的会话并更新 isHidden 状态
+        if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
+            var updatedSession = chatSessions[index]
+            // 创建新的会话，isHidden 设为 false
+            let newSession = ChatSession(
+                user: updatedSession.user,
+                messages: updatedSession.messages,
+                aiSuggestions: updatedSession.aiSuggestions,
+                isActive: updatedSession.isActive,
+                isHidden: false
+            )
+            chatSessions[index] = newSession
+            
+            // 更新缓存
+            saveCachedChatSessionsToStorage()
+            
+            print("✅ Session with \(session.user.name) has been unhidden")
+        }
+    }
+    
     /// 实际执行取消匹配操作
     private func performUnmatch(session: ChatSession) {
         guard let currentUser = authManager.currentUser,
@@ -1879,6 +2083,8 @@ struct ChatSessionRowView: View {
     let session: ChatSession
     let onTap: () -> Void
     let onUnmatch: () -> Void
+    let onHide: (() -> Void)? // 可选的 Hide 操作
+    let onUnhide: (() -> Void)? // 可选的 Unhide 操作
     @EnvironmentObject var supabaseService: SupabaseService
     
     var body: some View {
@@ -1930,16 +2136,18 @@ struct ChatSessionRowView: View {
                         
                         Spacer()
                         
-                        // 显示未读消息数，而不是总消息数
-                        let unreadCount = session.unreadCount
-                        if unreadCount > 0 {
-                            Text("\(unreadCount)")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2)
-                                .background(session.user.isMatched ? session.user.matchType.color : Color(red: 0.4, green: 0.2, blue: 0.1))
-                                .cornerRadius(10)
+                        // 显示未读消息数（Hidden 的会话不显示未读消息数）
+                        if !session.isHidden {
+                            let unreadCount = session.unreadCount
+                            if unreadCount > 0 {
+                                Text("\(unreadCount)")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 2)
+                                    .background(session.user.isMatched ? session.user.matchType.color : Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    .cornerRadius(10)
+                            }
                         }
                     }
                 }
@@ -1947,13 +2155,42 @@ struct ChatSessionRowView: View {
             .padding(.vertical, 8)
         }
         .buttonStyle(PlainButtonStyle())
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button(role: .destructive) {
-                onUnmatch()
-            } label: {
-                Label("Unmatch", systemImage: "xmark.circle.fill")
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            // 如果是 Hidden 分类，显示 Unhide 和 Unmatch
+            if session.isHidden {
+                if let onUnhide = onUnhide {
+                    Button {
+                        onUnhide()
+                    } label: {
+                        Label("Unhide", systemImage: "eye.fill")
+                    }
+                    .tint(.blue)
+                }
+                
+                Button(role: .destructive) {
+                    onUnmatch()
+                } label: {
+                    Label("Unmatch", systemImage: "xmark.circle.fill")
+                }
+                .tint(.red)
+            } else {
+                // 如果是 Your Turn 或 Their Turn，显示 Hide 和 Unmatch
+                if let onHide = onHide {
+                    Button {
+                        onHide()
+                    } label: {
+                        Label("Hide", systemImage: "eye.slash.fill")
+                    }
+                    .tint(.gray)
+                }
+                
+                Button(role: .destructive) {
+                    onUnmatch()
+                } label: {
+                    Label("Unmatch", systemImage: "xmark.circle.fill")
+                }
+                .tint(.red)
             }
-            .tint(.red)
         }
     }
     
