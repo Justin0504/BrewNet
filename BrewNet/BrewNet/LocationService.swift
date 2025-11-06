@@ -128,6 +128,26 @@ class LocationService: NSObject, ObservableObject {
         return location1.distance(from: location2) / 1000.0 // 返回公里
     }
     
+    // MARK: - Calculate Distance in Meters
+    func calculateDistanceInMeters(from location1: CLLocation, to location2: CLLocation) -> Double {
+        return location1.distance(from: location2) // 返回米
+    }
+    
+    // MARK: - Calculate Distance Between Two GPS Coordinates
+    func calculateDistanceBetweenCoordinates(
+        lat1: Double,
+        lon1: Double,
+        lat2: Double,
+        lon2: Double,
+        completion: @escaping (Double?) -> Void
+    ) {
+        let location1 = CLLocation(latitude: lat1, longitude: lon1)
+        let location2 = CLLocation(latitude: lat2, longitude: lon2)
+        let distance = calculateDistanceInMeters(from: location1, to: location2)
+        print("📏 [实时距离] 计算距离: (\(lat1), \(lon1)) 到 (\(lat2), \(lon2)) = \(formatDistance(distance / 1000.0))")
+        completion(distance)
+    }
+    
     // MARK: - Format Distance
     func formatDistance(_ kilometers: Double) -> String {
         if kilometers < 1 {

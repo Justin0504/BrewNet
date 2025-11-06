@@ -338,6 +338,65 @@ class SupabaseService: ObservableObject {
             .execute()
     }
     
+    /// 更新用户的实时GPS位置
+    func updateUserRealTimeLocation(userId: String, latitude: Double, longitude: Double) async throws {
+        print("📍 [实时位置] 更新用户 \(userId) 的位置: (\(latitude), \(longitude))")
+        do {
+            // 创建一个符合 Encodable 的结构体
+            struct LocationUpdate: Encodable {
+                let latitude: Double
+                let longitude: Double
+                let updated_at: String
+            }
+            
+            let update = LocationUpdate(
+                latitude: latitude,
+                longitude: longitude,
+                updated_at: ISO8601DateFormatter().string(from: Date())
+            )
+            
+            try await client
+                .from(SupabaseTable.users.rawValue)
+                .update(update)
+                .eq("id", value: userId)
+                .execute()
+            print("✅ [实时位置] 位置更新成功")
+        } catch {
+            print("❌ [实时位置] 位置更新失败: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    /// 获取用户的实时GPS位置
+    func getUserRealTimeLocation(userId: String) async throws -> (latitude: Double, longitude: Double)? {
+        do {
+            let response = try await client
+                .from(SupabaseTable.users.rawValue)
+                .select("latitude, longitude")
+                .eq("id", value: userId)
+                .single()
+                .execute()
+            
+            let data = response.data
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let lat = json["latitude"] as? Double,
+               let lon = json["longitude"] as? Double {
+                print("✅ [实时位置] 获取到用户 \(userId) 的位置: (\(lat), \(lon))")
+                return (latitude: lat, longitude: lon)
+            } else {
+                print("⚠️ [实时位置] 用户 \(userId) 没有实时位置信息")
+                return nil
+            }
+        } catch {
+            print("❌ [实时位置] 获取位置失败: \(error.localizedDescription)")
+            // 如果字段不存在，返回 nil 而不是抛出错误
+            if error.localizedDescription.contains("latitude") || error.localizedDescription.contains("longitude") {
+                return nil
+            }
+            throw error
+        }
+    }
+    
     /// 获取所有用户
     func getAllUsers() async throws -> [SupabaseUser] {
         let response = try await client
@@ -3612,6 +3671,8 @@ extension SupabaseService {
                 createdAt = formatter.date(from: createdAtString) ?? Date()
             }
             
+            let hasMet = json["has_met"] as? Bool ?? false
+            
             let schedule = CoffeeChatSchedule(
                 id: scheduleId,
                 userId: userId,
@@ -3620,7 +3681,8 @@ extension SupabaseService {
                 scheduledDate: finalScheduledDate,
                 location: location,
                 notes: notes,
-                createdAt: createdAt
+                createdAt: createdAt,
+                hasMet: hasMet
             )
             schedules.append(schedule)
             print("✅ [咖啡聊天] 成功解析日程: \(participantName) at \(location) on \(dateString)")
@@ -3628,6 +3690,139 @@ extension SupabaseService {
         
         print("✅ [咖啡聊天] 总共找到 \(schedules.count) 个有效日程")
         return schedules
+    }
+    
+    /// 标记咖啡聊天日程为已见面
+    func markCoffeeChatAsMet(scheduleId: String, currentUserId: String) async throws {
+        print("✅ [咖啡聊天] 标记日程为已见面: \(scheduleId)")
+        print("✅ [咖啡聊天] 当前用户ID: \(currentUserId)")
+        print("✅ [咖啡聊天] scheduleId 类型: \(type(of: scheduleId))")
+        
+        do {
+            // 创建一个符合 Encodable 的结构体
+            struct HasMetUpdate: Encodable {
+                let has_met: Bool
+            }
+            
+            let update = HasMetUpdate(has_met: true)
+            print("✅ [咖啡聊天] 准备更新，has_met = true")
+            
+            // 先检查记录是否存在以及当前用户是否有权限
+            let checkResponse = try await client
+                .from("coffee_chat_schedules")
+                .select("id, user_id, participant_id, has_met")
+                .eq("id", value: scheduleId)
+                .execute()
+            
+            if let checkData = try? JSONSerialization.jsonObject(with: checkResponse.data) as? [[String: Any]],
+               let record = checkData.first {
+                let recordUserId = record["user_id"] as? String ?? "nil"
+                let recordParticipantId = record["participant_id"] as? String ?? "nil"
+                let recordHasMet = record["has_met"] as? Bool ?? false
+                
+                print("✅ [咖啡聊天] 找到记录:")
+                print("   - id: \(record["id"] ?? "nil")")
+                print("   - user_id: \(recordUserId)")
+                print("   - participant_id: \(recordParticipantId)")
+                print("   - 当前 has_met: \(recordHasMet)")
+                print("   - 当前用户ID: \(currentUserId)")
+                print("   - 用户是否匹配 user_id: \(currentUserId == recordUserId)")
+                print("   - 用户是否匹配 participant_id: \(currentUserId == recordParticipantId)")
+                
+                // 检查权限
+                if currentUserId != recordUserId && currentUserId != recordParticipantId {
+                    print("❌ [咖啡聊天] 权限错误：当前用户不是 user_id 或 participant_id")
+                    print("❌ [咖啡聊天] 这会导致 RLS 策略阻止更新")
+                }
+            } else {
+                print("⚠️ [咖啡聊天] 未找到记录或无法解析，scheduleId: \(scheduleId)")
+                if let checkString = String(data: checkResponse.data, encoding: .utf8) {
+                    print("⚠️ [咖啡聊天] 检查响应: \(checkString)")
+                }
+            }
+            
+            // 执行更新
+            print("🔄 [咖啡聊天] 开始执行更新查询...")
+            let response = try await client
+                .from("coffee_chat_schedules")
+                .update(update)
+                .eq("id", value: scheduleId)
+                .execute()
+            
+            print("✅ [咖啡聊天] 更新请求已发送，响应状态码: \(response.status)")
+            print("✅ [咖啡聊天] 响应数据大小: \(response.data.count) bytes")
+            
+            // 打印响应内容
+            if let responseString = String(data: response.data, encoding: .utf8) {
+                print("✅ [咖啡聊天] 响应内容: \(responseString)")
+                
+                // 检查响应是否为空数组（表示没有行被更新）
+                if responseString == "[]" || responseString.trimmingCharacters(in: .whitespacesAndNewlines) == "[]" {
+                    print("❌ [咖啡聊天] 错误：更新响应为空数组，表示没有行被更新")
+                    print("❌ [咖啡聊天] 这通常意味着：")
+                    print("   1. RLS 策略阻止了更新")
+                    print("   2. 没有找到匹配的记录")
+                    print("   3. 当前用户没有权限更新这条记录")
+                    throw NSError(domain: "CoffeeChatError", code: 1, userInfo: [NSLocalizedDescriptionKey: "更新失败：没有行被更新，可能是 RLS 策略阻止了更新"])
+                }
+            }
+            
+            // 检查状态码
+            if response.status < 200 || response.status >= 300 {
+                print("❌ [咖啡聊天] 更新失败，HTTP 状态码: \(response.status)")
+                throw NSError(domain: "CoffeeChatError", code: 2, userInfo: [NSLocalizedDescriptionKey: "更新失败：HTTP 状态码 \(response.status)"])
+            }
+            
+            // 等待一小段时间确保更新完成
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5秒
+            
+            // 验证更新是否成功：查询更新后的记录
+            print("🔄 [咖啡聊天] 开始验证更新结果...")
+            let verifyResponse = try await client
+                .from("coffee_chat_schedules")
+                .select("id, has_met")
+                .eq("id", value: scheduleId)
+                .execute()
+            
+            print("✅ [咖啡聊天] 验证查询完成，状态码: \(verifyResponse.status)")
+            if let verifyString = String(data: verifyResponse.data, encoding: .utf8) {
+                print("✅ [咖啡聊天] 验证响应内容: \(verifyString)")
+            }
+            
+            if let verifyData = try? JSONSerialization.jsonObject(with: verifyResponse.data) as? [[String: Any]],
+               let record = verifyData.first,
+               let hasMet = record["has_met"] as? Bool {
+                print("✅ [咖啡聊天] 验证更新结果: has_met = \(hasMet)")
+                if !hasMet {
+                    print("❌ [咖啡聊天] 错误：数据库中的 has_met 仍然是 false")
+                    print("❌ [咖啡聊天] 可能的原因：")
+                    print("   1. RLS 策略阻止了更新")
+                    print("   2. 当前用户不是 user_id 或 participant_id")
+                    print("   3. 数据库字段不存在或名称不匹配")
+                    throw NSError(domain: "CoffeeChatError", code: 3, userInfo: [NSLocalizedDescriptionKey: "更新失败：数据库中的 has_met 仍然是 false"])
+                } else {
+                    print("✅ [咖啡聊天] 更新成功！has_met 已设置为 true")
+                }
+            } else {
+                print("⚠️ [咖啡聊天] 无法验证更新结果")
+                if let verifyString = String(data: verifyResponse.data, encoding: .utf8) {
+                    print("⚠️ [咖啡聊天] 验证响应: \(verifyString)")
+                }
+                // 如果无法验证，仍然抛出错误以确保用户知道更新可能失败
+                throw NSError(domain: "CoffeeChatError", code: 4, userInfo: [NSLocalizedDescriptionKey: "无法验证更新结果"])
+            }
+            
+            print("✅ [咖啡聊天] 日程已标记为已见面")
+        } catch {
+            print("❌ [咖啡聊天] 标记失败: \(error.localizedDescription)")
+            print("❌ [咖啡聊天] 错误类型: \(type(of: error))")
+            if let nsError = error as NSError? {
+                print("❌ [咖啡聊天] 错误域: \(nsError.domain)")
+                print("❌ [咖啡聊天] 错误代码: \(nsError.code)")
+                print("❌ [咖啡聊天] 错误信息: \(nsError.userInfo)")
+            }
+            throw error
+        }
     }
 }
 

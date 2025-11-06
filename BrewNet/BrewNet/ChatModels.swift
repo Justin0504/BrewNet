@@ -313,8 +313,9 @@ struct CoffeeChatSchedule: Identifiable, Codable {
     let location: String
     let notes: String?
     let createdAt: Date
+    var hasMet: Bool
     
-    init(userId: String, participantId: String, participantName: String, scheduledDate: Date, location: String, notes: String? = nil) {
+    init(userId: String, participantId: String, participantName: String, scheduledDate: Date, location: String, notes: String? = nil, hasMet: Bool = false) {
         self.id = UUID()
         self.userId = userId
         self.participantId = participantId
@@ -323,10 +324,11 @@ struct CoffeeChatSchedule: Identifiable, Codable {
         self.location = location
         self.notes = notes
         self.createdAt = Date()
+        self.hasMet = hasMet
     }
     
     // 从数据库解码的初始化方法
-    init(id: UUID, userId: String, participantId: String, participantName: String, scheduledDate: Date, location: String, notes: String?, createdAt: Date) {
+    init(id: UUID, userId: String, participantId: String, participantName: String, scheduledDate: Date, location: String, notes: String?, createdAt: Date, hasMet: Bool = false) {
         self.id = id
         self.userId = userId
         self.participantId = participantId
@@ -335,6 +337,7 @@ struct CoffeeChatSchedule: Identifiable, Codable {
         self.location = location
         self.notes = notes
         self.createdAt = createdAt
+        self.hasMet = hasMet
     }
     
     enum CodingKeys: String, CodingKey {
@@ -346,6 +349,7 @@ struct CoffeeChatSchedule: Identifiable, Codable {
         case location
         case notes
         case createdAt = "created_at"
+        case hasMet = "has_met"
     }
 }
 
