@@ -33,6 +33,7 @@ struct BrewNetMatchesView: View {
     @State private var showingGroupMeet = false
     @State private var showingMatchFilter = false
     @State private var showingIncreaseExposure = false
+    @State private var currentFilter: MatchFilter? = nil
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -203,6 +204,9 @@ struct BrewNetMatchesView: View {
                 .environmentObject(supabaseService)
         }
         .onAppear {
+            // 加载保存的filter
+            loadSavedFilter()
+            
             // 先尝试从持久化缓存加载（包括索引）
             loadCachedProfilesFromStorage()
             
@@ -296,6 +300,11 @@ struct BrewNetMatchesView: View {
         .onDisappear {
             // 保存当前索引（用于切换tab或退出登录时恢复）
             saveCurrentIndex()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ApplyMatchFilter"))) { notification in
+            if let filter = notification.userInfo?["filter"] as? MatchFilter {
+                applyFilter(filter)
+            }
         }
         .alert("It's a Match! 🎉", isPresented: $showingMatchAlert) {
             Button("Keep Swiping") {
@@ -811,11 +820,17 @@ struct BrewNetMatchesView: View {
             let sortedRecommendations = recommendations.sorted { $0.score > $1.score }
             
             // 过滤掉已交互的用户和无效测试用户
-            let validRecommendations = sortedRecommendations.filter { rec in
+            var validRecommendations = sortedRecommendations.filter { rec in
                 !excludedUserIds.contains(rec.userId) &&
                 !passedProfiles.contains(where: { $0.userId == rec.userId }) &&
                 !likedProfiles.contains(where: { $0.userId == rec.userId }) &&
                 isValidProfileName(rec.profile.coreIdentity.name) // 排除无效测试用户
+            }
+            
+            // 应用用户设置的filter
+            let filter = await MainActor.run { currentFilter }
+            if let filter = filter {
+                validRecommendations = validRecommendations.filter { filter.matches($0.profile) }
             }
             
             let brewNetProfiles = validRecommendations.map { $0.profile }
@@ -1243,9 +1258,16 @@ struct BrewNetMatchesView: View {
                 }
                 
                 // 最终过滤：确保不包含任何已交互的用户和无效测试用户
-                let finalValidProfiles = brewNetProfiles.filter { profile in
+                var finalValidProfiles = brewNetProfiles.filter { profile in
                     !excludedUserIds.contains(profile.userId) &&
                     isValidProfileName(profile.coreIdentity.name)
+                }
+                
+                // 应用用户设置的filter
+                let filter = await MainActor.run { currentFilter }
+                if let filter = filter {
+                    finalValidProfiles = finalValidProfiles.filter { filter.matches($0) }
+                    print("📊 Applied filter: \(finalValidProfiles.count) profiles remain (from \(brewNetProfiles.count))")
                 }
                 
                 print("📊 Filtered results: \(finalValidProfiles.count) valid profiles from \(brewNetProfiles.count) recommendations (excluded: \(brewNetProfiles.count - finalValidProfiles.count))")
@@ -1318,12 +1340,18 @@ struct BrewNetMatchesView: View {
             let excludedUserIds = try await supabaseService.getExcludedUserIds(userId: currentUser.id)
             
             // 过滤掉已pass、已like和已匹配的用户（避免重复显示），同时排除无效测试用户
-            let filteredProfiles = brewNetProfiles.filter { profile in
+            var filteredProfiles = brewNetProfiles.filter { profile in
                 !excludedUserIds.contains(profile.userId) &&
                 !passedUserIds.contains(profile.userId) && 
                 !likedUserIds.contains(profile.userId) &&
                 !excludedMatchedUserIds.contains(profile.userId) && // 防御性过滤已匹配用户
                 isValidProfileName(profile.coreIdentity.name) // 排除无效测试用户
+            }
+            
+            // 应用用户设置的filter
+            let filter = await MainActor.run { currentFilter }
+            if let filter = filter {
+                filteredProfiles = filteredProfiles.filter { filter.matches($0) }
             }
             
             let localFilteredCount = brewNetProfiles.count - filteredProfiles.count
@@ -1618,6 +1646,44 @@ struct BrewNetMatchesView: View {
         return [profile1, profile2]
     }
     
+    // MARK: - Filter Methods
+    private func loadSavedFilter() {
+        guard let userId = authManager.currentUser?.id else { return }
+        if let data = UserDefaults.standard.data(forKey: "match_filter_\(userId)"),
+           let savedFilter = try? JSONDecoder().decode(MatchFilter.self, from: data) {
+            currentFilter = savedFilter
+            print("✅ Loaded saved filter")
+        }
+    }
+    
+    private func applyFilter(_ filter: MatchFilter) {
+        currentFilter = filter
+        print("🔍 Applying filter: \(filter.hasActiveFilters() ? "Active" : "None")")
+        
+        // 重新过滤当前profiles
+        if let filter = currentFilter {
+            let filteredProfiles = profiles.filter { filter.matches($0) }
+            let filteredCount = profiles.count - filteredProfiles.count
+            
+            profiles = filteredProfiles
+            cachedProfiles = cachedProfiles.filter { filter.matches($0) }
+            
+            // 调整索引
+            if currentIndex >= profiles.count && !profiles.isEmpty {
+                currentIndex = 0
+            } else if profiles.isEmpty {
+                currentIndex = 0
+                // 如果没有匹配的profiles，尝试加载更多
+                if hasMoreProfiles {
+                    loadMoreProfiles()
+                }
+            }
+            
+            print("✅ Applied filter: \(filteredCount) profiles filtered out, \(profiles.count) remain")
+            saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
+        }
+    }
+    
     // MARK: - Helper Methods
     /// 验证 profile 名称是否有效（排除测试用户）
     private func isValidProfileName(_ name: String) -> Bool {
@@ -1686,31 +1752,369 @@ struct GroupMeetView: View {
     }
 }
 
+// MARK: - Match Filter Model
+struct MatchFilter: Codable, Equatable {
+    // 单选字段（唯一选项）
+    var networkingIntention: NetworkingIntentionType?
+    var experienceLevel: ExperienceLevel?
+    var careerStage: CareerStage?
+    var preferredChatFormat: ChatFormat?
+    var preferredMeetingVibe: MeetingVibe?
+    var verifiedStatus: VerifiedStatus?
+    
+    // 多选字段
+    var selectedSkills: Set<String> = []
+    var selectedHobbies: Set<String> = []
+    var selectedValues: Set<String> = []
+    var selectedSubIntentions: Set<SubIntentionType> = []
+    var selectedIndustries: Set<String> = []
+    
+    // 范围字段
+    var minYearsOfExperience: Double?
+    var maxYearsOfExperience: Double?
+    
+    // 是否启用filter
+    var isActive: Bool = false
+    
+    static let `default` = MatchFilter()
+    
+    func hasActiveFilters() -> Bool {
+        return networkingIntention != nil ||
+               experienceLevel != nil ||
+               careerStage != nil ||
+               preferredChatFormat != nil ||
+               preferredMeetingVibe != nil ||
+               verifiedStatus != nil ||
+               !selectedSkills.isEmpty ||
+               !selectedHobbies.isEmpty ||
+               !selectedValues.isEmpty ||
+               !selectedSubIntentions.isEmpty ||
+               !selectedIndustries.isEmpty ||
+               minYearsOfExperience != nil ||
+               maxYearsOfExperience != nil
+    }
+    
+    func matches(_ profile: BrewNetProfile) -> Bool {
+        // 如果没有任何filter，返回true
+        guard hasActiveFilters() else { return true }
+        
+        // 单选字段匹配
+        if let intention = networkingIntention, 
+           profile.networkingIntention.selectedIntention != intention {
+            return false
+        }
+        
+        if let level = experienceLevel,
+           profile.professionalBackground.experienceLevel != level {
+            return false
+        }
+        
+        if let stage = careerStage,
+           profile.professionalBackground.careerStage != stage {
+            return false
+        }
+        
+        if let format = preferredChatFormat,
+           profile.networkingPreferences.preferredChatFormat != format {
+            return false
+        }
+        
+        if let vibe = preferredMeetingVibe,
+           profile.personalitySocial.preferredMeetingVibe != vibe {
+            return false
+        }
+        
+        if let verified = verifiedStatus,
+           profile.privacyTrust.verifiedStatus != verified {
+            return false
+        }
+        
+        // 多选字段匹配（至少匹配一个）
+        if !selectedSkills.isEmpty {
+            let profileSkills = Set(profile.professionalBackground.skills)
+            if profileSkills.isDisjoint(with: selectedSkills) {
+                return false
+            }
+        }
+        
+        if !selectedHobbies.isEmpty {
+            let profileHobbies = Set(profile.personalitySocial.hobbies)
+            if profileHobbies.isDisjoint(with: selectedHobbies) {
+                return false
+            }
+        }
+        
+        if !selectedValues.isEmpty {
+            let profileValues = Set(profile.personalitySocial.valuesTags)
+            if profileValues.isDisjoint(with: selectedValues) {
+                return false
+            }
+        }
+        
+        if !selectedSubIntentions.isEmpty {
+            let profileSubIntentions = Set(profile.networkingIntention.selectedSubIntentions)
+            if profileSubIntentions.isDisjoint(with: selectedSubIntentions) {
+                return false
+            }
+        }
+        
+        if !selectedIndustries.isEmpty {
+            if let industry = profile.professionalBackground.industry,
+               !selectedIndustries.contains(industry) {
+                return false
+            } else if profile.professionalBackground.industry == nil {
+                return false
+            }
+        }
+        
+        // 范围字段匹配
+        if let minYears = minYearsOfExperience,
+           let profileYears = profile.professionalBackground.yearsOfExperience,
+           profileYears < minYears {
+            return false
+        }
+        
+        if let maxYears = maxYearsOfExperience,
+           let profileYears = profile.professionalBackground.yearsOfExperience,
+           profileYears > maxYears {
+            return false
+        }
+        
+        return true
+    }
+}
+
 // MARK: - Match Filter View
 struct MatchFilterView: View {
     @Environment(\.presentationMode) var presentationMode
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var supabaseService: SupabaseService
     
+    @State private var filter: MatchFilter = .default
+    @State private var showingResetConfirmation = false
+    
     var body: some View {
         NavigationView {
-            VStack(spacing: 20) {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 60))
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                    .padding(.top, 40)
+            ZStack {
+                // Background
+                Color(red: 0.98, green: 0.97, blue: 0.95)
+                    .ignoresSafeArea()
                 
-                Text("Match Filter")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                ScrollView {
+                    VStack(spacing: 24) {
+                        // Header Icon
+                        VStack(spacing: 12) {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 48, weight: .light))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            
+                            Text("Match Filter")
+                                .font(.system(size: 28, weight: .bold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            
+                            Text("Filter your matches by preferences")
+                                .font(.system(size: 15))
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.top, 20)
+                        
+                        // Filter Sections
+                        // 重新组织：优先级高的和关联性大的放在一起
+                        VStack(spacing: 20) {
+                            // ========== Networking Section (高优先级) ==========
+                            // 1. Networking Intention (单选)
+                            FilterSection(title: "Networking Intention") {
+                                SingleSelectFilter(
+                                    options: NetworkingIntentionType.allCases,
+                                    selected: $filter.networkingIntention,
+                                    displayName: { $0.displayName }
+                                )
+                            }
+                            
+                            // 2. Sub Intentions (多选) - 根据选中的Intention动态变化
+                            if let selectedIntention = filter.networkingIntention {
+                                FilterSection(title: "Sub Intentions") {
+                                    MultiSelectFilter(
+                                        options: selectedIntention.subIntentions.map { $0.rawValue },
+                                        selected: Binding(
+                                            get: { 
+                                                Set(filter.selectedSubIntentions
+                                                    .filter { subIntention in
+                                                        selectedIntention.subIntentions.contains(subIntention)
+                                                    }
+                                                    .map { $0.rawValue })
+                                            },
+                                            set: { newValues in
+                                                // 移除不在当前intention下的sub-intentions
+                                                filter.selectedSubIntentions = filter.selectedSubIntentions
+                                                    .filter { !selectedIntention.subIntentions.contains($0) }
+                                                // 添加新选择的
+                                                filter.selectedSubIntentions.formUnion(
+                                                    newValues.compactMap { SubIntentionType(rawValue: $0) }
+                                                        .filter { selectedIntention.subIntentions.contains($0) }
+                                                )
+                                            }
+                                        ),
+                                        maxSelections: 10
+                                    )
+                                }
+                            } else {
+                                // 如果没有选择Intention，显示提示
+                                FilterSection(title: "Sub Intentions") {
+                                    Text("Please select a Networking Intention first")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.gray)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.vertical, 8)
+                                }
+                            }
+                            
+                            // ========== Professional Background Section (高优先级) ==========
+                            // 3. Experience Level (单选)
+                            FilterSection(title: "Experience Level") {
+                                SingleSelectFilter(
+                                    options: ExperienceLevel.allCases,
+                                    selected: $filter.experienceLevel,
+                                    displayName: { $0.displayName }
+                                )
+                            }
+                            
+                            // 4. Career Stage (单选) - 关联Experience Level
+                            FilterSection(title: "Career Stage") {
+                                SingleSelectFilter(
+                                    options: CareerStage.allCases,
+                                    selected: $filter.careerStage,
+                                    displayName: { $0.displayName }
+                                )
+                            }
+                            
+                            // 5. Years of Experience Range - 关联Experience Level
+                            FilterSection(title: "Years of Experience") {
+                                ExperienceRangeFilter(
+                                    minYears: $filter.minYearsOfExperience,
+                                    maxYears: $filter.maxYearsOfExperience
+                                )
+                            }
+                            
+                            // 6. Industry (多选) - Professional相关
+                            FilterSection(title: "Industry") {
+                                MultiSelectFilter(
+                                    options: FeatureVocabularies.allIndustries,
+                                    selected: $filter.selectedIndustries,
+                                    maxSelections: 5
+                                )
+                            }
+                            
+                            // 7. Skills (多选) - 高优先级，Professional相关
+                            FilterSection(title: "Skills") {
+                                MultiSelectFilter(
+                                    options: FeatureVocabularies.allSkills,
+                                    selected: $filter.selectedSkills,
+                                    maxSelections: 10
+                                )
+                            }
+                            
+                            // ========== Networking Preferences Section (中优先级) ==========
+                            // 8. Preferred Chat Format (单选) - Networking相关
+                            FilterSection(title: "Chat Format") {
+                                SingleSelectFilter(
+                                    options: ChatFormat.allCases,
+                                    selected: $filter.preferredChatFormat,
+                                    displayName: { $0.displayName }
+                                )
+                            }
+                            
+                            // 9. Preferred Meeting Vibe (单选) - Networking相关
+                            FilterSection(title: "Meeting Vibe") {
+                                SingleSelectFilter(
+                                    options: MeetingVibe.allCases,
+                                    selected: $filter.preferredMeetingVibe,
+                                    displayName: { $0.displayName }
+                                )
+                            }
+                            
+                            // ========== Personal Preferences Section (低优先级) ==========
+                            // 10. Hobbies (多选)
+                            FilterSection(title: "Hobbies") {
+                                MultiSelectFilter(
+                                    options: FeatureVocabularies.allHobbies,
+                                    selected: $filter.selectedHobbies,
+                                    maxSelections: 10
+                                )
+                            }
+                            
+                            // 11. Values (多选)
+                            FilterSection(title: "Values") {
+                                MultiSelectFilter(
+                                    options: FeatureVocabularies.allValues,
+                                    selected: $filter.selectedValues,
+                                    maxSelections: 10
+                                )
+                            }
+                            
+                            // ========== Verification Section (低优先级) ==========
+                            // 12. Verified Status (单选)
+                            FilterSection(title: "Verified Status") {
+                                SingleSelectFilter(
+                                    options: VerifiedStatus.allCases,
+                                    selected: $filter.verifiedStatus,
+                                    displayName: { $0.displayName }
+                                )
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 100)
+                    }
+                }
                 
-                Text("Filter your matches by preferences")
-                    .font(.system(size: 16))
-                    .foregroundColor(.gray)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
-                
-                Spacer()
+                // Bottom Action Bar
+                VStack {
+                    Spacer()
+                    VStack(spacing: 12) {
+                        HStack(spacing: 12) {
+                            // Reset Button
+                            Button(action: {
+                                showingResetConfirmation = true
+                            }) {
+                                Text("Reset")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 50)
+                                    .background(Color.white)
+                                    .cornerRadius(12)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color(red: 0.6, green: 0.4, blue: 0.2), lineWidth: 1.5)
+                                    )
+                            }
+                            
+                            // Apply Button
+                            Button(action: {
+                                applyFilter()
+                            }) {
+                                Text("Apply")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 50)
+                                    .background(
+                                        filter.hasActiveFilters() ?
+                                        Color(red: 0.4, green: 0.2, blue: 0.1) :
+                                        Color.gray
+                                    )
+                                    .cornerRadius(12)
+                            }
+                            .disabled(!filter.hasActiveFilters())
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 20)
+                    }
+                    .background(
+                        Color(red: 0.98, green: 0.97, blue: 0.95)
+                            .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: -2)
+                    )
+                }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1720,6 +2124,246 @@ struct MatchFilterView: View {
                     }
                     .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                 }
+            }
+        }
+        .alert("Reset Filters", isPresented: $showingResetConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Reset", role: .destructive) {
+                resetFilter()
+            }
+        } message: {
+            Text("Are you sure you want to reset all filters?")
+        }
+        .onAppear {
+            loadSavedFilter()
+        }
+        .onChange(of: filter.networkingIntention) { newIntention in
+            // 当改变Intention时，清除不在新Intention下的Sub Intentions
+            if let newIntention = newIntention {
+                filter.selectedSubIntentions = filter.selectedSubIntentions.filter { subIntention in
+                    newIntention.subIntentions.contains(subIntention)
+                }
+            } else {
+                // 如果清空了Intention，也清空所有Sub Intentions
+                filter.selectedSubIntentions.removeAll()
+            }
+        }
+    }
+    
+    private func applyFilter() {
+        // Save filter to UserDefaults
+        if let data = try? JSONEncoder().encode(filter) {
+            UserDefaults.standard.set(data, forKey: "match_filter_\(authManager.currentUser?.id ?? "default")")
+        }
+        
+        // Post notification to apply filter
+        NotificationCenter.default.post(
+            name: NSNotification.Name("ApplyMatchFilter"),
+            object: nil,
+            userInfo: ["filter": filter]
+        )
+        
+        presentationMode.wrappedValue.dismiss()
+    }
+    
+    private func resetFilter() {
+        filter = .default
+        UserDefaults.standard.removeObject(forKey: "match_filter_\(authManager.currentUser?.id ?? "default")")
+    }
+    
+    private func loadSavedFilter() {
+        guard let userId = authManager.currentUser?.id else { return }
+        if let data = UserDefaults.standard.data(forKey: "match_filter_\(userId)"),
+           let savedFilter = try? JSONDecoder().decode(MatchFilter.self, from: data) {
+            filter = savedFilter
+        }
+    }
+}
+
+// MARK: - Filter Section
+struct FilterSection<Content: View>: View {
+    let title: String
+    let content: Content
+    
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            
+            content
+        }
+        .padding(16)
+        .background(Color.white)
+        .cornerRadius(16)
+        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+    }
+}
+
+// MARK: - Single Select Filter
+struct SingleSelectFilter<T: Hashable & RawRepresentable>: View where T.RawValue: StringProtocol {
+    let options: [T]
+    @Binding var selected: T?
+    let displayName: (T) -> String
+    
+    var body: some View {
+        VStack(spacing: 10) {
+            ForEach(options, id: \.self) { option in
+                Button(action: {
+                    if selected == option {
+                        selected = nil
+                    } else {
+                        selected = option
+                    }
+                }) {
+                    HStack {
+                        Text(displayName(option))
+                            .font(.system(size: 15))
+                            .foregroundColor(selected == option ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                        
+                        Spacer()
+                        
+                        if selected == option {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.white)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(
+                        selected == option ?
+                        Color(red: 0.4, green: 0.2, blue: 0.1) :
+                        Color(red: 0.98, green: 0.97, blue: 0.95)
+                    )
+                    .cornerRadius(10)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+    }
+}
+
+// MARK: - Multi Select Filter
+struct MultiSelectFilter: View {
+    let options: [String]
+    @Binding var selected: Set<String>
+    let maxSelections: Int
+    
+    var body: some View {
+        VStack(spacing: 10) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                ForEach(options, id: \.self) { option in
+                    Button(action: {
+                        if selected.contains(option) {
+                            selected.remove(option)
+                        } else if selected.count < maxSelections {
+                            selected.insert(option)
+                        }
+                    }) {
+                        HStack {
+                            Text(option)
+                                .font(.system(size: 14))
+                                .foregroundColor(selected.contains(option) ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                            
+                            Spacer()
+                            
+                            if selected.contains(option) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.white)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(
+                            selected.contains(option) ?
+                            Color(red: 0.4, green: 0.2, blue: 0.1) :
+                            Color(red: 0.98, green: 0.97, blue: 0.95)
+                        )
+                        .cornerRadius(8)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .disabled(!selected.contains(option) && selected.count >= maxSelections)
+                    .opacity((!selected.contains(option) && selected.count >= maxSelections) ? 0.5 : 1.0)
+                }
+            }
+            
+            if selected.count >= maxSelections {
+                Text("Maximum \(maxSelections) selections")
+                    .font(.system(size: 12))
+                    .foregroundColor(.orange)
+                    .padding(.top, 4)
+            }
+        }
+    }
+}
+
+// MARK: - Experience Range Filter
+struct ExperienceRangeFilter: View {
+    @Binding var minYears: Double?
+    @Binding var maxYears: Double?
+    
+    @State private var minValue: String = ""
+    @State private var maxValue: String = ""
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Min")
+                        .font(.system(size: 13))
+                        .foregroundColor(.gray)
+                    
+                    TextField("0", text: $minValue)
+                        .keyboardType(.decimalPad)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+                        .cornerRadius(8)
+                        .onChange(of: minValue) { newValue in
+                            minYears = Double(newValue)
+                            if newValue.isEmpty {
+                                minYears = nil
+                            }
+                        }
+                }
+                
+                Text("-")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.gray)
+                    .padding(.top, 20)
+                
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Max")
+                        .font(.system(size: 13))
+                        .foregroundColor(.gray)
+                    
+                    TextField("20+", text: $maxValue)
+                        .keyboardType(.decimalPad)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+                        .cornerRadius(8)
+                        .onChange(of: maxValue) { newValue in
+                            maxYears = Double(newValue)
+                            if newValue.isEmpty {
+                                maxYears = nil
+                            }
+                        }
+                }
+            }
+            
+            if let min = minYears, let max = maxYears, min > max {
+                Text("Min must be less than max")
+                    .font(.system(size: 12))
+                    .foregroundColor(.red)
             }
         }
     }
