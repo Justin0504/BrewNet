@@ -10,7 +10,7 @@ struct ProfileView: View {
     @State private var showLogoutAlert = false
     @State private var showUpgradeAlert = false
     @State private var matchedUsers: [UserProfile] = []
-    @State private var coffeeChatSchedules: [CoffeeChatSchedule] = []
+    @State private var coffeeChatSchedules: [ProfileCoffeeChatSchedule] = []
     @State private var userProfile: BrewNetProfile?
     @State private var isLoadingProfile = true
     @State private var showingEditProfile = false
@@ -417,7 +417,7 @@ struct MatchedUsersView: View {
 
 // MARK: - Calendar View
 struct CalendarView: View {
-    let schedules: [CoffeeChatSchedule]
+    let schedules: [ProfileCoffeeChatSchedule]
     @State private var selectedDate = Date()
     @State private var currentMonth = Date()
     
@@ -503,7 +503,7 @@ struct CalendarView: View {
         return formatter
     }
     
-    private var filteredSchedules: [CoffeeChatSchedule] {
+    private var filteredSchedules: [ProfileCoffeeChatSchedule] {
         let calendar = Calendar.current
         return schedules.filter { schedule in
             calendar.isDate(schedule.date, equalTo: selectedDate, toGranularity: .day)
@@ -568,7 +568,7 @@ struct MatchedUserCardView: View {
 struct CalendarGridView: View {
     @Binding var selectedDate: Date
     @Binding var currentMonth: Date
-    let schedules: [CoffeeChatSchedule]
+    let schedules: [ProfileCoffeeChatSchedule]
     
     private let calendar = Calendar.current
     private let dateFormatter = DateFormatter()
@@ -664,7 +664,7 @@ struct CalendarDayView: View {
 
 // MARK: - Coffee Chat Schedule Card
 struct CoffeeChatScheduleCard: View {
-    let schedule: CoffeeChatSchedule
+    let schedule: ProfileCoffeeChatSchedule
     
     var body: some View {
         HStack(spacing: 12) {
@@ -721,8 +721,8 @@ struct CoffeeChatScheduleCard: View {
     }
 }
 
-// MARK: - Coffee Chat Schedule Model
-struct CoffeeChatSchedule: Identifiable, Codable {
+// MARK: - Profile Coffee Chat Schedule Model (Legacy - for sample data only)
+struct ProfileCoffeeChatSchedule: Identifiable, Codable {
     let id: UUID
     let title: String
     let participantName: String
@@ -776,28 +776,28 @@ enum ScheduleStatus: String, Codable, CaseIterable {
 
 // MARK: - Sample Coffee Chat Schedules
 let sampleCoffeeChatSchedules = [
-    CoffeeChatSchedule(
+    ProfileCoffeeChatSchedule(
         title: "Coffee Chat",
         participantName: "Sarah Chen",
         date: Date().addingTimeInterval(3600), // 1 hour from now
         location: "Starbucks Downtown",
         status: .confirmed
     ),
-    CoffeeChatSchedule(
+    ProfileCoffeeChatSchedule(
         title: "Networking Meetup",
         participantName: "Mike Rodriguez",
         date: Date().addingTimeInterval(86400), // Tomorrow
         location: "Blue Bottle Coffee",
         status: .pending
     ),
-    CoffeeChatSchedule(
+    ProfileCoffeeChatSchedule(
         title: "Career Discussion",
         participantName: "Emma Wilson",
         date: Date().addingTimeInterval(172800), // Day after tomorrow
         location: "Local Cafe",
         status: .confirmed
     ),
-    CoffeeChatSchedule(
+    ProfileCoffeeChatSchedule(
         title: "Tech Talk",
         participantName: "Alex Kim",
         date: Date().addingTimeInterval(-86400), // Yesterday

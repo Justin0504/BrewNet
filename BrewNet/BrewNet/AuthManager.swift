@@ -105,22 +105,7 @@ class AuthManager: ObservableObject {
                         print("✅ [AuthManager] 认证状态已更新为 authenticated")
                     }
                     
-                    // 设置用户在线状态并启动 heartbeat
-                    print("🔍 [AuthManager] 准备启动 heartbeat（自动登录）")
-                    print("   - supabaseService 是否为 nil: \(supabaseService == nil)")
-                    print("   - 用户ID: \(finalAppUser.id)")
-                    
-                    if let service = supabaseService {
-                        print("✅ [AuthManager] supabaseService 可用，开始设置在线状态和启动 heartbeat")
-                        await service.setUserOnlineStatus(userId: finalAppUser.id, isOnline: true)
-                        print("✅ [AuthManager] 在线状态已设置，现在启动 heartbeat")
-                        await service.startLastSeenHeartbeat(userId: finalAppUser.id, interval: 30)
-                        print("✅ [AuthManager] 已启动 heartbeat 机制（自动登录）")
-                    } else {
-                        print("❌ [AuthManager] ⚠️⚠️⚠️ supabaseService 为 nil，无法启动 heartbeat ⚠️⚠️⚠️")
-                        print("   - 这可能是因为依赖注入还没有完成")
-                        print("   - 请检查 setDependencies 是否被调用")
-                    }
+                    // 在线状态功能已移除
                 } else {
                     print("⚠️ No user info found in Supabase")
                     await MainActor.run {
@@ -247,18 +232,7 @@ class AuthManager: ObservableObject {
                     saveUser(appUser)
                 }
                 
-                // 设置用户在线状态并启动 heartbeat
-                print("🔍 [AuthManager] 准备启动 heartbeat（自动注册）")
-                print("   - supabaseService 是否为 nil: \(supabaseService == nil)")
-                print("   - 用户ID: \(appUser.id)")
-                
-                if let service = supabaseService {
-                    await service.setUserOnlineStatus(userId: appUser.id, isOnline: true)
-                    await service.startLastSeenHeartbeat(userId: appUser.id, interval: 30)
-                    print("✅ [AuthManager] 已启动 heartbeat 机制（自动注册）")
-                } else {
-                    print("❌ [AuthManager] ⚠️⚠️⚠️ supabaseService 为 nil，无法启动 heartbeat ⚠️⚠️⚠️")
-                }
+                // 在线状态功能已移除
                 
                 return .success(appUser)
             } else {
@@ -310,18 +284,7 @@ class AuthManager: ObservableObject {
                     print("✅ 用户登录成功: \(finalAppUser.name), profile completed: \(finalAppUser.profileSetupCompleted)")
                 }
                 
-                // 设置用户在线状态并启动 heartbeat
-                print("🔍 [AuthManager] 准备启动 heartbeat（登录）")
-                print("   - supabaseService 是否为 nil: \(supabaseService == nil)")
-                print("   - 用户ID: \(finalAppUser.id)")
-                
-                if let service = supabaseService {
-                    await service.setUserOnlineStatus(userId: finalAppUser.id, isOnline: true)
-                    await service.startLastSeenHeartbeat(userId: finalAppUser.id, interval: 30)
-                    print("✅ [AuthManager] 已启动 heartbeat 机制（登录）")
-                } else {
-                    print("❌ [AuthManager] ⚠️⚠️⚠️ supabaseService 为 nil，无法启动 heartbeat ⚠️⚠️⚠️")
-                }
+                // 在线状态功能已移除
                 
                 return .success(finalAppUser)
             } else {
@@ -740,20 +703,8 @@ class AuthManager: ObservableObject {
     func logout() {
         print("🚪 Starting logout...")
         
-        // 保存当前用户ID（在清除 currentUser 之前）
-        let currentUserId = currentUser?.id
-        
-        // 先停止 heartbeat
+        // 在线状态功能已移除，直接登出
         Task {
-            await supabaseService?.stopLastSeenHeartbeat()
-            
-            // 设置用户离线状态（在清除 currentUser 之前）
-            if let userId = currentUserId {
-                print("🔄 设置用户离线状态: \(userId)")
-                await supabaseService?.setUserOnlineStatus(userId: userId, isOnline: false)
-                print("✅ 用户离线状态已设置")
-            }
-            
             // 从 Supabase 登出
             do {
                 try await SupabaseConfig.shared.client.auth.signOut()

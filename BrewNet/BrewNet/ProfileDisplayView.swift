@@ -22,6 +22,7 @@ struct ProfileDisplayView: View {
     @State private var showingProfileCard = false
     @State private var showingPointsSystem = false
     @State private var showingRedemptionSystem = false
+    @State private var showingCoffeeChatSchedule = false
     
     // 头像同步定时器
     @State private var avatarSyncTimer: Timer?
@@ -46,8 +47,27 @@ struct ProfileDisplayView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 20)
                 
-                // Points System and Redemption System Buttons
-                HStack(spacing: 16) {
+                // Coffee Chat Schedule, Points System and Redemption System Buttons
+                HStack(spacing: 12) {
+                    // Coffee Chat Schedule Button
+                    Button(action: {
+                        showingCoffeeChatSchedule = true
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "cup.and.saucer.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            Text("Chats")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.white)
+                        .cornerRadius(12)
+                        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+                    }
+                    
                     // Points System Button
                     Button(action: {
                         showingPointsSystem = true
@@ -56,7 +76,7 @@ struct ProfileDisplayView: View {
                             Image(systemName: "star.fill")
                                 .font(.system(size: 18, weight: .semibold))
                                 .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                            Text("Rewards")
+                            Text("Credit")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                         }
@@ -75,7 +95,7 @@ struct ProfileDisplayView: View {
                             Image(systemName: "gift.fill")
                                 .font(.system(size: 18, weight: .semibold))
                                 .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                            Text("Shop")
+                            Text("Redeem")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                         }
@@ -146,6 +166,11 @@ struct ProfileDisplayView: View {
         }
         .sheet(isPresented: $showingPointsSystem) {
             PointsSystemView()
+                .environmentObject(authManager)
+                .environmentObject(supabaseService)
+        }
+        .sheet(isPresented: $showingCoffeeChatSchedule) {
+            CoffeeChatScheduleView()
                 .environmentObject(authManager)
                 .environmentObject(supabaseService)
         }
@@ -2339,7 +2364,7 @@ struct PointsSystemView: View {
                     }
                 }
             }
-            .navigationTitle("Rewards")
+            .navigationTitle("Credit")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -2526,7 +2551,7 @@ struct RedemptionSystemView: View {
                             
                             // Available Rewards
                             VStack(alignment: .leading, spacing: 16) {
-                                Text("Available Rewards")
+                                Text("Available Credit")
                                     .font(.system(size: 18, weight: .bold))
                                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                                 
@@ -2535,7 +2560,7 @@ struct RedemptionSystemView: View {
                                         Image(systemName: "gift.fill")
                                             .font(.system(size: 40))
                                             .foregroundColor(.gray.opacity(0.5))
-                                        Text("No rewards available")
+                                        Text("No credit available")
                                             .font(.system(size: 14))
                                             .foregroundColor(.gray)
                                     }
@@ -2586,7 +2611,7 @@ struct RedemptionSystemView: View {
                     }
                 }
             }
-            .navigationTitle("Shop")
+            .navigationTitle("Redeem")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {

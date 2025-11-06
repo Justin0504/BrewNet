@@ -246,13 +246,7 @@ class SupabaseService: ObservableObject {
     @Published var isOnline = true
     @Published var lastSyncTime: Date?
     
-    // MARK: - Online Status Management
-    @Published var userOnlineStatuses: [String: (isOnline: Bool, lastSeen: Date)] = [:]
-    @Published var onlineStatusUpdateVersion: Int = 0 // 用于触发 UI 更新的版本号
-    private var onlineStatusChannel: RealtimeChannel?
-    private var lastSeenUpdateTimer: Timer?
-    private var isMonitoringOnlineStatus = false
-    private var currentHeartbeatUserId: String? // 保存当前 heartbeat 的用户ID，避免闭包捕获问题
+    // MARK: - Online Status Management (已移除)
     
     // MARK: - User Operations
     
@@ -3023,693 +3017,8 @@ extension SupabaseService {
         }
     }
     
-    // MARK: - Online Status Management
-    
-    /// 设置用户在线状态
-    func setUserOnlineStatus(userId: String, isOnline: Bool) async {
-        do {
-            let now = ISO8601DateFormatter().string(from: Date())
-            
-            // 尝试更新新字段（如果存在）
-            do {
-                // 分两次更新：先更新布尔字段，再更新字符串字段
-                try await client
-                    .from("users")
-                    .update(["is_online": isOnline])
-                    .eq("id", value: userId)
-                    .execute()
-                
-                // 尝试更新 last_seen_at（如果字段存在）
-                try await client
-                    .from("users")
-                    .update(["last_seen_at": now])
-                    .eq("id", value: userId)
-                    .execute()
-                
-                if isOnline {
-                    // 用户上线：更新最后登录时间
-                    try await client
-                        .from("users")
-                        .update(["last_login_at": now])
-                        .eq("id", value: userId)
-                        .execute()
-                }
-            } catch {
-                // 如果字段不存在，只更新 last_login_at（总是存在的）
-                if error.localizedDescription.contains("is_online") || error.localizedDescription.contains("last_seen_at") || error.localizedDescription.contains("does not exist") {
-                    print("⚠️ Online status fields not found, updating last_login_at only")
-                    try await client
-                        .from("users")
-                        .update(["last_login_at": now])
-                        .eq("id", value: userId)
-                        .execute()
-                } else {
-                    throw error
-                }
-            }
-            
-            // 更新本地状态
-            await MainActor.run {
-                userOnlineStatuses[userId] = (isOnline, Date())
-            }
-            
-            print("✅ Updated online status for user \(userId): \(isOnline ? "Online" : "Offline")")
-        } catch {
-            print("⚠️ Failed to update online status: \(error.localizedDescription)")
-        }
-    }
-    
-    /// 更新用户最后活跃时间（heartbeat）
-    func updateLastSeen(userId: String) async {
-        print("🔄 =========================================")
-        print("🔄 [Heartbeat] updateLastSeen() 被调用")
-        print("🔄 =========================================")
-        do {
-            let now = ISO8601DateFormatter().string(from: Date())
-            let nowDate = Date()
-            
-            print("🔄 [Heartbeat] 开始更新 last_seen_at 和 is_online")
-            print("   - 用户ID: \(userId)")
-            print("   - 时间: \(now)")
-            print("   - 调用时间: \(nowDate)")
-            print("   - 当前线程: \(Thread.isMainThread ? "主线程" : "后台线程")")
-            
-            // 尝试更新 last_seen_at 和 is_online（如果字段存在）
-            // 用户活跃时，应该同时更新 is_online 为 true
-            // 需要分开更新，因为类型不同（String vs Bool）
-            
-            // 先更新 last_seen_at
-            do {
-                let updateResponse = try await client
-                .from("users")
-                .update(["last_seen_at": now])
-                .eq("id", value: userId)
-                    .select()
-                .execute()
-                
-                let httpStatus = updateResponse.response.statusCode
-                print("✅ [Heartbeat] 更新 last_seen_at 请求成功")
-                print("   - HTTP状态码: \(httpStatus)")
-                print("   - 响应数据: \(String(data: updateResponse.data, encoding: .utf8) ?? "无数据")")
-                
-                // 检查是否真的更新了（通过select返回的数据）
-                if httpStatus == 200 || httpStatus == 204 {
-                    // 尝试解析返回的数据来验证
-                    if let jsonArray = try? JSONSerialization.jsonObject(with: updateResponse.data) as? [[String: Any]],
-                       let updatedUser = jsonArray.first,
-                       let updatedLastSeen = updatedUser["last_seen_at"] as? String {
-                        print("✅ [Heartbeat] 验证：数据库返回的 last_seen_at: \(updatedLastSeen)")
-                        if updatedLastSeen == now {
-                            print("✅ [Heartbeat] ✅✅✅ last_seen_at 已成功写入数据库 ✅✅✅")
-                        } else {
-                            print("⚠️ [Heartbeat] ⚠️⚠️⚠️ 数据库返回的时间与写入时间不一致")
-                            print("   - 写入: \(now)")
-                            print("   - 数据库: \(updatedLastSeen)")
-                        }
-                    } else {
-                        print("⚠️ [Heartbeat] 无法解析返回数据来验证更新")
-                    }
-                } else {
-                    print("⚠️ [Heartbeat] HTTP状态码不是200/204: \(httpStatus)")
-                }
-        } catch {
-                print("❌ [Heartbeat] 更新 last_seen_at 失败:")
-                print("   - 错误类型: \(type(of: error))")
-                print("   - 错误信息: \(error.localizedDescription)")
-                
-                // 检查是否是 RLS 权限问题
-                let errorMessage = error.localizedDescription.lowercased()
-                if errorMessage.contains("permission") || errorMessage.contains("policy") || errorMessage.contains("row level security") || errorMessage.contains("rls") {
-                    print("⚠️ [Heartbeat] ⚠️⚠️⚠️ 可能是 RLS (Row Level Security) 权限问题 ⚠️⚠️⚠️")
-                    print("   - 请在 Supabase Dashboard 中执行 fix_users_table_rls.sql 脚本")
-                    print("   - 或者检查 users 表的 RLS 策略是否允许用户更新自己的记录")
-                }
-                
-                if let nsError = error as NSError? {
-                    print("   - 错误代码: \(nsError.code)")
-                    print("   - 错误域: \(nsError.domain)")
-                    print("   - 用户信息: \(nsError.userInfo)")
-                }
-                
-                // 尝试获取更详细的错误信息
-                if let errorString = String(data: (error as NSError?)?.userInfo["data"] as? Data ?? Data(), encoding: .utf8) {
-                    print("   - 详细错误: \(errorString)")
-                }
-                
-                throw error // 重新抛出错误，让外层catch处理
-            }
-            
-            // 再更新 is_online
-            do {
-                let onlineUpdateResponse = try await client
-                    .from("users")
-                    .update(["is_online": true])
-                    .eq("id", value: userId)
-                    .select()
-                    .execute()
-                
-                let httpStatus = onlineUpdateResponse.response.statusCode
-                print("✅ [Heartbeat] 更新 is_online 请求成功")
-                print("   - HTTP状态码: \(httpStatus)")
-                
-                // 验证 is_online 是否更新成功
-                if let jsonArray = try? JSONSerialization.jsonObject(with: onlineUpdateResponse.data) as? [[String: Any]],
-                   let updatedUser = jsonArray.first,
-                   let updatedIsOnline = updatedUser["is_online"] as? Bool {
-                    print("✅ [Heartbeat] 验证：数据库返回的 is_online: \(updatedIsOnline)")
-                    if updatedIsOnline {
-                        print("✅ [Heartbeat] ✅✅✅ is_online 已成功写入数据库 ✅✅✅")
-                    } else {
-                        print("⚠️ [Heartbeat] ⚠️⚠️⚠️ 数据库返回的 is_online 为 false")
-                    }
-                }
-            } catch {
-                print("❌ [Heartbeat] 更新 is_online 失败:")
-                print("   - 错误类型: \(type(of: error))")
-                print("   - 错误信息: \(error.localizedDescription)")
-                
-                // 检查是否是 RLS 权限问题
-                let errorMessage = error.localizedDescription.lowercased()
-                if errorMessage.contains("permission") || errorMessage.contains("policy") || errorMessage.contains("row level security") || errorMessage.contains("rls") {
-                    print("⚠️ [Heartbeat] ⚠️⚠️⚠️ 可能是 RLS (Row Level Security) 权限问题 ⚠️⚠️⚠️")
-                    print("   - 请在 Supabase Dashboard 中执行 fix_users_table_rls.sql 脚本")
-                }
-                
-                // 不抛出错误，因为 last_seen_at 可能已经更新成功
-            }
-            
-            // 额外验证：查询数据库确认更新（仅在开发模式下）
-            #if DEBUG
-            // 等待一小段时间后验证（确保数据库已更新）
-            try? await Task.sleep(nanoseconds: 1_000_000_000) // 1秒
-            
-            // 直接查询数据库验证更新
-            do {
-                let verifyResponse = try await client
-                    .from("users")
-                    .select("last_seen_at,is_online")
-                    .eq("id", value: userId)
-                    .single()
-                    .execute()
-                
-                if let json = try? JSONSerialization.jsonObject(with: verifyResponse.data) as? [String: Any] {
-                    let dbLastSeen = json["last_seen_at"] as? String ?? "nil"
-                    let dbIsOnline = json["is_online"] as? Bool ?? false
-                    
-                    print("🔍 [Heartbeat] 数据库验证结果:")
-                    print("   - last_seen_at: \(dbLastSeen)")
-                    print("   - is_online: \(dbIsOnline)")
-                    
-                    if dbLastSeen == now {
-                        print("✅ [Heartbeat] ✅✅✅ 验证成功：last_seen_at 已成功写入数据库 ✅✅✅")
-                    } else {
-                        print("⚠️ [Heartbeat] ⚠️⚠️⚠️ 验证失败：数据库中的 last_seen_at 与写入值不一致")
-                        print("   - 期望值: \(now)")
-                        print("   - 实际值: \(dbLastSeen)")
-                    }
-                    
-                    if dbIsOnline {
-                        print("✅ [Heartbeat] ✅✅✅ 验证成功：is_online 已成功写入数据库 ✅✅✅")
-                    } else {
-                        print("⚠️ [Heartbeat] ⚠️⚠️⚠️ 验证失败：数据库中的 is_online 为 false")
-                    }
-                } else {
-                    print("⚠️ [Heartbeat] 无法解析验证响应")
-                }
-            } catch {
-                print("❌ [Heartbeat] 验证查询失败: \(error.localizedDescription)")
-            }
-            #endif
-            
-            // 更新本地状态
-            await MainActor.run {
-                userOnlineStatuses[userId] = (true, nowDate)
-            }
-        } catch {
-            print("❌ [Heartbeat] 外层 catch 捕获到错误:")
-            print("   - 错误类型: \(type(of: error))")
-            print("   - 错误信息: \(error.localizedDescription)")
-            
-            // 检查是否是 RLS 权限问题
-            let errorMessage = error.localizedDescription.lowercased()
-            if errorMessage.contains("permission") || errorMessage.contains("policy") || errorMessage.contains("row level security") || errorMessage.contains("rls") {
-                print("⚠️ [Heartbeat] ⚠️⚠️⚠️ 确认是 RLS (Row Level Security) 权限问题 ⚠️⚠️⚠️")
-                print("   - 请在 Supabase Dashboard → SQL Editor 中执行 fix_users_table_rls.sql 脚本")
-                print("   - 脚本位置: BrewNet/fix_users_table_rls.sql")
-                print("   - 这将创建允许用户更新自己 online status 的 RLS 策略")
-            }
-            
-            // 如果字段不存在，尝试只更新 last_seen_at
-            if error.localizedDescription.contains("last_seen_at") || error.localizedDescription.contains("is_online") || error.localizedDescription.contains("does not exist") || error.localizedDescription.contains("column") {
-                print("⚠️ [Heartbeat] 字段可能不存在，尝试只更新 last_seen_at: \(error.localizedDescription)")
-                print("   - 提示：请先执行 add_online_status_fields.sql 脚本添加字段")
-                
-                // 尝试只更新 last_seen_at
-                do {
-                    let now = ISO8601DateFormatter().string(from: Date())
-                    try await client
-                        .from("users")
-                        .update(["last_seen_at": now])
-                        .eq("id", value: userId)
-                        .execute()
-                    print("✅ [Heartbeat] 仅更新 last_seen_at 成功: \(now)")
-                } catch let innerError {
-                    print("❌ [Heartbeat] 更新失败: \(innerError.localizedDescription)")
-                    print("   - 内层错误类型: \(type(of: innerError))")
-                return
-            }
-            } else {
-                print("⚠️ [Heartbeat] Failed to update last seen: \(error.localizedDescription)")
-                print("   - 如果看到权限错误，请检查 RLS 策略")
-                print("   - 如果看到字段不存在错误，请先执行 add_online_status_fields.sql")
-            }
-        }
-    }
-    
-    /// 获取用户在线状态
-    func getUserOnlineStatus(userId: String) async -> (isOnline: Bool, lastSeen: Date)? {
-        do {
-            // 从数据库获取用户在线状态相关字段
-            let response = try await client
-                .from("users")
-                .select("is_online,last_seen_at,last_login_at")
-                .eq("id", value: userId)
-                .single()
-                .execute()
-            
-            let data = response.data
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                // 创建 ISO8601 日期格式化器，明确设置为 UTC 时区
-                let formatter = ISO8601DateFormatter()
-                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                formatter.timeZone = TimeZone(secondsFromGMT: 0) // 明确使用 UTC
-                
-                var lastSeen = Date()
-                var lastLoginAt: Date? = nil
-                
-                // 解析 last_seen_at（优先使用）
-                if let lastSeenString = json["last_seen_at"] as? String {
-                    if let date = formatter.date(from: lastSeenString) {
-                        lastSeen = date
-                        print("✅ [在线状态] 解析 last_seen_at: \(lastSeenString) -> \(date) (UTC)")
-                    } else {
-                        // 尝试不带小数秒的格式
-                        formatter.formatOptions = [.withInternetDateTime]
-                        if let date = formatter.date(from: lastSeenString) {
-                            lastSeen = date
-                            print("✅ [在线状态] 解析 last_seen_at (无小数秒): \(lastSeenString) -> \(date) (UTC)")
-                        } else {
-                            print("⚠️ [在线状态] 无法解析 last_seen_at: \(lastSeenString)")
-                        }
-                    }
-                }
-                
-                // 解析 last_login_at
-                if let lastLoginString = json["last_login_at"] as? String {
-                    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                    if let date = formatter.date(from: lastLoginString) {
-                        lastLoginAt = date
-                        // 如果没有 last_seen_at，使用 last_login_at 作为 lastSeen
-                        if json["last_seen_at"] == nil {
-                        lastSeen = date
-                        }
-                        print("✅ [在线状态] 解析 last_login_at: \(lastLoginString) -> \(date) (UTC)")
-                    } else {
-                        formatter.formatOptions = [.withInternetDateTime]
-                        if let date = formatter.date(from: lastLoginString) {
-                            lastLoginAt = date
-                            if json["last_seen_at"] == nil {
-                            lastSeen = date
-                            }
-                            print("✅ [在线状态] 解析 last_login_at (无小数秒): \(lastLoginString) -> \(date) (UTC)")
-                        } else {
-                            print("⚠️ [在线状态] 无法解析 last_login_at: \(lastLoginString)")
-                        }
-                    }
-                }
-                
-                // 获取数据库中的 is_online 值
-                let dbIsOnline = json["is_online"] as? Bool ?? false
-                
-                // 基于时间判断在线状态：如果 last_seen_at 在合理时间内，认为在线
-                // 注意：Date() 在 Swift 中已经是 UTC 时间的内部表示，所以可以直接比较
-                let currentTime = Date()
-                let timeSinceLastSeen = currentTime.timeIntervalSince(lastSeen)
-                let onlineThreshold: TimeInterval = 300 // 5分钟（允许一定的延迟）
-                let strictThreshold: TimeInterval = 60 // 1分钟（严格判断）
-                
-                print("🔍 [在线状态] 时间判断: currentTime=\(currentTime), lastSeen=\(lastSeen), timeSinceLastSeen=\(timeSinceLastSeen)秒, dbIsOnline=\(dbIsOnline)")
-                
-                // 判断逻辑：
-                // 1. 优先使用数据库中的 is_online 值
-                // 2. 如果 is_online 是 true，还需要验证 last_seen_at 是否在合理范围内（5分钟内）
-                // 3. 如果 is_online 是 false，但 last_seen_at 在 1 分钟内，也认为在线（防止数据库未及时更新）
-                // 4. 如果 last_seen_at 超过 5 分钟，即使 is_online 是 true，也认为离线（数据可能过时）
-                var isOnline = false
-                
-                if dbIsOnline {
-                    // 数据库标记为在线，验证时间是否合理
-                    if timeSinceLastSeen < onlineThreshold {
-                        // 数据库标记在线且时间在 5 分钟内，认为在线
-                        isOnline = true
-                        print("✅ [在线状态] 数据库标记在线，last_seen_at 在 \(Int(timeSinceLastSeen))秒前，判断为在线")
-                    } else {
-                        // 数据库标记在线但时间超过 5 分钟，认为离线（数据可能过时）
-                        isOnline = false
-                        print("⚠️ [在线状态] 数据库标记在线，但 last_seen_at 在 \(Int(timeSinceLastSeen))秒前（超过5分钟），判断为离线")
-                    }
-                } else {
-                    // 数据库标记为离线，但检查时间戳（可能数据库未及时更新）
-                    if timeSinceLastSeen < strictThreshold {
-                        // 时间在 1 分钟内，即使数据库标记离线，也认为在线
-                        isOnline = true
-                        print("✅ [在线状态] 数据库标记离线，但 last_seen_at 在 \(Int(timeSinceLastSeen))秒前（1分钟内），判断为在线")
-                    } else if let loginTime = lastLoginAt {
-                        // 如果 last_seen_at 超过 1 分钟，检查 last_login_at
-                        let timeSinceLastLogin = currentTime.timeIntervalSince(loginTime)
-                        print("🔍 [在线状态] timeSinceLastLogin=\(timeSinceLastLogin)秒")
-                        if timeSinceLastLogin < strictThreshold {
-                            // last_login_at 在 1 分钟内，认为在线
-                            isOnline = true
-                            print("✅ [在线状态] last_login_at 在 \(Int(timeSinceLastLogin))秒前，判断为在线")
-                        } else {
-                            // 超过 1 分钟，认为离线
-                            isOnline = false
-                            print("❌ [在线状态] last_login_at 在 \(Int(timeSinceLastLogin))秒前，判断为离线")
-                        }
-                    } else {
-                        // 没有登录时间信息，认为离线
-                        isOnline = false
-                        print("❌ [在线状态] 数据库标记离线且没有最近活动，判断为离线")
-                    }
-                }
-                
-                print("✅ [在线状态] 用户 \(userId): db_is_online=\(dbIsOnline), last_seen=\(lastSeen), 最终结果=\(isOnline ? "在线" : "离线")")
-                
-                return (isOnline, lastSeen)
-            }
-        } catch {
-            // 如果字段不存在，尝试使用旧方法（基于 last_login_at）
-            if error.localizedDescription.contains("is_online") || error.localizedDescription.contains("does not exist") {
-                print("⚠️ Online status fields not found, using fallback method based on last_login_at")
-                // 回退到基于 last_login_at 的方法
-                do {
-                    if let user = try? await getUser(id: userId) {
-                        let formatter = ISO8601DateFormatter()
-                        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                        formatter.timeZone = TimeZone(secondsFromGMT: 0) // 明确使用 UTC
-                        
-                        var lastSeen = Date()
-                        if let lastLoginAt = formatter.date(from: user.lastLoginAt) {
-                            lastSeen = lastLoginAt
-                            let timeSinceLastLogin = Date().timeIntervalSince(lastLoginAt)
-                            // 1分钟内活跃视为在线
-                            let isOnline = timeSinceLastLogin < 60
-                            return (isOnline, lastSeen)
-                        } else {
-                            formatter.formatOptions = [.withInternetDateTime]
-                            if let lastLoginAt = formatter.date(from: user.lastLoginAt) {
-                                lastSeen = lastLoginAt
-                                let timeSinceLastLogin = Date().timeIntervalSince(lastLoginAt)
-                                let isOnline = timeSinceLastLogin < 60
-                                return (isOnline, lastSeen)
-                            }
-                        }
-                    }
-                }
-            } else {
-                print("⚠️ Failed to get user online status: \(error.localizedDescription)")
-            }
-        }
-        return nil
-    }
-    
-    /// 开始监听用户在线状态变化（使用轮询方式，后续可优化为实时订阅）
-    func startMonitoringOnlineStatus(for userIds: [String]) {
-        guard !isMonitoringOnlineStatus else {
-            print("ℹ️ Online status monitoring already started")
-            return
-        }
-        
-        isMonitoringOnlineStatus = true
-        print("✅ Started monitoring online status for \(userIds.count) users (using polling)")
-        
-        // 使用轮询方式定期更新在线状态（每10秒）
-        Task {
-            while isMonitoringOnlineStatus {
-                await refreshOnlineStatuses(for: userIds)
-                try? await Task.sleep(nanoseconds: 10_000_000_000) // 10秒
-            }
-        }
-    }
-    
-    /// 刷新用户在线状态
-    private func refreshOnlineStatuses(for userIds: [String]) async {
-        guard !userIds.isEmpty else { return }
-        
-        print("🔄 [SupabaseService] 刷新在线状态，用户数量: \(userIds.count)")
-        
-        // 并行获取所有用户的在线状态
-        var updatedStatuses: [String: (isOnline: Bool, lastSeen: Date)] = [:]
-        await withTaskGroup(of: (String, (isOnline: Bool, lastSeen: Date)?).self) { group in
-        for userId in userIds {
-                group.addTask {
-                    let status = await self.getUserOnlineStatus(userId: userId)
-                    return (userId, status)
-                }
-            }
-            
-            for await (userId, status) in group {
-                if let status = status {
-                    updatedStatuses[userId] = status
-                }
-            }
-        }
-        
-        // 批量更新在线状态（在主线程上）
-                await MainActor.run {
-            var hasChanges = false
-            for (userId, status) in updatedStatuses {
-                let oldStatus = userOnlineStatuses[userId]
-                // 只有当状态发生变化时才更新（避免不必要的 UI 刷新）
-                if oldStatus?.isOnline != status.isOnline || oldStatus?.lastSeen != status.lastSeen {
-                    userOnlineStatuses[userId] = status
-                    hasChanges = true
-                    print("✅ [SupabaseService] 更新用户 \(userId) 在线状态: \(status.isOnline ? "在线" : "离线")")
-                }
-            }
-            
-            if hasChanges {
-                // 增加版本号以触发 UI 更新
-                onlineStatusUpdateVersion += 1
-                print("✅ [SupabaseService] 在线状态已更新，已更新 \(updatedStatuses.count) 个用户，版本号: \(onlineStatusUpdateVersion)")
-            } else {
-                print("ℹ️ [SupabaseService] 在线状态无变化")
-            }
-        }
-    }
-    
-    /// 停止监听在线状态
-    func stopMonitoringOnlineStatus() {
-        guard isMonitoringOnlineStatus else { return }
-        
-        Task {
-            if let channel = onlineStatusChannel {
-                await channel.unsubscribe()
-                onlineStatusChannel = nil
-            }
-            
-            lastSeenUpdateTimer?.invalidate()
-            lastSeenUpdateTimer = nil
-            
-            await MainActor.run {
-                isMonitoringOnlineStatus = false
-            }
-            
-            print("✅ Stopped monitoring online status")
-        }
-    }
-    
-    /// 开始定期更新最后活跃时间（heartbeat）
-    func startLastSeenHeartbeat(userId: String, interval: TimeInterval = 30) {
-        print("🔄 =========================================")
-        print("🔄 [Heartbeat] startLastSeenHeartbeat() 被调用")
-        print("🔄 =========================================")
-        print("🔄 [Heartbeat] 启动 heartbeat 机制")
-        print("   - 用户ID: \(userId)")
-        print("   - 更新间隔: \(interval) 秒")
-        print("   - 当前线程: \(Thread.isMainThread ? "主线程" : "后台线程")")
-        
-        // 保存 userId 到实例变量，确保 Timer 能访问
-        self.currentHeartbeatUserId = userId
-        
-        stopLastSeenHeartbeat()
-        
-        // 确保 Timer 在主线程的 RunLoop 上运行
-        if Thread.isMainThread {
-            print("✅ [Heartbeat] 已在主线程，直接创建 Timer")
-            setupTimer(userId: userId, interval: interval)
-        } else {
-            print("⚠️ [Heartbeat] 不在主线程，切换到主线程")
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                self.setupTimer(userId: userId, interval: interval)
-            }
-        }
-    }
-    
-    private func setupTimer(userId: String, interval: TimeInterval) {
-        print("🔧 [Heartbeat] setupTimer() 被调用")
-        print("   - 当前 RunLoop: \(RunLoop.current)")
-        print("   - Timer 间隔: \(interval) 秒")
-        guard Thread.isMainThread else {
-            print("❌ [Heartbeat] ⚠️⚠️⚠️ setupTimer 不在主线程！")
-            return
-        }
-        
-        // 使用实例变量保存 userId，避免闭包捕获问题
-        guard let capturedUserId = self.currentHeartbeatUserId else {
-            print("❌ [Heartbeat] ⚠️⚠️⚠️ currentHeartbeatUserId 为 nil，无法创建 Timer ⚠️⚠️⚠️")
-            return
-        }
-        
-        print("✅ [Heartbeat] 使用保存的 userId: \(capturedUserId)")
-        
-        // 创建 Timer 并添加到 .common mode（确保在滚动等操作时也能触发）
-        // 注意：使用 Timer(timeInterval:repeats:block:) 而不是 scheduledTimer，这样可以控制 mode
-        // 使用强引用 self 而不是 weak，因为 SupabaseService 是单例，不会被释放
-        self.lastSeenUpdateTimer = Timer(timeInterval: interval, repeats: true) { [weak self] timer in
-            guard let self = self else {
-                print("⚠️ [Heartbeat] Timer 触发但 self 已释放，停止 Timer")
-                timer.invalidate()
-                return
-            }
-            
-            // 使用实例变量中的 userId
-            guard let userId = self.currentHeartbeatUserId else {
-                print("❌ [Heartbeat] ⚠️⚠️⚠️ currentHeartbeatUserId 为 nil，无法更新 ⚠️⚠️⚠️")
-                return
-            }
-            
-            print("⏰ =========================================")
-            print("⏰ [Heartbeat] Timer 触发（每 \(interval) 秒）")
-            print("⏰ =========================================")
-            print("⏰ 准备更新 last_seen_at 和 is_online")
-            print("   - 用户ID: \(userId)")
-            print("   - 当前时间: \(Date())")
-            
-            Task {
-                await self.updateLastSeen(userId: userId)
-            }
-        }
-        
-        // 将 Timer 添加到当前 RunLoop 的 common mode（确保在滚动等操作时也能触发）
-        if let timer = self.lastSeenUpdateTimer {
-            // 确保 RunLoop 正在运行
-            let runLoop = RunLoop.current
-            
-            // 先添加到 common mode（最重要，在滚动时也能触发）
-            runLoop.add(timer, forMode: .common)
-            print("✅ [Heartbeat] Timer 已添加到 RunLoop (.common mode)")
-            
-            // 也添加到 default mode（作为备用）
-            runLoop.add(timer, forMode: .default)
-            print("✅ [Heartbeat] Timer 已添加到 RunLoop (.default mode)")
-            
-            print("   - RunLoop: \(runLoop)")
-            print("   - 当前 mode: \(runLoop.currentMode?.rawValue ?? "unknown")")
-            
-            // 验证 Timer 是否真的被添加到 RunLoop
-            let timerIsValid = timer.isValid
-            print("   - Timer 是否有效: \(timerIsValid)")
-            if !timerIsValid {
-                print("❌ [Heartbeat] ⚠️⚠️⚠️ Timer 创建后立即失效！这不应该发生 ⚠️⚠️⚠️")
-            }
-            
-            // 强制触发 RunLoop 运行（如果还没有运行）
-            if runLoop.currentMode == nil {
-                print("⚠️ [Heartbeat] RunLoop 当前没有 active mode，可能需要在主线程运行")
-            }
-        } else {
-            print("❌ [Heartbeat] ⚠️⚠️⚠️ Timer 创建失败！")
-        }
-        
-        // 立即执行第一次更新（不等待第一个 interval）
-        print("🔄 [Heartbeat] 立即执行第一次更新（不等待第一个 interval）")
-        if let userId = self.currentHeartbeatUserId {
-            Task {
-                await self.updateLastSeen(userId: userId)
-            }
-        } else {
-            print("❌ [Heartbeat] ⚠️⚠️⚠️ currentHeartbeatUserId 为 nil，无法执行第一次更新 ⚠️⚠️⚠️")
-        }
-        
-        // 验证 Timer 状态
-        print("✅ [Heartbeat] Heartbeat 已启动，Timer 已创建")
-        print("   - Timer 对象: \(String(describing: self.lastSeenUpdateTimer))")
-        print("   - Timer 是否有效: \(self.lastSeenUpdateTimer?.isValid ?? false)")
-        print("   - Timer fireDate: \(self.lastSeenUpdateTimer?.fireDate ?? Date())")
-        print("   - Timer timeInterval: \(self.lastSeenUpdateTimer?.timeInterval ?? 0)")
-        
-        // 延迟验证 Timer 是否还在运行（5秒、30秒、60秒后检查）
-        for (delay, label) in [(5.0, "5秒"), (30.0, "30秒"), (60.0, "60秒")] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self = self else { return }
-                if let timer = self.lastSeenUpdateTimer {
-                    print("🔍 [Heartbeat] \(label)后验证 Timer 状态:")
-                    print("   - Timer 是否有效: \(timer.isValid)")
-                    print("   - Timer fireDate: \(timer.fireDate)")
-                    print("   - 距离下次触发: \(String(format: "%.1f", timer.fireDate.timeIntervalSinceNow)) 秒")
-                    print("   - 当前时间: \(Date())")
-                    print("   - currentHeartbeatUserId: \(self.currentHeartbeatUserId ?? "nil")")
-                    if !timer.isValid {
-                        print("❌ [Heartbeat] ⚠️⚠️⚠️ Timer 已失效！需要重新启动 ⚠️⚠️⚠️")
-                        // 如果 Timer 失效，尝试重新启动
-                        if let userId = self.currentHeartbeatUserId {
-                            print("🔄 [Heartbeat] 尝试重新启动 Timer...")
-                            self.startLastSeenHeartbeat(userId: userId, interval: 30)
-                        }
-                    } else {
-                        print("✅ [Heartbeat] Timer 仍然有效")
-                    }
-                } else {
-                    print("❌ [Heartbeat] ⚠️⚠️⚠️ Timer 为 nil！可能被释放了 ⚠️⚠️⚠️")
-                    // 如果 Timer 为 nil，尝试重新启动
-                    if let userId = self.currentHeartbeatUserId {
-                        print("🔄 [Heartbeat] Timer 为 nil，尝试重新启动...")
-                        self.startLastSeenHeartbeat(userId: userId, interval: 30)
-                    }
-                }
-            }
-        }
-        
-        print("✅ =========================================")
-    }
-    
-    /// 停止定期更新
-    func stopLastSeenHeartbeat() {
-        if let timer = lastSeenUpdateTimer {
-            print("🛑 [Heartbeat] 停止 heartbeat")
-            print("   - Timer 是否有效: \(timer.isValid)")
-            print("   - 调用堆栈: \(Thread.callStackSymbols.prefix(5).joined(separator: "\n"))")
-            timer.invalidate()
-        }
-        lastSeenUpdateTimer = nil
-        // 注意：不清除 currentHeartbeatUserId，因为可能只是暂时停止
-        print("✅ [Heartbeat] Heartbeat 已停止")
-    }
-    
-    /// 手动测试更新 last_seen_at（用于调试）
-    func testUpdateLastSeen(userId: String) async {
-        print("🧪 =========================================")
-        print("🧪 [测试] 手动测试更新 last_seen_at")
-        print("🧪 =========================================")
-        print("🧪 用户ID: \(userId)")
-        await updateLastSeen(userId: userId)
-        print("🧪 =========================================")
-        print("🧪 [测试] 测试完成")
-        print("🧪 =========================================")
-    }
+    // MARK: - Online Status Management (已移除)
+    // 所有在线状态相关方法已删除
 }
 
 enum InteractionType: String, Codable {
@@ -4033,6 +3342,238 @@ extension SupabaseService {
             .execute()
         
         print("✅ [兑换系统] 兑换记录已创建，消耗 \(pointsRequired) 积分")
+    }
+    
+    // MARK: - Coffee Chat Invitations
+    
+    /// 创建咖啡聊天邀请记录
+    func createCoffeeChatInvitation(senderId: String, receiverId: String, senderName: String, receiverName: String) async throws -> String {
+        print("📧 [咖啡聊天] 创建邀请: \(senderName) -> \(receiverName)")
+        
+        let invitationId = UUID().uuidString
+        let now = ISO8601DateFormatter().string(from: Date())
+        
+        struct InvitationInsert: Codable {
+            let id: String
+            let senderId: String
+            let receiverId: String
+            let senderName: String
+            let receiverName: String
+            let status: String
+            let createdAt: String
+            
+            enum CodingKeys: String, CodingKey {
+                case id
+                case senderId = "sender_id"
+                case receiverId = "receiver_id"
+                case senderName = "sender_name"
+                case receiverName = "receiver_name"
+                case status
+                case createdAt = "created_at"
+            }
+        }
+        
+        let invitation = InvitationInsert(
+            id: invitationId,
+            senderId: senderId,
+            receiverId: receiverId,
+            senderName: senderName,
+            receiverName: receiverName,
+            status: "pending",
+            createdAt: now
+        )
+        
+        try await client
+            .from("coffee_chat_invitations")
+            .insert(invitation)
+            .execute()
+        
+        print("✅ [咖啡聊天] 邀请已创建: \(invitationId)")
+        return invitationId
+    }
+    
+    /// 接受咖啡聊天邀请并创建日程
+    func acceptCoffeeChatInvitation(invitationId: String, scheduledDate: Date, location: String, notes: String? = nil) async throws {
+        print("✅ [咖啡聊天] 接受邀请: \(invitationId)")
+        
+        // 首先获取邀请信息
+        let response = try await client
+            .from("coffee_chat_invitations")
+            .select()
+            .eq("id", value: invitationId)
+            .single()
+            .execute()
+        
+        let data = response.data
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let senderId = json["sender_id"] as? String,
+              let receiverId = json["receiver_id"] as? String,
+              let senderName = json["sender_name"] as? String,
+              let receiverName = json["receiver_name"] as? String else {
+            throw ProfileError.fetchFailed("Failed to fetch invitation")
+        }
+        
+        let now = ISO8601DateFormatter().string(from: Date())
+        let dateString = ISO8601DateFormatter().string(from: scheduledDate)
+        
+        // 更新邀请状态
+        try await client
+            .from("coffee_chat_invitations")
+            .update([
+                "status": "accepted",
+                "responded_at": now,
+                "scheduled_date": dateString,
+                "location": location,
+                "notes": notes ?? ""
+            ])
+            .eq("id", value: invitationId)
+            .execute()
+        
+        // 为发送者和接收者分别创建日程记录
+        let scheduleId1 = UUID().uuidString
+        let scheduleId2 = UUID().uuidString
+        
+        struct ScheduleInsert: Codable {
+            let id: String
+            let userId: String
+            let participantId: String
+            let participantName: String
+            let scheduledDate: String
+            let location: String
+            let notes: String
+            let createdAt: String
+            
+            enum CodingKeys: String, CodingKey {
+                case id
+                case userId = "user_id"
+                case participantId = "participant_id"
+                case participantName = "participant_name"
+                case scheduledDate = "scheduled_date"
+                case location
+                case notes
+                case createdAt = "created_at"
+            }
+        }
+        
+        let schedule1 = ScheduleInsert(
+            id: scheduleId1,
+            userId: senderId,
+            participantId: receiverId,
+            participantName: receiverName,
+            scheduledDate: dateString,
+            location: location,
+            notes: notes ?? "",
+            createdAt: now
+        )
+        
+        let schedule2 = ScheduleInsert(
+            id: scheduleId2,
+            userId: receiverId,
+            participantId: senderId,
+            participantName: senderName,
+            scheduledDate: dateString,
+            location: location,
+            notes: notes ?? "",
+            createdAt: now
+        )
+        
+        // 插入两条日程记录
+        try await client
+            .from("coffee_chat_schedules")
+            .insert(schedule1)
+            .execute()
+        
+        try await client
+            .from("coffee_chat_schedules")
+            .insert(schedule2)
+            .execute()
+        
+        print("✅ [咖啡聊天] 邀请已接受，日程已创建")
+    }
+    
+    /// 拒绝咖啡聊天邀请
+    func rejectCoffeeChatInvitation(invitationId: String) async throws {
+        print("❌ [咖啡聊天] 拒绝邀请: \(invitationId)")
+        
+        let now = ISO8601DateFormatter().string(from: Date())
+        
+        try await client
+            .from("coffee_chat_invitations")
+            .update([
+                "status": "rejected",
+                "responded_at": now
+            ])
+            .eq("id", value: invitationId)
+            .execute()
+        
+        print("✅ [咖啡聊天] 邀请已拒绝")
+    }
+    
+    /// 获取用户的咖啡聊天日程列表
+    func getCoffeeChatSchedules(userId: String) async throws -> [CoffeeChatSchedule] {
+        print("📅 [咖啡聊天] 获取日程列表: \(userId)")
+        
+        let response = try await client
+            .from("coffee_chat_schedules")
+            .select()
+            .eq("user_id", value: userId)
+            .order("scheduled_date", ascending: true)
+            .execute()
+        
+        let data = response.data
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        
+        var schedules: [CoffeeChatSchedule] = []
+        for json in jsonArray {
+            guard let id = json["id"] as? String,
+                  let participantId = json["participant_id"] as? String,
+                  let participantName = json["participant_name"] as? String,
+                  let location = json["location"] as? String,
+                  let dateString = json["scheduled_date"] as? String else {
+                continue
+            }
+            
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            guard let scheduledDate = formatter.date(from: dateString) else {
+                continue
+            }
+            
+            let notes = json["notes"] as? String
+            
+            // 解析 ID
+            let scheduleId: UUID
+            if let idString = json["id"] as? String, let uuid = UUID(uuidString: idString) {
+                scheduleId = uuid
+            } else {
+                scheduleId = UUID()
+            }
+            
+            // 解析创建时间
+            var createdAt = Date()
+            if let createdAtString = json["created_at"] as? String {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                createdAt = formatter.date(from: createdAtString) ?? Date()
+            }
+            
+            let schedule = CoffeeChatSchedule(
+                id: scheduleId,
+                userId: userId,
+                participantId: participantId,
+                participantName: participantName,
+                scheduledDate: scheduledDate,
+                location: location,
+                notes: notes,
+                createdAt: createdAt
+            )
+            schedules.append(schedule)
+        }
+        
+        print("✅ [咖啡聊天] 找到 \(schedules.count) 个日程")
+        return schedules
     }
 }
 

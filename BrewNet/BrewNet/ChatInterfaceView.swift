@@ -15,7 +15,6 @@ struct ChatInterfaceView: View {
     @State private var displayedProfile: BrewNetProfile?
     @State private var isLoadingProfile = false
     @State private var messageRefreshTimer: Timer?
-    @State private var onlineStatusSyncTimer: Timer? // 在线状态和头像同步定时器
     @State private var cachedChatSessions: [ChatSession] = [] // 缓存数据
     @State private var lastChatLoadTime: Date? = nil // 记录上次加载时间
     @State private var userIdToFullProfileMap: [String: BrewNetProfile] = [:] // 存储完整的 profile 数据
@@ -30,6 +29,9 @@ struct ChatInterfaceView: View {
     @State private var isYourTurnExpanded: Bool = true // Your Turn 分类展开状态
     @State private var isTheirTurnExpanded: Bool = true // Their Turn 分类展开状态
     @State private var isHiddenExpanded: Bool = false // Hidden 分类展开状态
+    @State private var showingCoffeeInviteAlert = false // 显示发送咖啡邀请的确认对话框
+    @State private var showingCoffeeInviteAnimation = false // 显示发送动画
+    @State private var showingCoffeeChatSchedule = false // 显示咖啡聊天日程列表
     
     var body: some View {
         mainContent
@@ -41,21 +43,9 @@ struct ChatInterfaceView: View {
             .onAppear {
                 loadChatSessions()
                 startMessageRefreshTimer()
-                startOnlineStatusSyncTimer() // 启动在线状态和头像同步定时器
-            }
-            .onChange(of: supabaseService.userOnlineStatuses.count) { _ in
-                // 当在线状态更新时（通过字典数量变化触发），刷新聊天会话列表
-                updateChatSessionsWithOnlineStatus()
-            }
-            .onChange(of: supabaseService.onlineStatusUpdateVersion) { _ in
-                // 当在线状态版本号变化时（表示状态已更新），刷新聊天会话列表
-                updateChatSessionsWithOnlineStatus()
             }
             .onDisappear {
             stopMessageRefreshTimer()
-            stopOnlineStatusSyncTimer() // 停止在线状态同步定时器
-            // 停止在线状态监控
-            supabaseService.stopMonitoringOnlineStatus()
             // 先尝试从持久化缓存加载
             loadCachedChatSessionsFromStorage()
             
@@ -230,6 +220,42 @@ struct ChatInterfaceView: View {
         } message: {
             if let session = sessionToUnmatch {
                 Text("Are you sure you want to unmatch with \(session.user.name)? This action cannot be undone.")
+            }
+        }
+        .alert("Send Coffee Chat Invitation", isPresented: $showingCoffeeInviteAlert) {
+            Button("Cancel", role: .cancel) {
+            }
+            Button("Send", role: .none) {
+                sendCoffeeChatInvitation()
+            }
+        } message: {
+            if let session = selectedSession {
+                Text("Do you want to send a coffee chat invitation to \(session.user.name)?")
+            }
+        }
+        .overlay {
+            // Coffee Chat Invitation Animation
+            if showingCoffeeInviteAnimation {
+                ZStack {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                    
+                    VStack(spacing: 20) {
+                        Image(systemName: "cup.and.saucer.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .scaleEffect(showingCoffeeInviteAnimation ? 1.2 : 0.8)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.6).repeatCount(2, autoreverses: true), value: showingCoffeeInviteAnimation)
+                        
+                        Text("Invitation Sent!")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    .padding(40)
+                    .background(Color.white)
+                    .cornerRadius(20)
+                    .shadow(radius: 20)
+                }
             }
         }
     }
@@ -436,6 +462,8 @@ struct ChatInterfaceView: View {
                     LazyVStack(spacing: 12) {
                         ForEach(session.messages) { message in
                             MessageBubbleView(message: message)
+                                .environmentObject(authManager)
+                                .environmentObject(supabaseService)
                                 .id(message.id)
                         }
                     }
@@ -626,19 +654,6 @@ struct ChatInterfaceView: View {
                             .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                         
                         HStack(spacing: 4) {
-                            // 使用实时在线状态（如果可用）
-                            let userId = session.user.userId
-                            let realtimeStatus = userId != nil ? supabaseService.userOnlineStatuses[userId!] : nil
-                            let realtimeIsOnline = realtimeStatus?.isOnline ?? session.user.isOnline
-                            
-                            Circle()
-                                .fill(realtimeIsOnline ? .green : .gray)
-                                .frame(width: 8, height: 8)
-                            
-                            Text(realtimeIsOnline ? "Active" : "Offline")
-                                .font(.system(size: 12))
-                                .foregroundColor(realtimeIsOnline ? .green : .gray)
-                            
                             // Match date
                             // if session.user.isMatched, let matchDate = session.user.matchDate {
                             //     Circle()
@@ -660,6 +675,17 @@ struct ChatInterfaceView: View {
             
             Spacer()
             
+            // Coffee Chat Invitation Button
+            Button(action: {
+                showingCoffeeInviteAlert = true
+            }) {
+                Image(systemName: "cup.and.saucer.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            }
+            .padding(.trailing, 8)
+            
+            // AI Suggestions Button
             Button(action: {
                 loadAISuggestions(for: session.user)
                 showingAISuggestions = true
@@ -759,17 +785,12 @@ struct ChatInterfaceView: View {
         return user.avatar
     }
     
-    /// 更新聊天会话的在线状态和头像（当实时状态更新时调用）
-    private func updateChatSessionsWithOnlineStatus() {
+    /// 更新聊天会话的头像（当头像更新时调用）
+    private func updateChatSessionsWithAvatars() {
         // 由于 ChatSession 的 user 是 let，需要重新创建整个会话
         var updatedSessions: [ChatSession] = []
         for session in chatSessions {
             if let userId = session.user.userId {
-                // 获取最新的在线状态
-                let status = supabaseService.userOnlineStatuses[userId]
-                let isOnline = status?.isOnline ?? session.user.isOnline
-                let lastSeen = status?.lastSeen ?? session.user.lastSeen
-                
                 // 获取最新的头像（从 profile map 中获取）
                 var avatar = session.user.avatar
                 let oldAvatar = avatar
@@ -803,8 +824,6 @@ struct ChatInterfaceView: View {
                 let updatedChatUser = ChatUser(
                     name: session.user.name,
                     avatar: avatar,
-                    isOnline: isOnline,
-                    lastSeen: lastSeen,
                     interests: session.user.interests,
                     bio: session.user.bio,
                     isMatched: session.user.isMatched,
@@ -1036,46 +1055,6 @@ struct ChatInterfaceView: View {
             let dateFormatter = ISO8601DateFormatter()
             dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             
-            // 并发获取所有用户的在线状态（改进版：更准确的在线判断）
-            // 使用新的在线状态 API 获取实时状态
-            let onlineStatusTasks = basicSessionData.map { data -> Task<(userId: String, isOnline: Bool, lastSeen: Date), Never> in
-                Task { @MainActor in
-                    // 优先使用实时状态缓存
-                    let cachedStatus = supabaseService.userOnlineStatuses[data.matchedUserId]
-                    if let status = cachedStatus {
-                        return (data.matchedUserId, status.isOnline, status.lastSeen)
-                    }
-                    
-                    // 如果缓存中没有，从数据库获取
-                    if let status = await supabaseService.getUserOnlineStatus(userId: data.matchedUserId) {
-                        return (data.matchedUserId, status.isOnline, status.lastSeen)
-                    }
-                    
-                    // 回退到旧方法（基于 lastLoginAt）
-                    var isOnline = false
-                    var lastSeen = Date()
-                    
-                    if let user = try? await supabaseService.getUser(id: data.matchedUserId) {
-                        let formatter = ISO8601DateFormatter()
-                        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                        
-                        if let lastLoginAt = formatter.date(from: user.lastLoginAt) {
-                            lastSeen = lastLoginAt
-                            let timeSinceLastLogin = Date().timeIntervalSince(lastLoginAt)
-                            isOnline = timeSinceLastLogin < 300
-                        } else {
-                            formatter.formatOptions = [.withInternetDateTime]
-                            if let lastLoginAt = formatter.date(from: user.lastLoginAt) {
-                                lastSeen = lastLoginAt
-                                let timeSinceLastLogin = Date().timeIntervalSince(lastLoginAt)
-                                isOnline = timeSinceLastLogin < 300
-                            }
-                        }
-                    }
-                    return (data.matchedUserId, isOnline, lastSeen)
-                }
-            }
-            
             // 并发获取所有会话的消息
             let messageTasks = basicSessionData.map { data -> Task<(userId: String, messages: [ChatMessage], lastMessageTime: Date, matchDate: Date), Never> in
                 Task {
@@ -1120,12 +1099,6 @@ struct ChatInterfaceView: View {
             }
             
             // 等待所有任务完成
-            var userIdToOnlineStatus: [String: (isOnline: Bool, lastSeen: Date)] = [:]
-            for task in onlineStatusTasks {
-                let result = await task.value
-                userIdToOnlineStatus[result.userId] = (result.isOnline, result.lastSeen)
-            }
-            
             var userIdToMessages: [String: (messages: [ChatMessage], lastMessageTime: Date, matchDate: Date)] = [:]
             for task in messageTasks {
                 let result = await task.value
@@ -1142,19 +1115,12 @@ struct ChatInterfaceView: View {
                 let messageData = userIdToMessages[matchedUserId] ?? ([], Date(), Date())
                 let matchDate = messageData.matchDate // 使用正确解析的匹配时间
                 
-                // 获取在线状态和最后访问时间
-                let onlineStatus = userIdToOnlineStatus[matchedUserId] ?? (false, Date())
-                let isOnline = onlineStatus.isOnline
-                let lastSeen = onlineStatus.lastSeen
-                
                 let profile = userIdToFullProfileMap[matchedUserId]
                 let avatarString = profile?.coreIdentity.profileImage ?? "person.circle.fill"
                 
                 let chatUser = ChatUser(
                     name: matchedUserName,
                     avatar: avatarString,
-                    isOnline: isOnline,
-                    lastSeen: lastSeen, // 使用真实的最后访问时间
                     interests: profile?.personalitySocial.hobbies ?? [],
                     bio: profile?.coreIdentity.bio ?? "",
                     isMatched: true,
@@ -1175,7 +1141,7 @@ struct ChatInterfaceView: View {
                 )
                 session.lastMessageAt = messageData.lastMessageTime
                 
-                print("✅ Created session for \(matchedUserName): matchDate=\(matchDate), isOnline=\(isOnline), lastSeen=\(lastSeen), isHidden=\(wasHidden)")
+                print("✅ Created session for \(matchedUserName): matchDate=\(matchDate), isHidden=\(wasHidden)")
                 
                 sessions.append(session)
             }
@@ -1212,11 +1178,7 @@ struct ChatInterfaceView: View {
                 return true
             }
             
-            // 启动在线状态监控（实时更新）- 使用过滤后的会话
-            let matchedUserIds = filteredSessions.compactMap { $0.user.userId }
-            if !matchedUserIds.isEmpty {
-                supabaseService.startMonitoringOnlineStatus(for: matchedUserIds)
-            }
+            // 在线状态功能已移除
             
             // 显示会话列表（所有数据已加载完成）
             // 只有在成功加载后才更新 chatSessions，确保不会在刷新时清空现有列表
@@ -1301,6 +1263,92 @@ struct ChatInterfaceView: View {
             await MainActor.run {
                 currentAISuggestions = suggestions
                 isLoadingSuggestions = false
+            }
+        }
+    }
+    
+    private func sendCoffeeChatInvitation() {
+        guard let session = selectedSession,
+              let currentUser = authManager.currentUser,
+              let receiverUserId = session.user.userId else {
+            return
+        }
+        
+        // 创建邀请消息
+        let invitationMessage = ChatMessage(
+            content: "\(currentUser.name) invited you to a coffee chat",
+            isFromUser: true,
+            messageType: .coffeeChatInvitation,
+            senderName: currentUser.name
+        )
+        
+        // 先更新本地UI（乐观更新）
+        if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
+            chatSessions[index].addMessage(invitationMessage)
+            chatSessions[index].lastMessageAt = invitationMessage.timestamp
+            selectedSession = chatSessions[index]
+            scrollToBottomId = invitationMessage.id
+            
+            // 重新排序列表
+            chatSessions.sort { session1, session2 in
+                let hasMessages1 = !session1.messages.isEmpty
+                let hasMessages2 = !session2.messages.isEmpty
+                
+                if hasMessages1 && hasMessages2 {
+                    return session1.lastMessageAt > session2.lastMessageAt
+                }
+                if hasMessages1 && !hasMessages2 {
+                    return true
+                }
+                if !hasMessages1 && hasMessages2 {
+                    return false
+                }
+                let date1 = session1.user.matchDate ?? Date.distantPast
+                let date2 = session2.user.matchDate ?? Date.distantPast
+                return date1 > date2
+            }
+        }
+        
+        // 显示发送动画
+        showingCoffeeInviteAnimation = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            showingCoffeeInviteAnimation = false
+        }
+        
+        // 发送到数据库
+        Task {
+            do {
+                // 获取接收者名称
+                var receiverName = session.user.name
+                if let receiverProfile = try? await supabaseService.getProfile(userId: receiverUserId) {
+                    receiverName = receiverProfile.coreIdentity.name
+                }
+                
+                // 创建邀请记录
+                let invitationId = try await supabaseService.createCoffeeChatInvitation(
+                    senderId: currentUser.id,
+                    receiverId: receiverUserId,
+                    senderName: currentUser.name,
+                    receiverName: receiverName
+                )
+                
+                // 发送消息
+                let _ = try await supabaseService.sendMessage(
+                    senderId: currentUser.id,
+                    receiverId: receiverUserId,
+                    content: invitationMessage.content,
+                    messageType: "coffee_chat_invitation"
+                )
+                print("✅ Coffee chat invitation sent to database: \(invitationId)")
+            } catch {
+                print("❌ Failed to send coffee chat invitation: \(error.localizedDescription)")
+                // 如果发送失败，移除本地消息
+                await MainActor.run {
+                    if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
+                        chatSessions[index].messages.removeAll { $0.id == invitationMessage.id }
+                        selectedSession = chatSessions[index]
+                    }
+                }
             }
         }
     }
@@ -1592,222 +1640,7 @@ struct ChatInterfaceView: View {
         messageRefreshTimer = nil
     }
     
-    // MARK: - Online Status and Avatar Sync Timer
-    /// 启动在线状态和头像同步定时器（每10秒同步一次）
-    private func startOnlineStatusSyncTimer() {
-        stopOnlineStatusSyncTimer() // 先停止现有的定时器
-        
-        print("🔄 [Chat同步] 启动在线状态和头像同步定时器（每10秒）")
-        
-        onlineStatusSyncTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { _ in
-            Task { @MainActor in
-                await self.syncOnlineStatusAndAvatars()
-            }
-        }
-    }
-    
-    /// 停止在线状态同步定时器
-    private func stopOnlineStatusSyncTimer() {
-        onlineStatusSyncTimer?.invalidate()
-        onlineStatusSyncTimer = nil
-    }
-    
-    /// 同步在线状态和头像（每10秒调用一次）
-    @MainActor
-    private func syncOnlineStatusAndAvatars() async {
-        guard let currentUser = authManager.currentUser else {
-            print("⚠️ [Chat同步] 没有当前用户，跳过同步")
-            return
-        }
-        
-        print("🔄 [Chat同步] 开始同步在线状态和头像...")
-        print("   - 当前会话数量: \(chatSessions.count)")
-        
-        // 收集所有需要同步的用户ID
-        let userIdsToSync = chatSessions.compactMap { $0.user.userId }
-        guard !userIdsToSync.isEmpty else {
-            print("ℹ️ [Chat同步] 没有需要同步的用户")
-            return
-        }
-        
-        print("   - 需要同步的用户数量: \(userIdsToSync.count)")
-        print("   - 用户IDs: \(userIdsToSync)")
-        
-        // 并行获取所有用户的在线状态
-        var updatedOnlineStatuses: [String: (isOnline: Bool, lastSeen: Date)] = [:]
-        await withTaskGroup(of: (String, (isOnline: Bool, lastSeen: Date)?).self) { group in
-            for userId in userIdsToSync {
-                group.addTask {
-                    let status = await self.supabaseService.getUserOnlineStatus(userId: userId)
-                    return (userId, status)
-                }
-            }
-            
-            for await (userId, status) in group {
-                if let status = status {
-                    updatedOnlineStatuses[userId] = status
-                }
-            }
-        }
-        
-        // 更新 SupabaseService 的在线状态缓存
-        var hasStatusChanges = false
-        for (userId, status) in updatedOnlineStatuses {
-            await MainActor.run {
-                let oldStatus = supabaseService.userOnlineStatuses[userId]
-                supabaseService.userOnlineStatuses[userId] = status
-                // 检查是否有变化
-                if oldStatus?.isOnline != status.isOnline || oldStatus?.lastSeen != status.lastSeen {
-                    hasStatusChanges = true
-                }
-            }
-        }
-        
-        // 如果有状态变化，更新版本号以触发 UI 更新
-        if hasStatusChanges {
-            await MainActor.run {
-                supabaseService.onlineStatusUpdateVersion += 1
-            }
-        }
-        
-        print("   - 已更新在线状态: \(updatedOnlineStatuses.count) 个用户\(hasStatusChanges ? " (有变化)" : "")")
-        
-        // 并行获取所有用户的头像（从 profile 获取）
-        var updatedProfiles: [String: BrewNetProfile] = [:]
-        await withTaskGroup(of: (String, BrewNetProfile?).self) { group in
-            for userId in userIdsToSync {
-                group.addTask {
-                    if let profile = try? await self.supabaseService.getProfile(userId: userId) {
-                        return (userId, profile.toBrewNetProfile())
-                    }
-                    return (userId, nil)
-                }
-            }
-            
-            for await (userId, profile) in group {
-                if let profile = profile {
-                    updatedProfiles[userId] = profile
-                }
-            }
-        }
-        
-        // 更新 profile map
-        for (userId, profile) in updatedProfiles {
-            userIdToFullProfileMap[userId] = profile
-        }
-        
-        print("   - 已更新头像: \(updatedProfiles.count) 个用户")
-        
-        // 更新聊天会话列表（包括在线状态和头像）
-        var updatedSessions: [ChatSession] = []
-        for session in chatSessions {
-            guard let userId = session.user.userId else {
-                updatedSessions.append(session)
-                continue
-            }
-            
-            // 获取最新的在线状态
-            let status = updatedOnlineStatuses[userId] ?? supabaseService.userOnlineStatuses[userId]
-            let isOnline = status?.isOnline ?? session.user.isOnline
-            let lastSeen = status?.lastSeen ?? session.user.lastSeen
-            
-            // 获取最新的头像
-            var avatar = session.user.avatar
-            let oldAvatar = avatar
-            var shouldClearCache = false
-            
-            if let profile = updatedProfiles[userId] ?? userIdToFullProfileMap[userId] {
-                // 优先使用新获取的头像，如果为空则保持原头像
-                if let newAvatar = profile.coreIdentity.profileImage, !newAvatar.isEmpty {
-                    // 即使 URL 相同，也要更新（因为可能图片内容已更新）
-                    avatar = newAvatar
-                    
-                    // 如果头像URL变化了，清除旧头像的缓存
-                    if oldAvatar != newAvatar && (oldAvatar.hasPrefix("http://") || oldAvatar.hasPrefix("https://")) {
-                        ImageCacheManager.shared.removeImage(for: oldAvatar)
-                        print("   🗑️ [头像更新] 已清除旧头像缓存: \(oldAvatar)")
-                    }
-                    
-                    // 即使 URL 相同，也清除缓存以确保显示最新图片（可能图片已更新）
-                    // 注意：每次同步时都清除缓存，确保显示最新的图片
-                    if oldAvatar == newAvatar && (newAvatar.hasPrefix("http://") || newAvatar.hasPrefix("https://")) {
-                        ImageCacheManager.shared.removeImage(for: newAvatar)
-                        // 增加刷新版本号，强制刷新视图
-                        avatarRefreshVersions[userId] = (avatarRefreshVersions[userId] ?? 0) + 1
-                        print("   🔄 [头像更新] 头像URL相同但强制刷新缓存: \(newAvatar) (版本: \(avatarRefreshVersions[userId] ?? 0))")
-                    } else if oldAvatar != newAvatar {
-                        // URL 变化时也更新版本号
-                        avatarRefreshVersions[userId] = (avatarRefreshVersions[userId] ?? 0) + 1
-                    }
-                    
-                    print("   ✅ [头像更新] 用户 \(userId) 头像: \(oldAvatar) -> \(newAvatar)")
-                } else {
-                    print("   ⚠️ [头像更新] 用户 \(userId) 的新头像为空，保持原头像: \(avatar)")
-                }
-            } else {
-                print("   ⚠️ [头像更新] 用户 \(userId) 的 profile 不存在于 map 中")
-            }
-            
-            // 创建更新后的 ChatUser
-            let updatedChatUser = ChatUser(
-                name: session.user.name,
-                avatar: avatar,
-                isOnline: isOnline,
-                lastSeen: lastSeen,
-                interests: session.user.interests,
-                bio: session.user.bio,
-                isMatched: session.user.isMatched,
-                matchDate: session.user.matchDate,
-                matchType: session.user.matchType,
-                userId: session.user.userId
-            )
-            
-            // 创建新的 ChatSession，保留 hidden 状态
-            var updatedSession = ChatSession(
-                user: updatedChatUser,
-                messages: session.messages,
-                aiSuggestions: session.aiSuggestions,
-                isActive: session.isActive,
-                isHidden: session.isHidden
-            )
-            updatedSession.lastMessageAt = session.lastMessageAt
-            updatedSessions.append(updatedSession)
-        }
-        
-        // 更新会话列表
-        chatSessions = updatedSessions
-        
-        // 如果当前有选中的会话，也需要更新它（确保聊天详情页的头像也更新）
-        if let currentSelectedSession = selectedSession,
-           let currentUserId = currentSelectedSession.user.userId,
-           let updatedSelectedSession = updatedSessions.first(where: { $0.user.userId == currentUserId }) {
-            // 即使头像URL相同，也要更新（确保显示最新数据）
-            let avatarChanged = updatedSelectedSession.user.avatar != currentSelectedSession.user.avatar
-            
-            if avatarChanged || updatedSelectedSession.user.name != currentSelectedSession.user.name || 
-               updatedSelectedSession.user.isOnline != currentSelectedSession.user.isOnline {
-                print("🔄 [Chat同步] 更新选中会话:")
-                print("   - 头像: \(currentSelectedSession.user.avatar) -> \(updatedSelectedSession.user.avatar)")
-                print("   - 在线状态: \(currentSelectedSession.user.isOnline) -> \(updatedSelectedSession.user.isOnline)")
-                
-                // 如果头像URL变化了，清除旧头像的缓存
-                if avatarChanged && (currentSelectedSession.user.avatar.hasPrefix("http://") || currentSelectedSession.user.avatar.hasPrefix("https://")) {
-                    ImageCacheManager.shared.removeImage(for: currentSelectedSession.user.avatar)
-                    print("🗑️ [Chat同步] 已清除旧头像缓存: \(currentSelectedSession.user.avatar)")
-                }
-                
-                // 即使URL相同，也清除缓存以确保显示最新图片
-                if !avatarChanged && (updatedSelectedSession.user.avatar.hasPrefix("http://") || updatedSelectedSession.user.avatar.hasPrefix("https://")) {
-                    ImageCacheManager.shared.removeImage(for: updatedSelectedSession.user.avatar)
-                    print("🔄 [Chat同步] 强制刷新头像缓存: \(updatedSelectedSession.user.avatar)")
-                }
-                
-                selectedSession = updatedSelectedSession
-            }
-        }
-        
-        print("✅ [Chat同步] 同步完成，已更新 \(updatedSessions.count) 个会话")
-    }
+    // MARK: - Avatar Sync (头像同步功能已移除，保留代码结构以便将来扩展)
     
     @MainActor
     private func refreshMessagesForCurrentSession() async {
@@ -2121,18 +1954,7 @@ struct ChatSessionRowView: View {
                         .lineLimit(1)
                     
                     HStack(spacing: 4) {
-                        // 使用实时在线状态（如果可用）
-                        let userId = session.user.userId
-                        let realtimeStatus = userId != nil ? supabaseService.userOnlineStatuses[userId!] : nil
-                        let realtimeIsOnline = realtimeStatus?.isOnline ?? session.user.isOnline
-                        
-                        Circle()
-                            .fill(realtimeIsOnline ? .green : .gray)
-                            .frame(width: 8, height: 8)
-                        
-                        Text(realtimeIsOnline ? "Active" : "Offline")
-                            .font(.system(size: 12))
-                            .foregroundColor(realtimeIsOnline ? .green : .gray)
+                        // 在线状态功能已移除
                         
                         Spacer()
                         
@@ -2238,6 +2060,13 @@ struct ChatSessionRowView: View {
 // MARK: - Message Bubble View
 struct MessageBubbleView: View {
     let message: ChatMessage
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    @State private var invitationStatus: CoffeeChatInvitation.InvitationStatus? = nil
+    @State private var showingAcceptSheet = false
+    @State private var selectedDate = Date()
+    @State private var locationText = ""
+    @State private var notesText = ""
     
     var body: some View {
         HStack {
@@ -2252,6 +2081,16 @@ struct MessageBubbleView: View {
     }
     
     private var messageBubble: some View {
+        Group {
+            if message.messageType == .coffeeChatInvitation {
+                coffeeChatInvitationBubble
+            } else {
+                regularMessageBubble
+            }
+        }
+    }
+    
+    private var regularMessageBubble: some View {
         VStack(alignment: message.isFromUser ? .trailing : .leading, spacing: 4) {
             if !message.isFromUser, let senderName = message.senderName {
                 Text(senderName)
@@ -2279,10 +2118,169 @@ struct MessageBubbleView: View {
         }
     }
     
+    private var coffeeChatInvitationBubble: some View {
+        VStack(alignment: .center, spacing: 12) {
+            // Envelope Icon
+            Image(systemName: "envelope.fill")
+                .font(.system(size: 40))
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            
+            // Invitation Text
+            Text(message.content)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                .multilineTextAlignment(.center)
+            
+            // Action Buttons (only for receiver)
+            if !message.isFromUser {
+                HStack(spacing: 12) {
+                    Button(action: {
+                        showingAcceptSheet = true
+                    }) {
+                        Text("Accept")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 10)
+                            .background(Color.green)
+                            .cornerRadius(20)
+                    }
+                    
+                    Button(action: {
+                        let invitationId = getInvitationId()
+                        rejectCoffeeChatInvitation(invitationId: invitationId)
+                    }) {
+                        Text("Decline")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 10)
+                            .background(Color.red)
+                            .cornerRadius(20)
+                    }
+                }
+            } else {
+                // Status for sender
+                if let status = invitationStatus {
+                    Text(status == .accepted ? "Accepted" : status == .rejected ? "Declined" : "Pending")
+                        .font(.system(size: 12))
+                        .foregroundColor(status == .accepted ? .green : status == .rejected ? .red : .gray)
+                }
+            }
+            
+            Text(formatTime(message.timestamp))
+                .font(.system(size: 10))
+                .foregroundColor(.gray)
+        }
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color.white)
+                .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
+        )
+        .padding(.horizontal, 16)
+        .sheet(isPresented: $showingAcceptSheet) {
+            AcceptInvitationSheet(
+                selectedDate: $selectedDate,
+                locationText: $locationText,
+                notesText: $notesText,
+                onAccept: {
+                    let invitationId = getInvitationId()
+                    acceptCoffeeChatInvitation(invitationId: invitationId)
+                },
+                onCancel: {
+                    showingAcceptSheet = false
+                }
+            )
+        }
+    }
+    
+    private func acceptCoffeeChatInvitation(invitationId: String) {
+        Task {
+            do {
+                try await supabaseService.acceptCoffeeChatInvitation(
+                    invitationId: invitationId,
+                    scheduledDate: selectedDate,
+                    location: locationText.isEmpty ? "To be determined" : locationText,
+                    notes: notesText.isEmpty ? nil : notesText
+                )
+                await MainActor.run {
+                    invitationStatus = .accepted
+                    showingAcceptSheet = false
+                }
+                print("✅ Coffee chat invitation accepted")
+            } catch {
+                print("❌ Failed to accept invitation: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    private func rejectCoffeeChatInvitation(invitationId: String) {
+        Task {
+            do {
+                try await supabaseService.rejectCoffeeChatInvitation(invitationId: invitationId)
+                await MainActor.run {
+                    invitationStatus = .rejected
+                }
+                print("✅ Coffee chat invitation rejected")
+            } catch {
+                print("❌ Failed to reject invitation: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    // 从消息中提取邀请ID（临时方案：从消息内容或其他方式获取）
+    private func getInvitationId() -> String {
+        // TODO: 从消息元数据或数据库中查找对应的邀请ID
+        // 暂时返回消息ID作为临时方案
+        return message.id.uuidString
+    }
+    
     private func formatTime(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: date)
+    }
+}
+
+// MARK: - Accept Invitation Sheet
+struct AcceptInvitationSheet: View {
+    @Binding var selectedDate: Date
+    @Binding var locationText: String
+    @Binding var notesText: String
+    let onAccept: () -> Void
+    let onCancel: () -> Void
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Schedule Details")) {
+                    DatePicker("Date & Time", selection: $selectedDate, displayedComponents: [.date, .hourAndMinute])
+                    
+                    TextField("Location", text: $locationText)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                    
+                    TextField("Notes (Optional)", text: $notesText, axis: .vertical)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .lineLimit(3...6)
+                }
+            }
+            .navigationTitle("Accept Invitation")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        onCancel()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Accept") {
+                        onAccept()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
     }
 }
 

@@ -365,8 +365,6 @@ struct SplashScreenView: View {
             let chatUser = ChatUser(
                 name: matchedUserName,
                 avatar: "person.circle.fill",
-                isOnline: false,
-                lastSeen: matchDate ?? Date(),
                 interests: [],
                 bio: "",
                 isMatched: true,

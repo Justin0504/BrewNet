@@ -30,6 +30,7 @@ enum MessageType: String, Codable, CaseIterable {
     case aiSuggestion = "ai_suggestion"
     case iceBreaker = "ice_breaker"
     case system = "system"
+    case coffeeChatInvitation = "coffee_chat_invitation"
 }
 
 // MARK: - Chat User Model
@@ -37,8 +38,6 @@ struct ChatUser: Identifiable, Codable {
     let id: UUID
     let name: String
     let avatar: String
-    let isOnline: Bool
-    let lastSeen: Date
     let interests: [String]
     let bio: String
     let isMatched: Bool
@@ -46,12 +45,10 @@ struct ChatUser: Identifiable, Codable {
     let matchType: MatchType
     let userId: String? // Optional userId for fetching profile from database
     
-    init(name: String, avatar: String, isOnline: Bool = false, lastSeen: Date = Date(), interests: [String] = [], bio: String = "", isMatched: Bool = false, matchDate: Date? = nil, matchType: MatchType = .none, userId: String? = nil) {
+    init(name: String, avatar: String, interests: [String] = [], bio: String = "", isMatched: Bool = false, matchDate: Date? = nil, matchType: MatchType = .none, userId: String? = nil) {
         self.id = UUID()
         self.name = name
         self.avatar = avatar
-        self.isOnline = isOnline
-        self.lastSeen = lastSeen
         self.interests = interests
         self.bio = bio
         self.isMatched = isMatched
@@ -271,6 +268,87 @@ enum SuggestionCategory: String, Codable, CaseIterable {
     }
 }
 
+// MARK: - Coffee Chat Invitation Model
+struct CoffeeChatInvitation: Identifiable, Codable {
+    let id: UUID
+    let senderId: String
+    let receiverId: String
+    let senderName: String
+    let receiverName: String
+    let status: InvitationStatus // pending, accepted, rejected
+    let createdAt: Date
+    let respondedAt: Date?
+    let scheduledDate: Date? // 确认后的日程日期
+    let location: String? // 确认后的地点
+    let notes: String? // 备注
+    
+    enum InvitationStatus: String, Codable {
+        case pending = "pending"
+        case accepted = "accepted"
+        case rejected = "rejected"
+    }
+    
+    init(senderId: String, receiverId: String, senderName: String, receiverName: String, status: InvitationStatus = .pending, scheduledDate: Date? = nil, location: String? = nil, notes: String? = nil) {
+        self.id = UUID()
+        self.senderId = senderId
+        self.receiverId = receiverId
+        self.senderName = senderName
+        self.receiverName = receiverName
+        self.status = status
+        self.createdAt = Date()
+        self.respondedAt = status != .pending ? Date() : nil
+        self.scheduledDate = scheduledDate
+        self.location = location
+        self.notes = notes
+    }
+}
+
+// MARK: - Coffee Chat Schedule Model
+struct CoffeeChatSchedule: Identifiable, Codable {
+    let id: UUID
+    let userId: String
+    let participantId: String
+    let participantName: String
+    let scheduledDate: Date
+    let location: String
+    let notes: String?
+    let createdAt: Date
+    
+    init(userId: String, participantId: String, participantName: String, scheduledDate: Date, location: String, notes: String? = nil) {
+        self.id = UUID()
+        self.userId = userId
+        self.participantId = participantId
+        self.participantName = participantName
+        self.scheduledDate = scheduledDate
+        self.location = location
+        self.notes = notes
+        self.createdAt = Date()
+    }
+    
+    // 从数据库解码的初始化方法
+    init(id: UUID, userId: String, participantId: String, participantName: String, scheduledDate: Date, location: String, notes: String?, createdAt: Date) {
+        self.id = id
+        self.userId = userId
+        self.participantId = participantId
+        self.participantName = participantName
+        self.scheduledDate = scheduledDate
+        self.location = location
+        self.notes = notes
+        self.createdAt = createdAt
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userId = "user_id"
+        case participantId = "participant_id"
+        case participantName = "participant_name"
+        case scheduledDate = "scheduled_date"
+        case location
+        case notes
+        case createdAt = "created_at"
+    }
+}
+
 // MARK: - Chat Session Model
 struct ChatSession: Identifiable, Codable {
     let id: UUID
@@ -330,7 +408,6 @@ let sampleChatUsers = [
     ChatUser(
         name: "Sarah Chen",
         avatar: "person.circle.fill",
-        isOnline: true,
         interests: ["Technology", "Coffee", "Travel"],
         bio: "Product Manager who loves creating amazing user experiences",
         isMatched: true,
@@ -340,8 +417,6 @@ let sampleChatUsers = [
     ChatUser(
         name: "Mike Rodriguez",
         avatar: "person.circle.fill",
-        isOnline: false,
-        lastSeen: Date().addingTimeInterval(-300),
         interests: ["Music", "Coding", "Photography"],
         bio: "Software Engineer with a passion for mobile development",
         isMatched: true,
@@ -351,7 +426,6 @@ let sampleChatUsers = [
     ChatUser(
         name: "Emma Wilson",
         avatar: "person.circle.fill",
-        isOnline: true,
         interests: ["Design", "Art", "Yoga"],
         bio: "UX Designer who believes good design can change the world",
         isMatched: true,
@@ -361,7 +435,6 @@ let sampleChatUsers = [
     ChatUser(
         name: "Alex Kim",
         avatar: "person.circle.fill",
-        isOnline: true,
         interests: ["Data Science", "Board Games", "Food"],
         bio: "Data Scientist who loves finding patterns in numbers",
         isMatched: false,
@@ -370,8 +443,6 @@ let sampleChatUsers = [
     ChatUser(
         name: "Lisa Zhang",
         avatar: "person.circle.fill",
-        isOnline: false,
-        lastSeen: Date().addingTimeInterval(-1800),
         interests: ["Marketing", "Books", "Coffee"],
         bio: "Marketing strategist who loves storytelling",
         isMatched: true,

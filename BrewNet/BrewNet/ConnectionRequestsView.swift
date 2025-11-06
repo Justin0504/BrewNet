@@ -443,17 +443,6 @@ struct ConnectionRequestsView: View {
                         print("⚠️ [请求页面] 加载临时消息失败: \(error.localizedDescription)")
                     }
                     
-                    // 获取请求者的在线状态
-                    var isOnline = false
-                    var lastSeen: Date? = nil
-                    if let onlineStatus = await supabaseService.getUserOnlineStatus(userId: invitation.senderId) {
-                        isOnline = onlineStatus.isOnline
-                        lastSeen = onlineStatus.lastSeen
-                        print("✅ [请求页面] \(requesterProfile.name) 在线状态: \(isOnline ? "在线" : "离线")")
-                    } else {
-                        print("⚠️ [请求页面] 无法获取 \(requesterProfile.name) 的在线状态")
-                    }
-                    
                     var connectionRequest = ConnectionRequest(
                         id: invitation.id,
                         requesterId: invitation.senderId,
@@ -464,8 +453,6 @@ struct ConnectionRequestsView: View {
                         isFeatured: false // 可以根据需要设置
                     )
                     connectionRequest.temporaryMessages = temporaryMessages
-                    connectionRequest.isOnline = isOnline
-                    connectionRequest.lastSeen = lastSeen
                     
                     convertedRequests.append(connectionRequest)
                 }
@@ -657,21 +644,10 @@ struct CompactRequestCard: View {
             
             // Profile Info
             VStack(alignment: .leading, spacing: 6) {
-                // Name with Online Status
-                HStack(spacing: 8) {
-                    Text(request.requesterProfile.name)
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(themeBrown)
-                    
-                    // Online indicator - 根据实际状态显示
-                    Circle()
-                        .fill(request.isOnline ? Color.green : Color.gray)
-                        .frame(width: 8, height: 8)
-                    
-                    Text(request.isOnline ? "Active" : "Offline")
-                        .font(.system(size: 12))
-                        .foregroundColor(request.isOnline ? .green : .gray)
-                }
+                // Name
+                Text(request.requesterProfile.name)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(themeBrown)
                 
                 // Temporary Message Bubble (if exists)
                 if let latestMessage = request.latestTemporaryMessage {
@@ -1309,10 +1285,9 @@ struct TemporaryChatsView: View {
                 allUserIds.insert(userId)
             }
             
-            // 批量并行获取所有用户的消息、profile 和在线状态
+            // 批量并行获取所有用户的消息和 profile
             var messagesMap: [String: [SupabaseMessage]] = [:]
             var profilesMap: [String: BrewNetProfile] = [:]
-            var onlineStatusMap: [String: (isOnline: Bool, lastSeen: Date)] = [:]
             
             await withTaskGroup(of: Void.self) { group in
                 // 并行获取所有用户的消息
@@ -1331,7 +1306,7 @@ struct TemporaryChatsView: View {
                         }
                     }
                 }
-                
+
                 // 并行获取所有用户的 profile（只获取虚拟请求需要的）
                 let virtualUserIds = messagesByOtherUser.keys.filter { userId in
                     !requests.contains { $0.requesterId == userId }
@@ -1341,17 +1316,6 @@ struct TemporaryChatsView: View {
                         if let profile = try? await supabaseService.getProfile(userId: userId) {
                             await MainActor.run {
                                 profilesMap[userId] = profile.toBrewNetProfile()
-                            }
-                        }
-                    }
-                }
-                
-                // 并行获取所有用户的在线状态
-                for userId in allUserIds {
-                    group.addTask {
-                        if let status = await supabaseService.getUserOnlineStatus(userId: userId) {
-                            await MainActor.run {
-                                onlineStatusMap[userId] = (status.isOnline, status.lastSeen)
                             }
                         }
                     }
@@ -1370,11 +1334,8 @@ struct TemporaryChatsView: View {
                     temporaryMessages = Array(temporaryMessages.suffix(10))
                 }
                 
-                let status = onlineStatusMap[request.requesterId]
                 var updatedRequest = request
                 updatedRequest.temporaryMessages = temporaryMessages
-                updatedRequest.isOnline = status?.isOnline ?? false
-                updatedRequest.lastSeen = status?.lastSeen
                 updatedRequests.append(updatedRequest)
             }
             
@@ -1404,7 +1365,6 @@ struct TemporaryChatsView: View {
                         backgroundImage: nil
                     )
                     
-                    let status = onlineStatusMap[otherUserId]
                     let virtualRequest = ConnectionRequest(
                         id: UUID().uuidString,
                         requesterId: otherUserId,
@@ -1416,8 +1376,6 @@ struct TemporaryChatsView: View {
                     )
                     var mutableRequest = virtualRequest
                     mutableRequest.temporaryMessages = temporaryMessages
-                    mutableRequest.isOnline = status?.isOnline ?? false
-                    mutableRequest.lastSeen = status?.lastSeen
                     updatedRequests.append(mutableRequest)
                     
                     print("✅ [临时聊天] 为用户 \(requesterProfile.name) 创建虚拟请求，包含 \(temporaryMessages.count) 条消息")
