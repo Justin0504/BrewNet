@@ -3511,7 +3511,8 @@ extension SupabaseService {
     
     /// 获取用户的咖啡聊天日程列表
     func getCoffeeChatSchedules(userId: String) async throws -> [CoffeeChatSchedule] {
-        print("📅 [咖啡聊天] 获取日程列表: \(userId)")
+        print("📅 [咖啡聊天] 获取日程列表，用户ID: \(userId)")
+        print("📅 [咖啡聊天] 用户ID类型: \(type(of: userId))")
         
         let response = try await client
             .from("coffee_chat_schedules")
@@ -3520,34 +3521,86 @@ extension SupabaseService {
             .order("scheduled_date", ascending: true)
             .execute()
         
+        print("📅 [咖啡聊天] 查询响应状态码: \(response.status)")
+        print("📅 [咖啡聊天] 响应数据大小: \(response.data.count) bytes")
+        
         let data = response.data
         guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            print("❌ [咖啡聊天] JSON解析失败")
+            if let jsonString = String(data: data, encoding: .utf8) {
+                print("❌ [咖啡聊天] 原始响应: \(jsonString)")
+            }
             return []
         }
         
+        print("📅 [咖啡聊天] 解析到 \(jsonArray.count) 条原始记录")
+        
         var schedules: [CoffeeChatSchedule] = []
-        for json in jsonArray {
-            guard let id = json["id"] as? String,
-                  let participantId = json["participant_id"] as? String,
-                  let participantName = json["participant_name"] as? String,
-                  let location = json["location"] as? String,
-                  let dateString = json["scheduled_date"] as? String else {
+        for (index, json) in jsonArray.enumerated() {
+            print("📅 [咖啡聊天] 处理第 \(index + 1) 条记录")
+            print("📅 [咖啡聊天] 记录内容: \(json)")
+            
+            guard let id = json["id"] as? String else {
+                print("❌ [咖啡聊天] 第 \(index + 1) 条记录缺少 id")
+                continue
+            }
+            guard let participantId = json["participant_id"] as? String else {
+                print("❌ [咖啡聊天] 第 \(index + 1) 条记录缺少 participant_id")
+                continue
+            }
+            guard let participantName = json["participant_name"] as? String else {
+                print("❌ [咖啡聊天] 第 \(index + 1) 条记录缺少 participant_name")
+                continue
+            }
+            guard let location = json["location"] as? String else {
+                print("❌ [咖啡聊天] 第 \(index + 1) 条记录缺少 location")
+                continue
+            }
+            guard let dateString = json["scheduled_date"] as? String else {
+                print("❌ [咖啡聊天] 第 \(index + 1) 条记录缺少 scheduled_date")
                 continue
             }
             
+            print("📅 [咖啡聊天] id: \(id)")
+            print("📅 [咖啡聊天] participant_id: \(participantId)")
+            print("📅 [咖啡聊天] participant_name: \(participantName)")
+            print("📅 [咖啡聊天] location: \(location)")
+            print("📅 [咖啡聊天] scheduled_date 字符串: \(dateString)")
+            
+            // 尝试多种日期格式
+            var scheduledDate: Date?
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            guard let scheduledDate = formatter.date(from: dateString) else {
+            scheduledDate = formatter.date(from: dateString)
+            
+            if scheduledDate == nil {
+                formatter.formatOptions = [.withInternetDateTime]
+                scheduledDate = formatter.date(from: dateString)
+            }
+            
+            if scheduledDate == nil {
+                let postgresFormatter = DateFormatter()
+                postgresFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSSZZZZZ"
+                postgresFormatter.locale = Locale(identifier: "en_US_POSIX")
+                postgresFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+                scheduledDate = postgresFormatter.date(from: dateString)
+            }
+            
+            guard let finalScheduledDate = scheduledDate else {
+                print("❌ [咖啡聊天] 无法解析日期: \(dateString)")
                 continue
             }
+            
+            print("✅ [咖啡聊天] 使用备用格式解析成功")
             
             let notes = json["notes"] as? String
             
             // 解析 ID
             let scheduleId: UUID
-            if let idString = json["id"] as? String, let uuid = UUID(uuidString: idString) {
+            if let uuid = UUID(uuidString: id) {
                 scheduleId = uuid
             } else {
+                print("⚠️ [咖啡聊天] ID格式无效，生成新UUID: \(id)")
                 scheduleId = UUID()
             }
             
@@ -3564,15 +3617,16 @@ extension SupabaseService {
                 userId: userId,
                 participantId: participantId,
                 participantName: participantName,
-                scheduledDate: scheduledDate,
+                scheduledDate: finalScheduledDate,
                 location: location,
                 notes: notes,
                 createdAt: createdAt
             )
             schedules.append(schedule)
+            print("✅ [咖啡聊天] 成功解析日程: \(participantName) at \(location) on \(dateString)")
         }
         
-        print("✅ [咖啡聊天] 找到 \(schedules.count) 个日程")
+        print("✅ [咖啡聊天] 总共找到 \(schedules.count) 个有效日程")
         return schedules
     }
 }

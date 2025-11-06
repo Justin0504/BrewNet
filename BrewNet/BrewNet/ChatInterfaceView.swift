@@ -461,7 +461,7 @@ struct ChatInterfaceView: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(session.messages) { message in
-                            MessageBubbleView(message: message)
+                            MessageBubbleView(message: message, session: session)
                                 .environmentObject(authManager)
                                 .environmentObject(supabaseService)
                                 .id(message.id)
@@ -616,11 +616,6 @@ struct ChatInterfaceView: View {
                 }
             }
             
-            // AI Suggestions Bar
-            if !currentAISuggestions.isEmpty {
-                aiSuggestionsBar
-            }
-            
             // Message Input
             messageInputView
         }
@@ -631,26 +626,59 @@ struct ChatInterfaceView: View {
             Button(action: {
                 selectedSession = nil
             }) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.95, green: 0.92, blue: 0.88),
+                                    Color(red: 0.9, green: 0.85, blue: 0.8)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 36, height: 36)
+                    
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                }
             }
+            .padding(.trailing, 4)
             
             // User Info with match indicator - Clickable
             Button(action: {
                 print("🔘 Button tapped for user: \(session.user.name)")
                 loadProfile(for: session.user)
             }) {
-                HStack(spacing: 12) {
+                HStack(spacing: 14) {
                     // 使用实时头像（如果profile map中有更新）
                     let currentAvatar = getCurrentAvatarForUser(session.user)
                     let avatarVersion = session.user.userId.flatMap { avatarRefreshVersions[$0] } ?? 0
-                    AvatarView(avatarString: currentAvatar, size: 40)
-                        .id("avatar-\(session.user.id)-\(currentAvatar)-v\(avatarVersion)") // 强制刷新当头像URL或版本号变化时
                     
-                    VStack(alignment: .leading, spacing: 2) {
+                    // 头像带渐变边框
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.9, green: 0.85, blue: 0.8),
+                                        Color(red: 0.85, green: 0.8, blue: 0.75)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 44, height: 44)
+                        
+                        AvatarView(avatarString: currentAvatar, size: 40)
+                            .id("avatar-\(session.user.id)-\(currentAvatar)-v\(avatarVersion)") // 强制刷新当头像URL或版本号变化时
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 3) {
                         Text(session.user.name)
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.system(size: 17, weight: .semibold))
                             .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                         
                         HStack(spacing: 4) {
@@ -679,26 +707,88 @@ struct ChatInterfaceView: View {
             Button(action: {
                 showingCoffeeInviteAlert = true
             }) {
-                Image(systemName: "cup.and.saucer.fill")
-                    .font(.system(size: 18))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.95, green: 0.92, blue: 0.88),
+                                    Color(red: 0.9, green: 0.85, blue: 0.8)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 36, height: 36)
+                    
+                    Image(systemName: "cup.and.saucer.fill")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                }
             }
-            .padding(.trailing, 8)
+            .padding(.trailing, 6)
             
             // AI Suggestions Button
             Button(action: {
                 loadAISuggestions(for: session.user)
                 showingAISuggestions = true
             }) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 18))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.95, green: 0.92, blue: 0.88),
+                                    Color(red: 0.9, green: 0.85, blue: 0.8)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 36, height: 36)
+                    
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                }
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color.white)
-        .shadow(color: Color.black.opacity(0.05), radius: 1, x: 0, y: 1)
+        .padding(.vertical, 14)
+        .background(
+            ZStack {
+                // 主背景
+                Color.white
+                
+                // 顶部渐变边框效果
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.98, green: 0.97, blue: 0.95).opacity(0.5),
+                        Color.white
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        )
+        .shadow(color: Color(red: 0.4, green: 0.3, blue: 0.2).opacity(0.08), radius: 8, x: 0, y: 2)
+        .overlay(
+            // 底部细线
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.3),
+                            Color(red: 0.85, green: 0.8, blue: 0.75).opacity(0.1)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(height: 1)
+                .offset(y: 0.5),
+            alignment: .bottom
+        )
     }
     
     private func formatMatchDate(_ date: Date) -> String {
@@ -753,7 +843,7 @@ struct ChatInterfaceView: View {
                 .textFieldStyle(PlainTextFieldStyle())
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                .background(Color.gray.opacity(0.1))
+                .background(Color(red: 0.95, green: 0.92, blue: 0.88))
                 .cornerRadius(20)
             
             Button(action: {
@@ -1276,7 +1366,7 @@ struct ChatInterfaceView: View {
         
         // 创建邀请消息
         let invitationMessage = ChatMessage(
-            content: "\(currentUser.name) invited you to a coffee chat",
+            content: "Coffee chat invitation",
             isFromUser: true,
             messageType: .coffeeChatInvitation,
             senderName: currentUser.name
@@ -2060,6 +2150,7 @@ struct ChatSessionRowView: View {
 // MARK: - Message Bubble View
 struct MessageBubbleView: View {
     let message: ChatMessage
+    let session: ChatSession
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var supabaseService: SupabaseService
     @State private var invitationStatus: CoffeeChatInvitation.InvitationStatus? = nil
@@ -2107,7 +2198,7 @@ struct MessageBubbleView: View {
                 .background(
                     message.isFromUser
                         ? Color(red: 0.4, green: 0.2, blue: 0.1)
-                        : Color.gray.opacity(0.1)
+                        : Color(red: 0.95, green: 0.92, blue: 0.88)
                 )
                 .cornerRadius(20, corners: message.isFromUser ? [.topLeft, .topRight, .bottomLeft] : [.topLeft, .topRight, .bottomRight])
             
@@ -2119,65 +2210,222 @@ struct MessageBubbleView: View {
     }
     
     private var coffeeChatInvitationBubble: some View {
-        VStack(alignment: .center, spacing: 12) {
-            // Envelope Icon
-            Image(systemName: "envelope.fill")
-                .font(.system(size: 40))
-                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-            
-            // Invitation Text
-            Text(message.content)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                .multilineTextAlignment(.center)
-            
-            // Action Buttons (only for receiver)
+        Group {
             if !message.isFromUser {
-                HStack(spacing: 12) {
-                    Button(action: {
-                        showingAcceptSheet = true
-                    }) {
-                        Text("Accept")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 10)
-                            .background(Color.green)
-                            .cornerRadius(20)
+                // 接收者：两行布局
+                VStack(alignment: .leading, spacing: 14) {
+                    // 第一行：信封图标 + 文字
+                    HStack(alignment: .center, spacing: 12) {
+                        // 小信封图标
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 0.9, green: 0.85, blue: 0.8),
+                                            Color(red: 0.85, green: 0.8, blue: 0.75)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 40, height: 40)
+                                .shadow(color: Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.15), radius: 4, x: 0, y: 2)
+                            
+                            Image(systemName: "envelope.fill")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        }
+                        
+                        // 邀请文字（显示发送者名字）
+                        Text("\(session.user.name) invited you to a coffee chat")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .lineLimit(2)
+                        
+                        Spacer()
                     }
                     
-                    Button(action: {
-                        let invitationId = getInvitationId()
-                        rejectCoffeeChatInvitation(invitationId: invitationId)
-                    }) {
-                        Text("Decline")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 10)
-                            .background(Color.red)
-                            .cornerRadius(20)
+                    // 第二行：两个按钮并排
+                    HStack(spacing: 10) {
+                        Button(action: {
+                            showingAcceptSheet = true
+                        }) {
+                            Text("Accept")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 40)
+                                .background(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 0.7, green: 0.55, blue: 0.4),
+                                            Color(red: 0.6, green: 0.45, blue: 0.3)
+                                        ],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .cornerRadius(20)
+                                .shadow(color: Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.4), radius: 5, x: 0, y: 2)
+                        }
+                        
+                        Button(action: {
+                            let invitationId = getInvitationId()
+                            rejectCoffeeChatInvitation(invitationId: invitationId)
+                        }) {
+                            Text("Decline")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(Color(red: 0.5, green: 0.4, blue: 0.3))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 40)
+                                .background(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 0.98, green: 0.96, blue: 0.94),
+                                            Color(red: 0.95, green: 0.92, blue: 0.88)
+                                        ],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .cornerRadius(20)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .stroke(
+                                            LinearGradient(
+                                                colors: [
+                                                    Color(red: 0.8, green: 0.7, blue: 0.6),
+                                                    Color(red: 0.7, green: 0.6, blue: 0.5)
+                                                ],
+                                                startPoint: .leading,
+                                                endPoint: .trailing
+                                            ),
+                                            lineWidth: 1.5
+                                        )
+                                )
+                                .shadow(color: Color(red: 0.4, green: 0.3, blue: 0.2).opacity(0.1), radius: 3, x: 0, y: 2)
+                        }
                     }
                 }
             } else {
-                // Status for sender
-                if let status = invitationStatus {
-                    Text(status == .accepted ? "Accepted" : status == .rejected ? "Declined" : "Pending")
-                        .font(.system(size: 12))
-                        .foregroundColor(status == .accepted ? .green : status == .rejected ? .red : .gray)
+                // 发送者：一行布局
+                HStack(alignment: .center, spacing: 12) {
+                    // 小信封图标
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.9, green: 0.85, blue: 0.8),
+                                        Color(red: 0.85, green: 0.8, blue: 0.75)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 40, height: 40)
+                            .shadow(color: Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.15), radius: 4, x: 0, y: 2)
+                        
+                        Image(systemName: "envelope.fill")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    }
+                    
+                    // 邀请文字
+                    Text("Coffee chat invitation")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    
+                    Spacer()
+                    
+                    // 状态文字
+                    if let status = invitationStatus {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: status == .accepted ? [
+                                            Color(red: 0.7, green: 0.55, blue: 0.4),
+                                            Color(red: 0.6, green: 0.45, blue: 0.3)
+                                        ] : [
+                                            Color(red: 0.6, green: 0.5, blue: 0.4),
+                                            Color(red: 0.5, green: 0.4, blue: 0.3)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 8, height: 8)
+                            
+                            Text(status == .accepted ? "Accepted" : status == .rejected ? "Declined" : "Pending")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(Color(red: 0.5, green: 0.4, blue: 0.3))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.98, green: 0.96, blue: 0.94),
+                                    Color(red: 0.95, green: 0.92, blue: 0.88)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .cornerRadius(14)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.5),
+                                            Color(red: 0.85, green: 0.8, blue: 0.75).opacity(0.3)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1
+                                )
+                        )
+                    }
                 }
             }
-            
-            Text(formatTime(message.timestamp))
-                .font(.system(size: 10))
-                .foregroundColor(.gray)
         }
-        .padding(20)
+        .padding(28)
         .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color.white)
-                .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
+            ZStack {
+                // 主背景
+                RoundedRectangle(cornerRadius: 24)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white,
+                                Color(red: 0.99, green: 0.98, blue: 0.97)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                
+                // 内阴影效果
+                RoundedRectangle(cornerRadius: 24)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.95, green: 0.92, blue: 0.88).opacity(0.6),
+                                Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.3)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.5
+                    )
+            }
         )
+        .shadow(color: Color(red: 0.4, green: 0.3, blue: 0.2).opacity(0.15), radius: 12, x: 0, y: 6)
+        .shadow(color: Color(red: 0.4, green: 0.3, blue: 0.2).opacity(0.08), radius: 4, x: 0, y: 2)
         .padding(.horizontal, 16)
         .sheet(isPresented: $showingAcceptSheet) {
             AcceptInvitationSheet(
@@ -2253,16 +2501,185 @@ struct AcceptInvitationSheet: View {
     
     var body: some View {
         NavigationView {
-            Form {
-                Section(header: Text("Schedule Details")) {
-                    DatePicker("Date & Time", selection: $selectedDate, displayedComponents: [.date, .hourAndMinute])
-                    
-                    TextField("Location", text: $locationText)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                    
-                    TextField("Notes (Optional)", text: $notesText, axis: .vertical)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .lineLimit(3...6)
+            ZStack {
+                // 背景
+                Color(red: 0.98, green: 0.97, blue: 0.95)
+                    .ignoresSafeArea()
+                
+                ScrollView {
+                    VStack(spacing: 24) {
+                        // 顶部装饰图标
+                        VStack(spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [
+                                                Color(red: 0.9, green: 0.85, blue: 0.8),
+                                                Color(red: 0.85, green: 0.8, blue: 0.75)
+                                            ],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 80, height: 80)
+                                    .shadow(color: Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.2), radius: 8, x: 0, y: 4)
+                                
+                                Image(systemName: "calendar.badge.plus")
+                                    .font(.system(size: 35, weight: .medium))
+                                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            }
+                            
+                            Text("Schedule Your Coffee Chat")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        }
+                        .padding(.top, 20)
+                        
+                        // 表单卡片
+                        VStack(alignment: .leading, spacing: 20) {
+                            // Date & Time
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "clock.fill")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                    
+                                    Text("Date & Time")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                }
+                                
+                                DatePicker("", selection: $selectedDate, displayedComponents: [.date, .hourAndMinute])
+                                    .datePickerStyle(.compact)
+                                    .labelsHidden()
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color(red: 0.98, green: 0.96, blue: 0.94))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(
+                                                LinearGradient(
+                                                    colors: [
+                                                        Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.5),
+                                                        Color(red: 0.85, green: 0.8, blue: 0.75).opacity(0.3)
+                                                    ],
+                                                    startPoint: .leading,
+                                                    endPoint: .trailing
+                                                ),
+                                                lineWidth: 1
+                                            )
+                                    )
+                            }
+                            
+                            // Location
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "mappin.circle.fill")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                    
+                                    Text("Location")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                }
+                                
+                                TextField("Enter location", text: $locationText)
+                                    .font(.system(size: 16))
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 14)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color(red: 0.98, green: 0.96, blue: 0.94))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(
+                                                LinearGradient(
+                                                    colors: [
+                                                        Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.5),
+                                                        Color(red: 0.85, green: 0.8, blue: 0.75).opacity(0.3)
+                                                    ],
+                                                    startPoint: .leading,
+                                                    endPoint: .trailing
+                                                ),
+                                                lineWidth: 1
+                                            )
+                                    )
+                            }
+                            
+                            // Notes
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "note.text")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                    
+                                    Text("Notes (Optional)")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                }
+                                
+                                TextField("Add any notes...", text: $notesText, axis: .vertical)
+                                    .font(.system(size: 16))
+                                    .lineLimit(3...6)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 14)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color(red: 0.98, green: 0.96, blue: 0.94))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(
+                                                LinearGradient(
+                                                    colors: [
+                                                        Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.5),
+                                                        Color(red: 0.85, green: 0.8, blue: 0.75).opacity(0.3)
+                                                    ],
+                                                    startPoint: .leading,
+                                                    endPoint: .trailing
+                                                ),
+                                                lineWidth: 1
+                                            )
+                                    )
+                            }
+                        }
+                        .padding(24)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.white,
+                                            Color(red: 0.99, green: 0.98, blue: 0.97)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .shadow(color: Color(red: 0.4, green: 0.3, blue: 0.2).opacity(0.12), radius: 12, x: 0, y: 6)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20)
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 0.95, green: 0.92, blue: 0.88).opacity(0.6),
+                                            Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.3)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1.5
+                                )
+                        )
+                        .padding(.horizontal, 20)
+                    }
+                    .padding(.bottom, 30)
                 }
             }
             .navigationTitle("Accept Invitation")
@@ -2272,12 +2689,15 @@ struct AcceptInvitationSheet: View {
                     Button("Cancel") {
                         onCancel()
                     }
+                    .foregroundColor(Color(red: 0.5, green: 0.4, blue: 0.3))
+                    .font(.system(size: 16, weight: .medium))
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Accept") {
                         onAccept()
                     }
-                    .fontWeight(.semibold)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                 }
             }
         }
