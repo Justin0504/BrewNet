@@ -878,18 +878,6 @@ struct CoreIdentityStep: View {
                         validateAndFormatLocation(newValue)
                     }
                 
-                // 地址格式提示
-                if !location.isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "info.circle")
-                            .font(.system(size: 10))
-                            .foregroundColor(.blue)
-                        Text("建议格式: 城市, 州, 国家 (例如: Austin, TX, USA)")
-                            .font(.system(size: 11))
-                            .foregroundColor(.blue.opacity(0.7))
-                    }
-                    .padding(.top, 4)
-                }
                 
                 // Show location error if any
                 if let error = locationService.locationError {

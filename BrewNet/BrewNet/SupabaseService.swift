@@ -3081,6 +3081,9 @@ extension SupabaseService {
     
     /// 更新用户最后活跃时间（heartbeat）
     func updateLastSeen(userId: String) async {
+        print("🔄 =========================================")
+        print("🔄 [Heartbeat] updateLastSeen() 被调用")
+        print("🔄 =========================================")
         do {
             let now = ISO8601DateFormatter().string(from: Date())
             let nowDate = Date()
@@ -3088,6 +3091,8 @@ extension SupabaseService {
             print("🔄 [Heartbeat] 开始更新 last_seen_at 和 is_online")
             print("   - 用户ID: \(userId)")
             print("   - 时间: \(now)")
+            print("   - 调用时间: \(nowDate)")
+            print("   - 当前线程: \(Thread.isMainThread ? "主线程" : "后台线程")")
             
             // 尝试更新 last_seen_at 和 is_online（如果字段存在）
             // 用户活跃时，应该同时更新 is_online 为 true
@@ -3602,12 +3607,24 @@ extension SupabaseService {
         if let timer = self.lastSeenUpdateTimer {
             // 确保 RunLoop 正在运行
             let runLoop = RunLoop.current
+            
+            // 先添加到 common mode（最重要，在滚动时也能触发）
             runLoop.add(timer, forMode: .common)
-            runLoop.add(timer, forMode: .default) // 同时添加到 default mode 确保触发
-            print("✅ [Heartbeat] Timer 已添加到 RunLoop")
+            print("✅ [Heartbeat] Timer 已添加到 RunLoop (.common mode)")
+            
+            // 也添加到 default mode（作为备用）
+            runLoop.add(timer, forMode: .default)
+            print("✅ [Heartbeat] Timer 已添加到 RunLoop (.default mode)")
+            
             print("   - RunLoop: \(runLoop)")
             print("   - 当前 mode: \(runLoop.currentMode?.rawValue ?? "unknown")")
-            print("   - Timer 已添加到 .common 和 .default mode")
+            
+            // 验证 Timer 是否真的被添加到 RunLoop
+            let timerIsValid = timer.isValid
+            print("   - Timer 是否有效: \(timerIsValid)")
+            if !timerIsValid {
+                print("❌ [Heartbeat] ⚠️⚠️⚠️ Timer 创建后立即失效！这不应该发生 ⚠️⚠️⚠️")
+            }
             
             // 强制触发 RunLoop 运行（如果还没有运行）
             if runLoop.currentMode == nil {
@@ -3634,19 +3651,35 @@ extension SupabaseService {
         print("   - Timer fireDate: \(self.lastSeenUpdateTimer?.fireDate ?? Date())")
         print("   - Timer timeInterval: \(self.lastSeenUpdateTimer?.timeInterval ?? 0)")
         
-        // 延迟验证 Timer 是否还在运行（5秒后检查）
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-            guard let self = self else { return }
-            if let timer = self.lastSeenUpdateTimer {
-                print("🔍 [Heartbeat] 5秒后验证 Timer 状态:")
-                print("   - Timer 是否有效: \(timer.isValid)")
-                print("   - Timer fireDate: \(timer.fireDate)")
-                print("   - 距离下次触发: \(timer.fireDate.timeIntervalSinceNow) 秒")
-                if !timer.isValid {
-                    print("❌ [Heartbeat] ⚠️⚠️⚠️ Timer 已失效！需要重新启动 ⚠️⚠️⚠️")
+        // 延迟验证 Timer 是否还在运行（5秒、30秒、60秒后检查）
+        for (delay, label) in [(5.0, "5秒"), (30.0, "30秒"), (60.0, "60秒")] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self = self else { return }
+                if let timer = self.lastSeenUpdateTimer {
+                    print("🔍 [Heartbeat] \(label)后验证 Timer 状态:")
+                    print("   - Timer 是否有效: \(timer.isValid)")
+                    print("   - Timer fireDate: \(timer.fireDate)")
+                    print("   - 距离下次触发: \(String(format: "%.1f", timer.fireDate.timeIntervalSinceNow)) 秒")
+                    print("   - 当前时间: \(Date())")
+                    print("   - currentHeartbeatUserId: \(self.currentHeartbeatUserId ?? "nil")")
+                    if !timer.isValid {
+                        print("❌ [Heartbeat] ⚠️⚠️⚠️ Timer 已失效！需要重新启动 ⚠️⚠️⚠️")
+                        // 如果 Timer 失效，尝试重新启动
+                        if let userId = self.currentHeartbeatUserId {
+                            print("🔄 [Heartbeat] 尝试重新启动 Timer...")
+                            self.startLastSeenHeartbeat(userId: userId, interval: 30)
+                        }
+                    } else {
+                        print("✅ [Heartbeat] Timer 仍然有效")
+                    }
+                } else {
+                    print("❌ [Heartbeat] ⚠️⚠️⚠️ Timer 为 nil！可能被释放了 ⚠️⚠️⚠️")
+                    // 如果 Timer 为 nil，尝试重新启动
+                    if let userId = self.currentHeartbeatUserId {
+                        print("🔄 [Heartbeat] Timer 为 nil，尝试重新启动...")
+                        self.startLastSeenHeartbeat(userId: userId, interval: 30)
+                    }
                 }
-            } else {
-                print("❌ [Heartbeat] ⚠️⚠️⚠️ Timer 为 nil！可能被释放了 ⚠️⚠️⚠️")
             }
         }
         
