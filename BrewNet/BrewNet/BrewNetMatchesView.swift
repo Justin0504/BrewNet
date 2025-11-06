@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreLocation
 
 // MARK: - BrewNet Matches View (New implementation with BrewNetProfile)
 struct BrewNetMatchesView: View {
@@ -1660,28 +1661,129 @@ struct BrewNetMatchesView: View {
         currentFilter = filter
         print("🔍 Applying filter: \(filter.hasActiveFilters() ? "Active" : "None")")
         
-        // 重新过滤当前profiles
+        // 重新过滤当前profiles（包括距离过滤）
         if let filter = currentFilter {
-            let filteredProfiles = profiles.filter { filter.matches($0) }
-            let filteredCount = profiles.count - filteredProfiles.count
-            
-            profiles = filteredProfiles
-            cachedProfiles = cachedProfiles.filter { filter.matches($0) }
-            
-            // 调整索引
-            if currentIndex >= profiles.count && !profiles.isEmpty {
-                currentIndex = 0
-            } else if profiles.isEmpty {
-                currentIndex = 0
-                // 如果没有匹配的profiles，尝试加载更多
-                if hasMoreProfiles {
-                    loadMoreProfiles()
+            Task {
+                // 如果有距离限制，需要异步计算距离
+                var filteredProfiles: [BrewNetProfile]
+                
+                if let maxDistance = filter.maxDistance {
+                    // 需要计算距离，异步处理
+                    filteredProfiles = await filterProfilesWithDistance(
+                        profiles: profiles,
+                        filter: filter,
+                        maxDistance: maxDistance
+                    )
+                } else {
+                    // 不需要距离计算，直接过滤
+                    filteredProfiles = profiles.filter { filter.matches($0) }
+                }
+                
+                let filteredCount = profiles.count - filteredProfiles.count
+                
+                await MainActor.run {
+                    profiles = filteredProfiles
+                    cachedProfiles = cachedProfiles.filter { filter.matches($0) }
+                    
+                    // 调整索引
+                    if currentIndex >= profiles.count && !profiles.isEmpty {
+                        currentIndex = 0
+                    } else if profiles.isEmpty {
+                        currentIndex = 0
+                        // 如果没有匹配的profiles，尝试加载更多
+                        if hasMoreProfiles {
+                            loadMoreProfiles()
+                        }
+                    }
+                    
+                    print("✅ Applied filter: \(filteredCount) profiles filtered out, \(profiles.count) remain")
+                    saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
+                }
+            }
+        }
+    }
+    
+    // 异步过滤profiles，包括距离计算
+    private func filterProfilesWithDistance(
+        profiles: [BrewNetProfile],
+        filter: MatchFilter,
+        maxDistance: Double
+    ) async -> [BrewNetProfile] {
+        guard let currentUser = authManager.currentUser else {
+            return profiles.filter { filter.matches($0) }
+        }
+        
+        // 获取当前用户的位置
+        var currentUserLocation: CLLocation? = nil
+        if let currentUserProfile = try? await supabaseService.getProfile(userId: currentUser.id) {
+            let brewNetProfile = currentUserProfile.toBrewNetProfile()
+            if let userLocationString = brewNetProfile.coreIdentity.location, !userLocationString.isEmpty {
+                // 使用LocationService获取当前用户位置的坐标
+                let locationService = LocationService.shared
+                await withCheckedContinuation { continuation in
+                    locationService.geocodeAddress(userLocationString) { location in
+                        currentUserLocation = location
+                        continuation.resume()
+                    }
+                }
+            }
+        }
+        
+        // 如果无法获取当前用户位置，无法进行距离过滤，返回基本过滤结果
+        guard let userLocation = currentUserLocation else {
+            print("⚠️ Cannot get current user location, skipping distance filter")
+            return profiles.filter { filter.matches($0) }
+        }
+        
+        var filteredProfiles: [BrewNetProfile] = []
+        let locationService = LocationService.shared
+        
+        // 并行处理所有profiles的距离计算
+        await withTaskGroup(of: (BrewNetProfile, Double?).self) { group in
+            for profile in profiles {
+                // 先进行基本过滤
+                guard filter.matches(profile) else { continue }
+                
+                group.addTask {
+                    // 计算距离
+                    guard let profileLocationString = profile.coreIdentity.location,
+                          !profileLocationString.isEmpty else {
+                        // 如果没有位置信息，保留（或者可以根据需求过滤掉）
+                        return (profile, nil)
+                    }
+                    
+                    var profileLocation: CLLocation? = nil
+                    await withCheckedContinuation { continuation in
+                        locationService.geocodeAddress(profileLocationString) { location in
+                            profileLocation = location
+                            continuation.resume()
+                        }
+                    }
+                    
+                    guard let location = profileLocation else {
+                        return (profile, nil)
+                    }
+                    
+                    let distance = locationService.calculateDistance(from: userLocation, to: location)
+                    return (profile, distance)
                 }
             }
             
-            print("✅ Applied filter: \(filteredCount) profiles filtered out, \(profiles.count) remain")
-            saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
+            // 收集结果并过滤
+            for await (profile, distance) in group {
+                if let distance = distance {
+                    // 有距离信息，检查是否在范围内
+                    if distance <= maxDistance {
+                        filteredProfiles.append(profile)
+                    }
+                } else {
+                    // 没有距离信息，保留（或者可以根据需求过滤掉）
+                    filteredProfiles.append(profile)
+                }
+            }
         }
+        
+        return filteredProfiles
     }
     
     // MARK: - Helper Methods
@@ -1772,6 +1874,7 @@ struct MatchFilter: Codable, Equatable {
     // 范围字段
     var minYearsOfExperience: Double?
     var maxYearsOfExperience: Double?
+    var maxDistance: Double? // 最大距离（公里），nil表示不限
     
     // 是否启用filter
     var isActive: Bool = false
@@ -1791,7 +1894,8 @@ struct MatchFilter: Codable, Equatable {
                !selectedSubIntentions.isEmpty ||
                !selectedIndustries.isEmpty ||
                minYearsOfExperience != nil ||
-               maxYearsOfExperience != nil
+               maxYearsOfExperience != nil ||
+               maxDistance != nil
     }
     
     func matches(_ profile: BrewNetProfile) -> Bool {
@@ -1880,6 +1984,15 @@ struct MatchFilter: Codable, Equatable {
             return false
         }
         
+        // 距离过滤（需要在实际应用中计算，这里只检查是否有location）
+        // 注意：距离计算是异步的，这里只做基本检查
+        // 实际的距离过滤应该在加载profiles时进行
+        if maxDistance != nil {
+            // 如果设置了距离限制，但profile没有location，可以考虑过滤掉
+            // 或者保留，让实际距离计算来决定
+            // 这里暂时保留，在应用filter时会进行实际距离计算
+        }
+        
         return true
     }
 }
@@ -1904,17 +2017,17 @@ struct MatchFilterView: View {
                     VStack(spacing: 24) {
                         // Header Icon
                         VStack(spacing: 12) {
-                            Image(systemName: "slider.horizontal.3")
+                Image(systemName: "slider.horizontal.3")
                                 .font(.system(size: 48, weight: .light))
-                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                            
-                            Text("Match Filter")
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                
+                Text("Match Filter")
                                 .font(.system(size: 28, weight: .bold))
-                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                            
-                            Text("Filter your matches by preferences")
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                
+                Text("Filter your matches by preferences")
                                 .font(.system(size: 15))
-                                .foregroundColor(.gray)
+                    .foregroundColor(.gray)
                         }
                         .padding(.top, 20)
                         
@@ -1996,16 +2109,17 @@ struct MatchFilterView: View {
                                 )
                             }
                             
-                            // 6. Industry (多选) - Professional相关
+                            // 6. Industry (多选) - Professional相关，使用IndustryOption与Profile对齐
                             FilterSection(title: "Industry") {
                                 MultiSelectFilter(
-                                    options: FeatureVocabularies.allIndustries,
+                                    options: IndustryOption.allCases.map { $0.rawValue },
                                     selected: $filter.selectedIndustries,
-                                    maxSelections: 5
+                                    maxSelections: 10
                                 )
                             }
                             
                             // 7. Skills (多选) - 高优先级，Professional相关
+                            // 使用FeatureVocabularies，与推荐系统对齐
                             FilterSection(title: "Skills") {
                                 MultiSelectFilter(
                                     options: FeatureVocabularies.allSkills,
@@ -2034,26 +2148,32 @@ struct MatchFilterView: View {
                             }
                             
                             // ========== Personal Preferences Section (低优先级) ==========
-                            // 10. Hobbies (多选)
+                            // 10. Hobbies (多选) - 使用ProfileOptions，与profile设置对齐
                             FilterSection(title: "Hobbies") {
                                 MultiSelectFilter(
-                                    options: FeatureVocabularies.allHobbies,
+                                    options: HobbiesOptions.allHobbies,
                                     selected: $filter.selectedHobbies,
                                     maxSelections: 10
                                 )
                             }
                             
-                            // 11. Values (多选)
+                            // 11. Values (多选) - 使用ProfileOptions，与profile设置对齐
                             FilterSection(title: "Values") {
                                 MultiSelectFilter(
-                                    options: FeatureVocabularies.allValues,
+                                    options: ValuesOptions.allValues,
                                     selected: $filter.selectedValues,
                                     maxSelections: 10
                                 )
                             }
                             
+                            // ========== Location Section (中优先级) ==========
+                            // 12. Maximum Distance (范围)
+                            FilterSection(title: "Maximum Distance") {
+                                DistanceFilter(maxDistance: $filter.maxDistance)
+                            }
+                            
                             // ========== Verification Section (低优先级) ==========
-                            // 12. Verified Status (单选)
+                            // 13. Verified Status (单选)
                             FilterSection(title: "Verified Status") {
                                 SingleSelectFilter(
                                     options: VerifiedStatus.allCases,
@@ -2069,7 +2189,7 @@ struct MatchFilterView: View {
                 
                 // Bottom Action Bar
                 VStack {
-                    Spacer()
+                Spacer()
                     VStack(spacing: 12) {
                         HStack(spacing: 12) {
                             // Reset Button
@@ -2300,6 +2420,104 @@ struct MultiSelectFilter: View {
                     .font(.system(size: 12))
                     .foregroundColor(.orange)
                     .padding(.top, 4)
+            }
+        }
+    }
+}
+
+// MARK: - Distance Filter
+struct DistanceFilter: View {
+    @Binding var maxDistance: Double?
+    @State private var distanceValue: String = ""
+    @State private var selectedPreset: DistancePreset? = nil
+    
+    enum DistancePreset: String, CaseIterable {
+        case km5 = "5 km"
+        case km10 = "10 km"
+        case km25 = "25 km"
+        case km50 = "50 km"
+        case km100 = "100 km"
+        case unlimited = "Unlimited"
+        
+        var kilometers: Double? {
+            switch self {
+            case .km5: return 5
+            case .km10: return 10
+            case .km25: return 25
+            case .km50: return 50
+            case .km100: return 100
+            case .unlimited: return nil
+            }
+        }
+        
+        var displayName: String {
+            return self.rawValue
+        }
+    }
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            // 预设选项
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                ForEach(DistancePreset.allCases, id: \.self) { preset in
+                    Button(action: {
+                        if selectedPreset == preset {
+                            selectedPreset = nil
+                            maxDistance = nil
+                            distanceValue = ""
+                        } else {
+                            selectedPreset = preset
+                            maxDistance = preset.kilometers
+                            distanceValue = preset.kilometers != nil ? String(format: "%.0f", preset.kilometers!) : ""
+                        }
+                    }) {
+                        HStack {
+                            Text(preset.displayName)
+                                .font(.system(size: 14))
+                                .foregroundColor(selectedPreset == preset ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                            
+                            Spacer()
+                            
+                            if selectedPreset == preset {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.white)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(
+                            selectedPreset == preset ?
+                            Color(red: 0.4, green: 0.2, blue: 0.1) :
+                            Color(red: 0.98, green: 0.97, blue: 0.95)
+                        )
+                        .cornerRadius(8)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            
+            // 自定义输入
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Custom Distance (km)")
+                    .font(.system(size: 13))
+                    .foregroundColor(.gray)
+                
+                TextField("Enter distance in km", text: $distanceValue)
+                    .keyboardType(.decimalPad)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+                    .cornerRadius(8)
+                    .onChange(of: distanceValue) { newValue in
+                        if let distance = Double(newValue), distance > 0 {
+                            maxDistance = distance
+                            selectedPreset = nil // 清除预设选择
+                        } else if newValue.isEmpty {
+                            maxDistance = nil
+                            selectedPreset = nil
+                        }
+                    }
             }
         }
     }
