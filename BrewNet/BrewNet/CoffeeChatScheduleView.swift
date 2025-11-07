@@ -9,6 +9,10 @@ struct CoffeeChatScheduleView: View {
     @State private var schedules: [CoffeeChatSchedule] = []
     @State private var isLoading = true
     
+    // Cached data to improve performance
+    @State private var cachedSchedules: [CoffeeChatSchedule] = []
+    @State private var lastSchedulesHash: Int = 0
+    
     var body: some View {
         NavigationView {
             ZStack {
@@ -18,7 +22,7 @@ struct CoffeeChatScheduleView: View {
                 if isLoading {
                     ProgressView()
                         .scaleEffect(1.2)
-                } else if schedules.isEmpty {
+                } else if cachedSchedules.isEmpty {
                     emptyStateView
                 } else {
                     scheduleListView
@@ -34,6 +38,9 @@ struct CoffeeChatScheduleView: View {
                 }
             }
             .onAppear {
+                // 先加载本地缓存，立即显示
+                loadCachedSchedules()
+                // 然后在后台加载最新数据
                 loadSchedules()
             }
             .refreshable {
@@ -42,6 +49,14 @@ struct CoffeeChatScheduleView: View {
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CoffeeChatScheduleUpdated"))) { _ in
                 print("🔄 [咖啡聊天] 收到日程更新通知，重新加载")
                 loadSchedules()
+            }
+            .onChange(of: schedules) { newSchedules in
+                // Update cache when schedules change
+                let newHash = newSchedules.map { "\($0.id)-\($0.hasMet)" }.joined().hashValue
+                if newHash != lastSchedulesHash {
+                    cachedSchedules = newSchedules
+                    lastSchedulesHash = newHash
+                }
             }
         }
     }
@@ -67,7 +82,7 @@ struct CoffeeChatScheduleView: View {
     private var scheduleListView: some View {
         ScrollView {
             LazyVStack(spacing: 16) {
-                ForEach(schedules) { schedule in
+                ForEach(cachedSchedules) { schedule in
                     ScheduleCardView(schedule: schedule, schedules: $schedules)
                         .environmentObject(supabaseService)
                         .environmentObject(authManager)
@@ -76,6 +91,18 @@ struct CoffeeChatScheduleView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 20)
+        }
+    }
+    
+    private func loadCachedSchedules() {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        // 从本地缓存加载数据
+        if let cached = LocalCacheManager.shared.loadChatsData(userId: currentUser.id) {
+            schedules = cached.schedules
+            cachedSchedules = cached.schedules
+            isLoading = false
+            print("✅ [咖啡聊天] 已从缓存加载数据：日程数 = \(cached.schedules.count)")
         }
     }
     
@@ -89,13 +116,32 @@ struct CoffeeChatScheduleView: View {
         print("🔄 [咖啡聊天] 开始加载日程")
         print("🔄 [咖啡聊天] 当前用户ID: \(currentUser.id)")
         print("🔄 [咖啡聊天] 当前用户ID类型: \(type(of: currentUser.id))")
-        isLoading = true
+        
+        // 如果没有缓存，显示 loading
+        if cachedSchedules.isEmpty {
+            isLoading = true
+        }
+        
         Task {
             do {
                 let fetchedSchedules = try await supabaseService.getCoffeeChatSchedules(userId: currentUser.id)
                 await MainActor.run {
                     print("📊 [咖啡聊天] 更新前 schedules.count = \(schedules.count)")
                     schedules = fetchedSchedules
+                    
+                    // Update cache only if data changed
+                    let newHash = fetchedSchedules.map { "\($0.id)-\($0.hasMet)" }.joined().hashValue
+                    if newHash != lastSchedulesHash {
+                        cachedSchedules = fetchedSchedules
+                        lastSchedulesHash = newHash
+                    }
+                    
+                    // 保存到本地缓存
+                    LocalCacheManager.shared.saveChatsData(
+                        userId: currentUser.id,
+                        schedules: fetchedSchedules
+                    )
+                    
                     print("📊 [咖啡聊天] 更新后 schedules.count = \(schedules.count)")
                     isLoading = false
                     print("✅ [咖啡聊天] 日程加载完成，共 \(fetchedSchedules.count) 条，isLoading = \(isLoading)")

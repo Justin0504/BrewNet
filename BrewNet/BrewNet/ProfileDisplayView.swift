@@ -1,6 +1,182 @@
 import SwiftUI
 import PhotosUI
 
+// MARK: - Local Cache Manager
+class LocalCacheManager {
+    static let shared = LocalCacheManager()
+    private let userDefaults = UserDefaults.standard
+    
+    private init() {}
+    
+    // MARK: - Credit View Cache
+    func saveCreditData(userId: String, credits: Int, history: [CoffeeChatRecord]) {
+        let key = "credit_cache_\(userId)"
+        let data = CreditCacheData(credits: credits, history: history, timestamp: Date())
+        if let encoded = try? JSONEncoder().encode(data) {
+            userDefaults.set(encoded, forKey: key)
+            print("💾 [Cache] 已保存 Credit 数据到本地缓存")
+        }
+    }
+    
+    func loadCreditData(userId: String) -> CreditCacheData? {
+        let key = "credit_cache_\(userId)"
+        guard let data = userDefaults.data(forKey: key),
+              let decoded = try? JSONDecoder().decode(CreditCacheData.self, from: data) else {
+            return nil
+        }
+        
+        // 检查缓存是否过期（24小时）
+        if let timestamp = decoded.timestamp,
+           Date().timeIntervalSince(timestamp) > 86400 {
+            print("⏰ [Cache] Credit 缓存已过期")
+            return nil
+        }
+        
+        print("📦 [Cache] 从本地缓存加载 Credit 数据")
+        return decoded
+    }
+    
+    // MARK: - Redeem View Cache (Optimized)
+    func saveRedeemData(userId: String, credits: Int, rewards: [Reward], redemptions: [RedemptionRecord], coffeeRewards: [Reward]? = nil, membershipRewards: [Reward]? = nil) {
+        let key = "redeem_cache_\(userId)"
+        let data = RedeemCacheData(
+            credits: credits,
+            rewards: rewards,
+            redemptions: redemptions,
+            coffeeRewards: coffeeRewards,
+            membershipRewards: membershipRewards,
+            timestamp: Date(),
+            version: 2 // 缓存版本号
+        )
+        if let encoded = try? JSONEncoder().encode(data) {
+            userDefaults.set(encoded, forKey: key)
+            print("💾 [Cache] 已保存 Redeem 数据到本地缓存 (版本 2)")
+        }
+    }
+    
+    func loadRedeemData(userId: String) -> RedeemCacheData? {
+        let key = "redeem_cache_\(userId)"
+        guard let data = userDefaults.data(forKey: key),
+              let decoded = try? JSONDecoder().decode(RedeemCacheData.self, from: data) else {
+            return nil
+        }
+        
+        // 检查缓存版本，旧版本需要重新加载
+        if decoded.version < 2 {
+            print("⚠️ [Cache] Redeem 缓存版本过旧，需要更新")
+            return nil
+        }
+        
+        // 检查缓存是否过期（奖励数据 12 小时，兑换记录 1 小时）
+        if let timestamp = decoded.timestamp {
+            let timeSinceCache = Date().timeIntervalSince(timestamp)
+            // 如果超过 12 小时，认为缓存过期
+            if timeSinceCache > 43200 {
+                print("⏰ [Cache] Redeem 缓存已过期 (\(Int(timeSinceCache/3600)) 小时前)")
+                return nil
+            }
+            print("📦 [Cache] 从本地缓存加载 Redeem 数据 (\(Int(timeSinceCache/60)) 分钟前)")
+        }
+        
+        return decoded
+    }
+    
+    // 快速更新积分（不更新其他数据）
+    func updateRedeemCredits(userId: String, credits: Int) {
+        let key = "redeem_cache_\(userId)"
+        guard let data = userDefaults.data(forKey: key),
+              var decoded = try? JSONDecoder().decode(RedeemCacheData.self, from: data) else {
+            return
+        }
+        
+        // 只更新积分，保持其他数据不变
+        let updatedData = RedeemCacheData(
+            credits: credits,
+            rewards: decoded.rewards,
+            redemptions: decoded.redemptions,
+            coffeeRewards: decoded.coffeeRewards,
+            membershipRewards: decoded.membershipRewards,
+            timestamp: decoded.timestamp, // 保持原时间戳
+            version: decoded.version
+        )
+        
+        if let encoded = try? JSONEncoder().encode(updatedData) {
+            userDefaults.set(encoded, forKey: key)
+            print("💾 [Cache] 已快速更新积分缓存: \(credits)")
+        }
+    }
+    
+    // MARK: - Chats View Cache
+    func saveChatsData(userId: String, schedules: [CoffeeChatSchedule]) {
+        let key = "chats_cache_\(userId)"
+        let cacheData = ChatsCacheData(schedules: schedules, timestamp: Date())
+        if let encoded = try? JSONEncoder().encode(cacheData) {
+            userDefaults.set(encoded, forKey: key)
+            print("💾 [Cache] 已保存 Chats 数据到本地缓存")
+        }
+    }
+    
+    func loadChatsData(userId: String) -> ChatsCacheData? {
+        let key = "chats_cache_\(userId)"
+        guard let data = userDefaults.data(forKey: key),
+              let decoded = try? JSONDecoder().decode(ChatsCacheData.self, from: data) else {
+            return nil
+        }
+        
+        // 检查缓存是否过期（24小时）
+        if let timestamp = decoded.timestamp,
+           Date().timeIntervalSince(timestamp) > 86400 {
+            print("⏰ [Cache] Chats 缓存已过期")
+            return nil
+        }
+        
+        print("📦 [Cache] 从本地缓存加载 Chats 数据")
+        return decoded
+    }
+    
+    // MARK: - Clear Cache
+    func clearCache(userId: String) {
+        userDefaults.removeObject(forKey: "credit_cache_\(userId)")
+        userDefaults.removeObject(forKey: "redeem_cache_\(userId)")
+        userDefaults.removeObject(forKey: "chats_cache_\(userId)")
+        print("🗑️ [Cache] 已清除用户缓存")
+    }
+}
+
+// MARK: - Chats Cache Data Model
+struct ChatsCacheData: Codable {
+    let schedules: [CoffeeChatSchedule]
+    let timestamp: Date?
+}
+
+// MARK: - Cache Data Models
+struct CreditCacheData: Codable {
+    let credits: Int
+    let history: [CoffeeChatRecord]
+    let timestamp: Date?
+}
+
+struct RedeemCacheData: Codable {
+    let credits: Int
+    let rewards: [Reward]
+    let redemptions: [RedemptionRecord]
+    let coffeeRewards: [Reward]? // 预过滤的咖啡奖励
+    let membershipRewards: [Reward]? // 预过滤的会员奖励
+    let timestamp: Date?
+    let version: Int // 缓存版本号
+    
+    // 为了兼容旧版本缓存
+    init(credits: Int, rewards: [Reward], redemptions: [RedemptionRecord], coffeeRewards: [Reward]? = nil, membershipRewards: [Reward]? = nil, timestamp: Date?, version: Int = 1) {
+        self.credits = credits
+        self.rewards = rewards
+        self.redemptions = redemptions
+        self.coffeeRewards = coffeeRewards
+        self.membershipRewards = membershipRewards
+        self.timestamp = timestamp
+        self.version = version
+    }
+}
+
 struct ProfileDisplayView: View {
     @State var profile: BrewNetProfile
     var onEditProfile: (() -> Void)?
@@ -2283,6 +2459,10 @@ struct PointsSystemView: View {
     @State private var coffeeChatHistory: [CoffeeChatRecord] = []
     @State private var isLoading = true
     
+    // Cached data to improve performance
+    @State private var cachedHistory: [CoffeeChatRecord] = []
+    @State private var lastHistoryHash: Int = 0
+    
     var body: some View {
         NavigationView {
             ZStack {
@@ -2321,7 +2501,7 @@ struct PointsSystemView: View {
                                     .font(.system(size: 18, weight: .bold))
                                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                                 
-                                if coffeeChatHistory.isEmpty {
+                                if cachedHistory.isEmpty {
                                     VStack(spacing: 12) {
                                         Image(systemName: "cup.and.saucer.fill")
                                             .font(.system(size: 40))
@@ -2333,9 +2513,12 @@ struct PointsSystemView: View {
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 40)
                                 } else {
-                                    ForEach(coffeeChatHistory) { record in
-                                        CoffeeChatRecordRow(record: record)
-                                            .environmentObject(supabaseService)
+                                    LazyVStack(spacing: 12) {
+                                        ForEach(cachedHistory) { record in
+                                            CoffeeChatRecordRow(record: record)
+                                                .environmentObject(supabaseService)
+                                                .id("credit-record-\(record.id)")
+                                        }
                                     }
                                 }
                             }
@@ -2376,6 +2559,9 @@ struct PointsSystemView: View {
                 }
             }
             .onAppear {
+                // 先加载本地缓存，立即显示
+                loadCachedData()
+                // 然后在后台加载最新数据
                 loadPointsData()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CoffeeChatScheduleUpdated"))) { _ in
@@ -2386,6 +2572,27 @@ struct PointsSystemView: View {
                 print("🔄 [Credit] 收到积分更新通知，重新加载")
                 loadPointsData()
             }
+            .onChange(of: coffeeChatHistory) { newHistory in
+                // Update cache when history changes
+                let newHash = newHistory.map { $0.id }.joined().hashValue
+                if newHash != lastHistoryHash {
+                    cachedHistory = newHistory
+                    lastHistoryHash = newHash
+                }
+            }
+        }
+    }
+    
+    private func loadCachedData() {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        // 从本地缓存加载数据
+        if let cached = LocalCacheManager.shared.loadCreditData(userId: currentUser.id) {
+            totalCredits = cached.credits
+            coffeeChatHistory = cached.history
+            cachedHistory = cached.history
+            isLoading = false
+            print("✅ [Credit] 已从缓存加载数据：积分 = \(cached.credits), 记录数 = \(cached.history.count)")
         }
     }
     
@@ -2393,6 +2600,11 @@ struct PointsSystemView: View {
         guard let currentUser = authManager.currentUser else {
             isLoading = false
             return
+        }
+        
+        // 如果没有缓存，显示 loading
+        if cachedHistory.isEmpty {
+            isLoading = true
         }
         
         Task {
@@ -2446,6 +2658,21 @@ struct PointsSystemView: View {
                 await MainActor.run {
                     totalCredits = credits // 使用数据库中的 credits
                     coffeeChatHistory = records
+                    
+                    // Update cache only if data changed
+                    let newHash = records.map { $0.id }.joined().hashValue
+                    if newHash != lastHistoryHash {
+                        cachedHistory = records
+                        lastHistoryHash = newHash
+                    }
+                    
+                    // 保存到本地缓存
+                    LocalCacheManager.shared.saveCreditData(
+                        userId: currentUser.id,
+                        credits: credits,
+                        history: records
+                    )
+                    
                     isLoading = false
                     print("✅ [Credit] 加载完成：总积分 = \(credits), 记录数 = \(records.count)")
                 }
@@ -2460,7 +2687,7 @@ struct PointsSystemView: View {
 }
 
 // MARK: - Coffee Chat Record
-struct CoffeeChatRecord: Identifiable, Codable {
+struct CoffeeChatRecord: Identifiable, Codable, Equatable {
     let id: String
     let partnerId: String
     let partnerName: String
@@ -2469,7 +2696,7 @@ struct CoffeeChatRecord: Identifiable, Codable {
     let pointsEarned: Int
     let status: CoffeeChatStatus
     
-    enum CoffeeChatStatus: String, Codable {
+    enum CoffeeChatStatus: String, Codable, Equatable {
         case completed = "completed"
         case pending = "pending"
     }
@@ -2615,77 +2842,231 @@ struct RedemptionSystemView: View {
     @State private var isLoading = true
     @State private var refreshID = UUID() // 用于强制刷新 toolbar
     
+    // Cached filtered rewards to improve performance
+    @State private var cachedCoffeeRewards: [Reward] = []
+    @State private var cachedMembershipRewards: [Reward] = []
+    @State private var lastRewardsHash: Int = 0 // 用于检测奖励是否变化
+    
+    // Cached rewards for better performance
+    private var coffeeRewards: [Reward] {
+        cachedCoffeeRewards
+    }
+    
+    private var membershipRewards: [Reward] {
+        cachedMembershipRewards
+    }
+    
+    private func updateCachedRewards() {
+        // 使用哈希值快速检测变化，避免不必要的过滤操作
+        let currentHash = availableRewards.map { $0.id }.joined().hashValue
+        
+        // 如果奖励数组没变化，跳过更新
+        if currentHash == lastRewardsHash && !cachedCoffeeRewards.isEmpty {
+            return
+        }
+        
+        lastRewardsHash = currentHash
+        
+        // 使用并行过滤提高性能
+        let coffeeFilter: (Reward) -> Bool = { reward in
+            reward.category == .coffee || reward.name.lowercased().contains("coffee")
+        }
+        
+        let membershipFilter: (Reward) -> Bool = { reward in
+            reward.name.lowercased().contains("premium") || 
+            reward.name.lowercased().contains("ultimate") ||
+            reward.name.lowercased().contains("membership")
+        }
+        
+        // 只过滤一次，然后分别提取
+        let newCoffeeRewards = availableRewards.filter(coffeeFilter)
+        let newMembershipRewards = availableRewards.filter(membershipFilter)
+        
+        // 使用 Set 进行快速比较
+        let coffeeIds = Set(newCoffeeRewards.map { $0.id })
+        let cachedCoffeeIds = Set(cachedCoffeeRewards.map { $0.id })
+        
+        let membershipIds = Set(newMembershipRewards.map { $0.id })
+        let cachedMembershipIds = Set(cachedMembershipRewards.map { $0.id })
+        
+        // 只在真正变化时更新
+        if coffeeIds != cachedCoffeeIds {
+            cachedCoffeeRewards = newCoffeeRewards
+        }
+        
+        if membershipIds != cachedMembershipIds {
+            cachedMembershipRewards = newMembershipRewards
+        }
+    }
+    
+    // 使用 @ViewBuilder 和缓存优化
+    @ViewBuilder
+    private var availableGiftSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Available Gift")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            
+            coffeeVouchersSection
+            
+            Divider()
+                .padding(.vertical, 8)
+            
+            membershipSection
+            
+            Divider()
+                .padding(.vertical, 8)
+            
+            cashOutSection
+        }
+        .padding(20)
+        .background(Color.white)
+        .cornerRadius(16)
+        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+    }
+    
+    @ViewBuilder
+    private var coffeeVouchersSection: some View {
+        DisclosureGroup {
+            if coffeeRewards.isEmpty {
+                emptyStateView(
+                    icon: "cup.and.saucer.fill",
+                    message: "No coffee vouchers available"
+                )
+            } else {
+                LazyVStack(spacing: 12) {
+                    ForEach(coffeeRewards, id: \.id) { reward in
+                        RewardCard(reward: reward, userPoints: totalCredits) {
+                            redeemReward(reward)
+                        }
+                        .equatable() // 使用 Equatable 优化，避免不必要的重绘
+                    }
+                }
+            }
+        } label: {
+            sectionLabel(icon: "cup.and.saucer.fill", title: "Coffee Vouchers")
+        }
+        .id("coffee-section-\(cachedCoffeeRewards.count)")
+    }
+    
+    @ViewBuilder
+    private var membershipSection: some View {
+        DisclosureGroup {
+            if membershipRewards.isEmpty {
+                emptyStateView(
+                    icon: "crown.fill",
+                    message: "No membership options available"
+                )
+            } else {
+                LazyVStack(spacing: 12) {
+                    ForEach(membershipRewards, id: \.id) { reward in
+                        RewardCard(reward: reward, userPoints: totalCredits) {
+                            redeemReward(reward)
+                        }
+                        .equatable() // 使用 Equatable 优化，避免不必要的重绘
+                    }
+                }
+            }
+        } label: {
+            sectionLabel(icon: "crown.fill", title: "BrewNet membership")
+        }
+        .id("membership-section-\(cachedMembershipRewards.count)")
+    }
+    
+    private var cashOutSection: some View {
+        DisclosureGroup {
+            emptyStateView(
+                icon: "dollarsign.circle.fill",
+                message: "Cash out feature coming soon"
+            )
+        } label: {
+            sectionLabel(icon: "dollarsign.circle.fill", title: "Cash Out")
+        }
+        .id("cashout-section")
+    }
+    
+    private func emptyStateView(icon: String, message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 32))
+                .foregroundColor(.gray.opacity(0.5))
+            Text(message)
+                .font(.system(size: 14))
+                .foregroundColor(.gray)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+    }
+    
+    private func sectionLabel(icon: String, title: String) -> some View {
+        HStack {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+            Text(title)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            Spacer()
+        }
+    }
+    
+    @ViewBuilder
+    private var redemptionHistorySection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("My Redemption History")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            
+            if myRedemptions.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "list.bullet")
+                        .font(.system(size: 40))
+                        .foregroundColor(.gray.opacity(0.5))
+                    Text("No redemption history")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 40)
+            } else {
+                LazyVStack(spacing: 12) {
+                    ForEach(myRedemptions, id: \.id) { redemption in
+                        RedemptionRecordRow(record: redemption)
+                    }
+                }
+            }
+        }
+        .padding(20)
+        .background(Color.white)
+        .cornerRadius(16)
+        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+    }
+    
     var body: some View {
         NavigationView {
             ZStack {
                 Color(red: 0.98, green: 0.97, blue: 0.95)
                     .ignoresSafeArea()
                 
-                if isLoading {
-                    ProgressView()
-                        .scaleEffect(1.2)
-                } else {
-                    ScrollView {
-                        VStack(spacing: 24) {
-                            // Available Rewards
-                            VStack(alignment: .leading, spacing: 16) {
-                                Text("Available Credit")
-                                    .font(.system(size: 18, weight: .bold))
-                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                                
-                                if availableRewards.isEmpty {
-                                    VStack(spacing: 12) {
-                                        Image(systemName: "gift.fill")
-                                            .font(.system(size: 40))
-                                            .foregroundColor(.gray.opacity(0.5))
-                                        Text("No credit available")
-                                            .font(.system(size: 14))
-                                            .foregroundColor(.gray)
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 40)
-                                } else {
-                                    ForEach(availableRewards) { reward in
-                                        RewardCard(reward: reward, userPoints: totalCredits) {
-                                            redeemReward(reward)
-                                        }
-                                    }
-                                }
-                            }
-                            .padding(20)
-                            .background(Color.white)
-                            .cornerRadius(16)
-                            .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
-                            
-                            // My Redemptions
-                            VStack(alignment: .leading, spacing: 16) {
-                                Text("My Redemption History")
-                                    .font(.system(size: 18, weight: .bold))
-                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                                
-                                if myRedemptions.isEmpty {
-                                    VStack(spacing: 12) {
-                                        Image(systemName: "list.bullet")
-                                            .font(.system(size: 40))
-                                            .foregroundColor(.gray.opacity(0.5))
-                                        Text("No redemption history")
-                                            .font(.system(size: 14))
-                                            .foregroundColor(.gray)
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 40)
-                                } else {
-                                    ForEach(myRedemptions) { redemption in
-                                        RedemptionRecordRow(record: redemption)
-                                    }
-                                }
-                            }
-                            .padding(20)
-                            .background(Color.white)
-                            .cornerRadius(16)
-                            .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+                ScrollView {
+                    VStack(spacing: 24) {
+                        availableGiftSection
+                        redemptionHistorySection
+                    }
+                    .padding(16)
+                }
+                .overlay {
+                    // 只在真正需要时显示 loading（没有缓存且正在加载）
+                    if isLoading && cachedCoffeeRewards.isEmpty && cachedMembershipRewards.isEmpty && myRedemptions.isEmpty {
+                        VStack(spacing: 20) {
+                            ProgressView()
+                                .scaleEffect(1.2)
+                            Text("Loading...")
+                                .font(.system(size: 14))
+                                .foregroundColor(.gray)
                         }
-                        .padding(16)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(red: 0.98, green: 0.97, blue: 0.95).opacity(0.9))
                     }
                 }
             }
@@ -2718,16 +3099,72 @@ struct RedemptionSystemView: View {
                 }
             }
             .onAppear {
-                loadRedemptionData()
+                // 立即在主线程加载缓存，确保 UI 快速响应
+                Task { @MainActor in
+                    loadCachedRedeemData()
+                    // 延迟一点再加载最新数据，让 UI 先渲染
+                    try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 秒
+                    loadRedemptionData()
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CoffeeChatScheduleUpdated"))) { _ in
                 print("🔄 [Redeem] 收到日程更新通知，重新加载积分")
                 loadRedemptionData()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserCreditsUpdated"))) { _ in
-                print("🔄 [Redeem] 收到积分更新通知，重新加载")
-                loadRedemptionData()
+                print("🔄 [Redeem] 收到积分更新通知，快速更新积分")
+                // 只更新积分，不重新加载所有数据
+                Task {
+                    guard let currentUser = authManager.currentUser else { return }
+                    do {
+                        let credits = try await supabaseService.getUserCredits(userId: currentUser.id)
+                        await MainActor.run {
+                            totalCredits = credits
+                            refreshID = UUID()
+                            // 快速更新缓存中的积分
+                            LocalCacheManager.shared.updateRedeemCredits(userId: currentUser.id, credits: credits)
+                            print("✅ [Redeem] 积分已快速更新: \(credits)")
+                        }
+                    } catch {
+                        print("⚠️ [Redeem] 快速更新积分失败: \(error.localizedDescription)")
+                    }
+                }
             }
+            .onChange(of: availableRewards) { newRewards in
+                // 使用哈希值快速检测是否真的需要更新
+                let newHash = newRewards.map { $0.id }.joined().hashValue
+                if newHash != lastRewardsHash {
+                    // 只在真正变化时更新
+                    updateCachedRewards()
+                }
+            }
+        }
+    }
+    
+    private func loadCachedRedeemData() {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        // 从本地缓存加载数据（同步操作，立即执行）
+        if let cached = LocalCacheManager.shared.loadRedeemData(userId: currentUser.id) {
+            // 批量更新状态，减少视图重建次数
+            totalCredits = cached.credits
+            availableRewards = cached.rewards
+            myRedemptions = cached.redemptions
+            
+            // 如果缓存中有预过滤的奖励，直接使用，避免重新过滤
+            if let cachedCoffee = cached.coffeeRewards, let cachedMembership = cached.membershipRewards {
+                cachedCoffeeRewards = cachedCoffee
+                cachedMembershipRewards = cachedMembership
+            } else {
+                // 如果没有预过滤数据，执行过滤（但不在主线程阻塞）
+                updateCachedRewards()
+            }
+            
+            // 立即设置加载完成，让 UI 显示内容
+            isLoading = false
+        } else {
+            // 没有缓存时，保持 loading 状态
+            isLoading = true
         }
     }
     
@@ -2737,65 +3174,81 @@ struct RedemptionSystemView: View {
             return
         }
         
+        // 如果没有缓存，显示 loading
+        if availableRewards.isEmpty && myRedemptions.isEmpty {
+            isLoading = true
+        }
+        
         Task {
             do {
-                // 获取所有已 met 的 coffee chat schedules（与 Credit 板块同步）
-                let allSchedules = try await supabaseService.getCoffeeChatSchedules(userId: currentUser.id)
-                print("🔄 [Redeem] 获取到 \(allSchedules.count) 个 schedules")
+                // 并行加载数据以提高性能（移除不必要的 schedule 获取）
+                async let creditsTask = supabaseService.getUserCredits(userId: currentUser.id)
+                async let rewardsTask: [Reward] = {
+                    do {
+                        return try await supabaseService.getAvailableRewards()
+                    } catch {
+                        print("⚠️ [Redeem] 获取奖励失败: \(error.localizedDescription)")
+                        return []
+                    }
+                }()
+                async let redemptionsTask: [RedemptionRecord] = {
+                    do {
+                        return try await supabaseService.getUserRedemptions(userId: currentUser.id)
+                    } catch {
+                        print("⚠️ [Redeem] 获取兑换记录失败: \(error.localizedDescription)")
+                        return []
+                    }
+                }()
                 
-                let metSchedules = allSchedules.filter { $0.hasMet }
-                print("🔄 [Redeem] 其中 \(metSchedules.count) 个已 met")
+                // 等待所有任务完成
+                let credits = try await creditsTask
+                let rewards = await rewardsTask
+                let redemptions = await redemptionsTask
                 
-                // 打印每个 schedule 的详细信息
-                for schedule in allSchedules {
-                    print("📅 [Redeem] Schedule: \(schedule.participantName), hasMet: \(schedule.hasMet)")
-                }
-                
-                // 从数据库获取 credits
-                let credits = try await supabaseService.getUserCredits(userId: currentUser.id)
-                print("✅ [Redeem] 从数据库获取 credits: \(credits)")
-                
-                // 先更新积分，即使获取奖励失败也不影响积分显示
+                // 批量更新所有状态，减少视图重建
                 await MainActor.run {
-                    let oldTotal = totalCredits
-                    print("🔄 [Redeem] 准备更新 totalCredits: \(oldTotal) -> \(credits)")
+                    // 只在数据真正变化时更新，避免不必要的重绘
+                    var needsUpdate = false
                     
-                    totalCredits = credits
-                    refreshID = UUID() // 更新 refreshID 以强制刷新 toolbar
+                    if totalCredits != credits {
+                        totalCredits = credits
+                        refreshID = UUID()
+                        needsUpdate = true
+                        // 快速更新缓存中的积分
+                        LocalCacheManager.shared.updateRedeemCredits(userId: currentUser.id, credits: credits)
+                    }
                     
-                    print("✅ [Redeem] 积分已更新：totalCredits = \(totalCredits)")
-                    print("✅ [Redeem] UI 应该显示: \(totalCredits) credits")
-                    print("✅ [Redeem] refreshID 已更新: \(refreshID)")
-                }
-                
-                // 尝试获取奖励和兑换记录，即使失败也不影响积分显示
-                var rewards: [Reward] = []
-                var redemptions: [RedemptionRecord] = []
-                
-                do {
-                    rewards = try await supabaseService.getAvailableRewards()
-                    print("✅ [Redeem] 成功获取 \(rewards.count) 个奖励")
-                } catch {
-                    print("⚠️ [Redeem] 获取奖励失败（不影响积分显示）: \(error.localizedDescription)")
-                    // 如果 rewards 表不存在，使用空数组
-                    rewards = []
-                }
-                
-                do {
-                    redemptions = try await supabaseService.getUserRedemptions(userId: currentUser.id)
-                    print("✅ [Redeem] 成功获取 \(redemptions.count) 个兑换记录")
-                } catch {
-                    print("⚠️ [Redeem] 获取兑换记录失败（不影响积分显示）: \(error.localizedDescription)")
-                    // 如果 redemptions 表不存在，使用空数组
-                    redemptions = []
-                }
-                
-                await MainActor.run {
-                    availableRewards = rewards
-                    myRedemptions = redemptions
+                    // 使用 Set 比较，只在真正变化时更新
+                    let newRewardIds = Set(rewards.map { $0.id })
+                    let currentRewardIds = Set(availableRewards.map { $0.id })
+                    
+                    if newRewardIds != currentRewardIds {
+                        availableRewards = rewards
+                        updateCachedRewards()
+                        needsUpdate = true
+                    }
+                    
+                    let newRedemptionIds = Set(redemptions.map { $0.id })
+                    let currentRedemptionIds = Set(myRedemptions.map { $0.id })
+                    
+                    if newRedemptionIds != currentRedemptionIds {
+                        myRedemptions = redemptions
+                        needsUpdate = true
+                    }
+                    
+                    // 只在有变化时保存缓存
+                    if needsUpdate {
+                        LocalCacheManager.shared.saveRedeemData(
+                            userId: currentUser.id,
+                            credits: totalCredits,
+                            rewards: rewards,
+                            redemptions: redemptions,
+                            coffeeRewards: cachedCoffeeRewards,
+                            membershipRewards: cachedMembershipRewards
+                        )
+                    }
+                    
                     isLoading = false
-                    
-                    print("✅ [Redeem] 加载完成：totalCredits = \(totalCredits), 记录数 = \(metSchedules.count)")
                 }
             } catch {
                 print("❌ Failed to load redemption data: \(error.localizedDescription)")
@@ -2822,7 +3275,7 @@ struct RedemptionSystemView: View {
 }
 
 // MARK: - Reward Model
-struct Reward: Identifiable, Codable {
+struct Reward: Identifiable, Codable, Equatable {
     let id: String
     let name: String
     let description: String
@@ -2830,7 +3283,7 @@ struct Reward: Identifiable, Codable {
     let category: RewardCategory
     let imageUrl: String?
     
-    enum RewardCategory: String, Codable {
+    enum RewardCategory: String, Codable, Equatable {
         case coffee = "coffee"
         case gift = "gift"
         case other = "other"
@@ -2838,13 +3291,20 @@ struct Reward: Identifiable, Codable {
 }
 
 // MARK: - Reward Card
-struct RewardCard: View {
+struct RewardCard: View, Equatable {
     let reward: Reward
     let userPoints: Int
     let onRedeem: () -> Void
     
     private var canRedeem: Bool {
         userPoints >= reward.pointsRequired
+    }
+    
+    // Equatable 实现，用于优化重绘
+    static func == (lhs: RewardCard, rhs: RewardCard) -> Bool {
+        lhs.reward.id == rhs.reward.id && 
+        lhs.userPoints == rhs.userPoints &&
+        lhs.reward == rhs.reward
     }
     
     var body: some View {
@@ -2917,7 +3377,7 @@ struct RewardCard: View {
 }
 
 // MARK: - Redemption Record
-struct RedemptionRecord: Identifiable {
+struct RedemptionRecord: Identifiable, Codable {
     let id: String
     let rewardId: String
     let rewardName: String
@@ -3025,3 +3485,4 @@ struct ProfileDisplayView_Previews: PreviewProvider {
         }
     }
 }
+
