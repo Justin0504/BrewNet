@@ -429,6 +429,19 @@ struct UserProfileCardView: View {
             // Networking Intention Badge with Location and Distance
             VStack(alignment: .leading, spacing: 12) {
                 NetworkingIntentionBadgeView(intention: profile.networkingIntention.selectedIntention)
+                if !profile.networkingIntention.additionalIntentions.isEmpty {
+                    FlowLayout(spacing: 8) {
+                        ForEach(profile.networkingIntention.additionalIntentions, id: \.self) { extra in
+                            Text(extra.displayName)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color(red: 0.4, green: 0.2, blue: 0.1).opacity(0.12))
+                                .cornerRadius(10)
+                        }
+                    }
+                }
                 
                 // Location and Distance (下方显示，字体与 intention 一样大)
                 if shouldShowLocation, let location = profile.coreIdentity.location, !location.isEmpty {
@@ -610,6 +623,31 @@ struct UserProfileCardView: View {
                 }
             }
             
+            // What I'm Looking For
+            if !profile.networkingIntention.selectedSubIntentions.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "sparkles")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("What I'm Looking For")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    
+                    FlowLayout(spacing: 8) {
+                        ForEach(profile.networkingIntention.selectedSubIntentions, id: \.self) { subIntention in
+                            Text(subIntention.displayName)
+                                .font(.system(size: 15))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                                .cornerRadius(12)
+                        }
+                    }
+                }
+            }
+            
             // Skills
             if shouldShowSkills && !profile.professionalBackground.skills.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -660,31 +698,6 @@ struct UserProfileCardView: View {
                 }
             }
             
-            // Sub-Intentions
-            if !profile.networkingIntention.selectedSubIntentions.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "sparkles")
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("What I'm Looking For")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                    }
-                    
-                    FlowLayout(spacing: 8) {
-                        ForEach(profile.networkingIntention.selectedSubIntentions, id: \.self) { subIntention in
-                            Text(subIntention.displayName)
-                                .font(.system(size: 15))
-                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
-                                .cornerRadius(12)
-                        }
-                    }
-                }
-            }
-            
             // Hobbies & Interests
             if shouldShowInterests && !profile.personalitySocial.hobbies.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -711,6 +724,30 @@ struct UserProfileCardView: View {
                     }
                 }
             }
+
+            // Preferred Meeting Vibes
+            if !meetingVibesDisplay.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "person.3.fill")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("Meeting Vibes")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    FlowLayout(spacing: 8) {
+                        ForEach(meetingVibesDisplay, id: \.self) { vibe in
+                            Text(vibe.displayName)
+                                .font(.system(size: 15))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .cornerRadius(12)
+                        }
+                    }
+                }
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -721,65 +758,6 @@ struct UserProfileCardView: View {
     private var level3DeepUnderstandingView: some View {
         VStack(alignment: .leading, spacing: 20) {
             Divider()
-            
-            // Self Introduction
-            if let selfIntro = profile.personalitySocial.selfIntroduction, !selfIntro.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "hand.wave.fill")
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("About Me")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                    }
-                    
-                    Text(selfIntro)
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray)
-                        .lineSpacing(4)
-                }
-            }
-            
-            // Education
-            if let education = profile.professionalBackground.education, !education.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "graduationcap.fill")
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("Education")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                    }
-                    
-                    Text(education)
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray)
-                }
-            }
-            
-            // Work Experience (summary)
-            if !profile.professionalBackground.workExperiences.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "briefcase.fill")
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("Experience")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                    }
-                    
-                    ForEach(profile.professionalBackground.workExperiences.prefix(3), id: \.id) { workExp in
-                        WorkExperienceRowView(workExp: workExp)
-                    }
-                    
-                    if let yearsOfExp = profile.professionalBackground.yearsOfExperience {
-                        Text("Total: \(String(format: "%.1f", yearsOfExp)) years of experience")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundColor(.gray)
-                            .italic()
-                    }
-                }
-            }
             
             // Personal Website
             if let website = profile.coreIdentity.personalWebsite, !website.isEmpty,
@@ -851,6 +829,14 @@ struct UserProfileCardView: View {
             print("   ⚠️ Timeslot hidden (not public): \(settings.timeslot.rawValue)")
         }
         return visible
+    }
+    
+    private var meetingVibesDisplay: [MeetingVibe] {
+        let vibes = profile.personalitySocial.preferredMeetingVibes
+        if vibes.isEmpty {
+            return [profile.personalitySocial.preferredMeetingVibe]
+        }
+        return vibes
     }
 }
 
@@ -1158,6 +1144,19 @@ struct PublicProfileCardView: View {
             // Networking Intention Badge with Location and Distance
             VStack(alignment: .leading, spacing: 12) {
                 NetworkingIntentionBadgeView(intention: profile.networkingIntention.selectedIntention)
+                if !profile.networkingIntention.additionalIntentions.isEmpty {
+                    FlowLayout(spacing: 8) {
+                        ForEach(profile.networkingIntention.additionalIntentions, id: \.self) { extra in
+                            Text(extra.displayName)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color(red: 0.4, green: 0.2, blue: 0.1).opacity(0.12))
+                                .cornerRadius(10)
+                        }
+                    }
+                }
                 
                 // Location and Distance (下方显示，字体与 intention 一样大)
                 if shouldShowLocation, let location = profile.coreIdentity.location, !location.isEmpty {
@@ -1260,28 +1259,36 @@ struct PublicProfileCardView: View {
         VStack(alignment: .leading, spacing: 20) {
             Divider()
             
-            // Sub-Intentions
-            if !profile.networkingIntention.selectedSubIntentions.isEmpty {
+            // About Me
+            if let selfIntro = profile.personalitySocial.selfIntroduction, !selfIntro.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Image(systemName: "sparkles")
+                        Image(systemName: "hand.wave.fill")
                             .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("What I'm Looking For")
+                        Text("About Me")
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                     }
-                    
-                    FlowLayout(spacing: 8) {
-                        ForEach(profile.networkingIntention.selectedSubIntentions, id: \.self) { subIntention in
-                            Text(subIntention.displayName)
-                                .font(.system(size: 15))
-                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
-                                .cornerRadius(12)
-                        }
+                    Text(selfIntro)
+                        .font(.system(size: 16))
+                        .foregroundColor(.gray)
+                        .lineSpacing(4)
+                }
+            }
+            
+            // Education
+            if let education = profile.professionalBackground.education, !education.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "graduationcap.fill")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("Education")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                     }
+                    Text(education)
+                        .font(.system(size: 16))
+                        .foregroundColor(.gray)
                 }
             }
             
@@ -1331,6 +1338,31 @@ struct PublicProfileCardView: View {
                 }
             }
             
+            // What I'm Looking For
+            if !profile.networkingIntention.selectedSubIntentions.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "sparkles")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("What I'm Looking For")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    
+                    FlowLayout(spacing: 8) {
+                        ForEach(profile.networkingIntention.selectedSubIntentions, id: \.self) { subIntention in
+                            Text(subIntention.displayName)
+                                .font(.system(size: 15))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                                .cornerRadius(12)
+                        }
+                    }
+                }
+            }
+
             // Skills (only if public)
             if shouldShowSkills && !profile.professionalBackground.skills.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -1408,15 +1440,27 @@ struct PublicProfileCardView: View {
                 }
             }
             
-            // Preferred Meeting Vibe
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Meeting Vibe:")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.gray)
-                    Text(profile.personalitySocial.preferredMeetingVibe.displayName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            // Preferred Meeting Vibes
+            if !publicMeetingVibesDisplay.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "person.3.fill")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("Meeting Vibes")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    FlowLayout(spacing: 8) {
+                        ForEach(publicMeetingVibesDisplay, id: \.self) { vibe in
+                            Text(vibe.displayName)
+                                .font(.system(size: 15))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .cornerRadius(12)
+                        }
+                    }
                 }
             }
         }
@@ -1429,65 +1473,6 @@ struct PublicProfileCardView: View {
     private var level3DeepUnderstandingView: some View {
         VStack(alignment: .leading, spacing: 20) {
             Divider()
-            
-            // Self Introduction
-            if let selfIntro = profile.personalitySocial.selfIntroduction, !selfIntro.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "hand.wave.fill")
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("About Me")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                    }
-                    
-                    Text(selfIntro)
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray)
-                        .lineSpacing(4)
-                }
-            }
-            
-            // Education
-            if let education = profile.professionalBackground.education, !education.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "graduationcap.fill")
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("Education")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                    }
-                    
-                    Text(education)
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray)
-                }
-            }
-            
-            // Work Experience (summary)
-            if !profile.professionalBackground.workExperiences.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "briefcase.fill")
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("Experience")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                    }
-                    
-                    ForEach(profile.professionalBackground.workExperiences.prefix(3), id: \.id) { workExp in
-                        WorkExperienceRowView(workExp: workExp)
-                    }
-                    
-                    if let yearsOfExp = profile.professionalBackground.yearsOfExperience {
-                        Text("Total: \(String(format: "%.1f", yearsOfExp)) years of experience")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundColor(.gray)
-                            .italic()
-                    }
-                }
-            }
             
             // Personal Website
             if let website = profile.coreIdentity.personalWebsite, !website.isEmpty,
@@ -1558,6 +1543,14 @@ struct PublicProfileCardView: View {
             print("   ⚠️ Timeslot hidden due to privacy: \(settings.timeslot.rawValue), isConnection: \(isConnection)")
         }
         return visible
+    }
+    
+    private var publicMeetingVibesDisplay: [MeetingVibe] {
+        let vibes = profile.personalitySocial.preferredMeetingVibes
+        if vibes.isEmpty {
+            return [profile.personalitySocial.preferredMeetingVibe]
+        }
+        return vibes
     }
 }
 

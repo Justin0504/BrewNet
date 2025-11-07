@@ -1554,6 +1554,7 @@ struct BrewNetMatchesView: View {
                 valuesTags: ["Curious", "Empathetic", "Collaborative"],
                 hobbies: ["Coffee Culture", "Photography", "Hiking"],
                 preferredMeetingVibe: .reflective,
+                preferredMeetingVibes: [.reflective],
                 selfIntroduction: "I love bridging design and data to solve real-world problems. When I'm not designing products, you'll find me exploring coffee shops or capturing moments with my camera."
             ),
             privacyTrust: PrivacyTrust(
@@ -1634,6 +1635,7 @@ struct BrewNetMatchesView: View {
                 valuesTags: ["Innovative", "Passionate"],
                 hobbies: ["Guitar", "Coding Side Projects"],
                 preferredMeetingVibe: .casual,
+                preferredMeetingVibes: [.casual],
                 selfIntroduction: "Passionate about mobile apps and building great user experiences."
             ),
             privacyTrust: PrivacyTrust(
@@ -1917,7 +1919,6 @@ struct MatchFilter: Codable, Equatable {
     var experienceLevel: ExperienceLevel?
     var careerStage: CareerStage?
     var preferredChatFormat: ChatFormat?
-    var preferredMeetingVibe: MeetingVibe?
     var verifiedStatus: VerifiedStatus?
     
     // 多选字段
@@ -1925,6 +1926,7 @@ struct MatchFilter: Codable, Equatable {
     var selectedHobbies: Set<String> = []
     var selectedValues: Set<String> = []
     var selectedIndustries: Set<String> = []
+    var preferredMeetingVibes: Set<MeetingVibe> = []
     
     // 范围字段
     var minYearsOfExperience: Double?
@@ -1935,11 +1937,97 @@ struct MatchFilter: Codable, Equatable {
     
     static let `default` = MatchFilter()
     
+    enum CodingKeys: String, CodingKey {
+        case experienceLevel
+        case careerStage
+        case preferredChatFormat
+        case preferredMeetingVibes
+        case legacyPreferredMeetingVibe
+        case verifiedStatus
+        case selectedSkills
+        case selectedHobbies
+        case selectedValues
+        case selectedIndustries
+        case minYearsOfExperience
+        case maxDistance
+        case isActive
+    }
+    
+    init() {}
+    
+    init(
+        experienceLevel: ExperienceLevel? = nil,
+        careerStage: CareerStage? = nil,
+        preferredChatFormat: ChatFormat? = nil,
+        preferredMeetingVibes: Set<MeetingVibe> = [],
+        verifiedStatus: VerifiedStatus? = nil,
+        selectedSkills: Set<String> = [],
+        selectedHobbies: Set<String> = [],
+        selectedValues: Set<String> = [],
+        selectedIndustries: Set<String> = [],
+        minYearsOfExperience: Double? = nil,
+        maxDistance: Double? = nil,
+        isActive: Bool = false
+    ) {
+        self.experienceLevel = experienceLevel
+        self.careerStage = careerStage
+        self.preferredChatFormat = preferredChatFormat
+        self.preferredMeetingVibes = preferredMeetingVibes
+        self.verifiedStatus = verifiedStatus
+        self.selectedSkills = selectedSkills
+        self.selectedHobbies = selectedHobbies
+        self.selectedValues = selectedValues
+        self.selectedIndustries = selectedIndustries
+        self.minYearsOfExperience = minYearsOfExperience
+        self.maxDistance = maxDistance
+        self.isActive = isActive
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        experienceLevel = try container.decodeIfPresent(ExperienceLevel.self, forKey: .experienceLevel)
+        careerStage = try container.decodeIfPresent(CareerStage.self, forKey: .careerStage)
+        preferredChatFormat = try container.decodeIfPresent(ChatFormat.self, forKey: .preferredChatFormat)
+        let decodedVibes = try container.decodeIfPresent([MeetingVibe].self, forKey: .preferredMeetingVibes) ?? []
+        preferredMeetingVibes = Set(decodedVibes)
+        if preferredMeetingVibes.isEmpty, let legacy = try container.decodeIfPresent(MeetingVibe.self, forKey: .legacyPreferredMeetingVibe) {
+            preferredMeetingVibes = [legacy]
+        }
+        verifiedStatus = try container.decodeIfPresent(VerifiedStatus.self, forKey: .verifiedStatus)
+        selectedSkills = try container.decodeIfPresent(Set<String>.self, forKey: .selectedSkills) ?? []
+        selectedHobbies = try container.decodeIfPresent(Set<String>.self, forKey: .selectedHobbies) ?? []
+        selectedValues = try container.decodeIfPresent(Set<String>.self, forKey: .selectedValues) ?? []
+        selectedIndustries = try container.decodeIfPresent(Set<String>.self, forKey: .selectedIndustries) ?? []
+        minYearsOfExperience = try container.decodeIfPresent(Double.self, forKey: .minYearsOfExperience)
+        maxDistance = try container.decodeIfPresent(Double.self, forKey: .maxDistance)
+        isActive = try container.decodeIfPresent(Bool.self, forKey: .isActive) ?? false
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(experienceLevel, forKey: .experienceLevel)
+        try container.encodeIfPresent(careerStage, forKey: .careerStage)
+        try container.encodeIfPresent(preferredChatFormat, forKey: .preferredChatFormat)
+        let vibesArray = Array(preferredMeetingVibes)
+        if !vibesArray.isEmpty {
+            try container.encode(vibesArray, forKey: .preferredMeetingVibes)
+            try container.encode(vibesArray.first, forKey: .legacyPreferredMeetingVibe)
+        }
+        try container.encodeIfPresent(verifiedStatus, forKey: .verifiedStatus)
+        try container.encode(selectedSkills, forKey: .selectedSkills)
+        try container.encode(selectedHobbies, forKey: .selectedHobbies)
+        try container.encode(selectedValues, forKey: .selectedValues)
+        try container.encode(selectedIndustries, forKey: .selectedIndustries)
+        try container.encodeIfPresent(minYearsOfExperience, forKey: .minYearsOfExperience)
+        try container.encodeIfPresent(maxDistance, forKey: .maxDistance)
+        try container.encode(isActive, forKey: .isActive)
+    }
+    
     func hasActiveFilters() -> Bool {
         return experienceLevel != nil ||
                careerStage != nil ||
                preferredChatFormat != nil ||
-               preferredMeetingVibe != nil ||
+               !preferredMeetingVibes.isEmpty ||
                verifiedStatus != nil ||
                !selectedSkills.isEmpty ||
                !selectedHobbies.isEmpty ||
@@ -1968,9 +2056,11 @@ struct MatchFilter: Codable, Equatable {
             return false
         }
         
-        if let vibe = preferredMeetingVibe,
-           profile.personalitySocial.preferredMeetingVibe != vibe {
-            return false
+        if !preferredMeetingVibes.isEmpty {
+            let profileVibes = Set(profile.personalitySocial.preferredMeetingVibes.isEmpty ? [profile.personalitySocial.preferredMeetingVibe] : profile.personalitySocial.preferredMeetingVibes)
+            if profileVibes.isDisjoint(with: preferredMeetingVibes) {
+                return false
+            }
         }
         
         if let verified = verifiedStatus,
@@ -2111,12 +2201,20 @@ struct MatchFilterView: View {
                                 )
                             }
                             
-                            // 7. Preferred Meeting Vibe (单选) - Networking相关
-                            FilterSection(title: "Meeting Vibe") {
-                                SingleSelectFilter(
-                                    options: MeetingVibe.allCases,
-                                    selected: $filter.preferredMeetingVibe,
-                                    displayName: { $0.displayName }
+                            // 7. Meeting Vibes (多选)
+                            FilterSection(title: "Meeting Vibes") {
+                                MultiSelectFilter(
+                                    options: MeetingVibe.allCases.map { $0.displayName },
+                                    selected: Binding(
+                                        get: {
+                                            Set(filter.preferredMeetingVibes.map { $0.displayName })
+                                        },
+                                        set: { newValue in
+                                            let mapped = newValue.compactMap { MeetingVibe(rawValue: $0) }
+                                            filter.preferredMeetingVibes = Set(mapped)
+                                        }
+                                    ),
+                                    maxSelections: MeetingVibe.allCases.count
                                 )
                             }
                             

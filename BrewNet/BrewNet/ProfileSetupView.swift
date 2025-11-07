@@ -1790,6 +1790,11 @@ struct NetworkingIntentionStep: View {
                             if primaryIntention == intention {
                                 primaryIntention = selectedIntentions.first ?? .learnGrow
                             }
+                            if selectedIntentions.isEmpty {
+                                primaryIntention = .learnGrow
+                                selectedIntentions.insert(.learnGrow)
+                                selectedSubIntentions.removeAll()
+                            }
                             } else {
                                 selectedIntentions.insert(intention)
                             if selectedIntentions.count == 1 {
@@ -1940,6 +1945,7 @@ struct NetworkingIntentionStep: View {
             print("📊 selectedSubIntentions Set updated: \(newValue.map { $0.rawValue })")
         }
         .onChange(of: selectedSubIntentions) { _ in updateProfileData() }
+        .onChange(of: selectedIntentions) { _ in updateProfileData() }
         .onChange(of: marketingFunctions) { _ in updateCareerDirectionData() }
         .onChange(of: productTechFunctions) { _ in updateCareerDirectionData() }
         .onChange(of: dataAnalyticsFunctions) { _ in updateCareerDirectionData() }
