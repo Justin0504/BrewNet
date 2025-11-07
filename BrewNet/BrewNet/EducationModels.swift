@@ -9,6 +9,15 @@ struct Education: Codable, Identifiable, Equatable {
     let degree: DegreeType
     let fieldOfStudy: String?
     
+    enum CodingKeys: String, CodingKey {
+        case id
+        case schoolName = "school_name"
+        case startYear = "start_year"
+        case endYear = "end_year"
+        case degree
+        case fieldOfStudy = "field_of_study"
+    }
+    
     init(schoolName: String, startYear: Int, endYear: Int? = nil, degree: DegreeType, fieldOfStudy: String? = nil) {
         self.id = UUID()
         self.schoolName = schoolName
@@ -51,6 +60,14 @@ struct WorkExperience: Identifiable, Codable, Equatable {
     var startYear: Int
     var endYear: Int? // nil if currently working
     var position: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case companyName = "company_name"
+        case startYear = "start_year"
+        case endYear = "end_year"
+        case position
+    }
     
     init(id: UUID = UUID(), companyName: String, startYear: Int, endYear: Int?, position: String?) {
         self.id = id
