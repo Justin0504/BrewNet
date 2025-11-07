@@ -11,6 +11,7 @@ struct ConnectionRequest: Identifiable, Codable {
     let createdAt: Date
     let isFeatured: Bool // "Featured Professional" tag
     var temporaryMessages: [TemporaryMessage] = [] // 临时消息列表
+    var isRequesterPro: Bool = false
     
     enum CodingKeys: String, CodingKey {
         case id

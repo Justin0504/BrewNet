@@ -457,10 +457,28 @@ struct ConnectionRequestsView: View {
                     convertedRequests.append(connectionRequest)
                 }
                 
+                // Load Pro status and prioritize
+                let requesterIds = convertedRequests.map { $0.requesterId }
+                do {
+                    let proUserIds = try await supabaseService.getProUserIds(from: requesterIds)
+                    for idx in convertedRequests.indices {
+                        convertedRequests[idx].isRequesterPro = proUserIds.contains(convertedRequests[idx].requesterId)
+                    }
+                } catch {
+                    print("⚠️ Failed to load Pro status for requests: \(error.localizedDescription)")
+                }
+                
+                let sortedRequests = convertedRequests.sorted { lhs, rhs in
+                    if lhs.isRequesterPro != rhs.isRequesterPro {
+                        return lhs.isRequesterPro && !rhs.isRequesterPro
+                    }
+                    return lhs.createdAt > rhs.createdAt
+                }
+                
                 await MainActor.run {
-                    self.requests = convertedRequests
+                    self.requests = sortedRequests
                     self.isLoading = false
-                    print("✅ Loaded \(convertedRequests.count) connection requests from database")
+                    print("✅ Loaded \(sortedRequests.count) connection requests from database (Pro prioritized)")
                 }
                 
                 // 更新未读临时消息数
@@ -645,9 +663,15 @@ struct CompactRequestCard: View {
             // Profile Info
             VStack(alignment: .leading, spacing: 6) {
                 // Name
-                Text(request.requesterProfile.name)
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(themeBrown)
+                HStack(spacing: 6) {
+                    Text(request.requesterProfile.name)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(themeBrown)
+                    
+                    if request.isRequesterPro {
+                        ProBadge(size: .small)
+                    }
+                }
                 
                 // Temporary Message Bubble (if exists)
                 if let latestMessage = request.latestTemporaryMessage {
@@ -1376,16 +1400,29 @@ struct TemporaryChatsView: View {
                     )
                     var mutableRequest = virtualRequest
                     mutableRequest.temporaryMessages = temporaryMessages
+                    do {
+                        let isPro = try await supabaseService.canSendTemporaryChat(userId: otherUserId)
+                        mutableRequest.isRequesterPro = isPro
+                    } catch {
+                        print("⚠️ [临时聊天] 获取用户 \(requesterProfile.name) Pro 状态失败: \(error.localizedDescription)")
+                    }
                     updatedRequests.append(mutableRequest)
                     
                     print("✅ [临时聊天] 为用户 \(requesterProfile.name) 创建虚拟请求，包含 \(temporaryMessages.count) 条消息")
                 }
             }
             
+            let sortedUpdated = updatedRequests.sorted { lhs, rhs in
+                if lhs.isRequesterPro != rhs.isRequesterPro {
+                    return lhs.isRequesterPro && !rhs.isRequesterPro
+                }
+                return lhs.createdAt > rhs.createdAt
+            }
+            
             await MainActor.run {
-                refreshedRequests = updatedRequests
+                refreshedRequests = sortedUpdated
                 isLoading = false
-                print("✅ Refreshed temporary messages for \(updatedRequests.count) requests (including virtual requests)")
+                print("✅ Refreshed temporary messages for \(sortedUpdated.count) requests (including virtual requests, Pro prioritized)")
             }
         } catch {
             print("❌ Failed to refresh messages: \(error.localizedDescription)")
