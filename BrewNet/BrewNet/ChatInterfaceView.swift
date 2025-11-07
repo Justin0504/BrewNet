@@ -2231,7 +2231,7 @@ struct ChatSessionRowView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text(session.user.name)
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.system(size: 18, weight: .semibold))
                             .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                         
                         Spacer()
@@ -2248,7 +2248,7 @@ struct ChatSessionRowView: View {
                     let unreadMessages = session.messages.filter { !$0.isFromUser && !$0.isRead }
                     let displayMessage = unreadMessages.last ?? session.messages.last
                     Text(displayMessage?.content ?? "Start chatting...")
-                        .font(.system(size: 14))
+                        .font(.system(size: 16))
                         .foregroundColor(unreadMessages.isEmpty ? .gray : Color(red: 0.4, green: 0.2, blue: 0.1))
                         .fontWeight(unreadMessages.isEmpty ? .regular : .semibold)
                         .lineLimit(1)
