@@ -509,6 +509,41 @@ class SupabaseService: ObservableObject {
         }
     }
     
+    /// 上传 Moments 图片
+    func uploadMomentImage(userId: String, imageData: Data, fileName: String) async throws -> String {
+        print("📤 Uploading moment image for user: \(userId), fileName: \(fileName)")
+        
+        let filePath = "\(userId)/moments/\(fileName)"
+        
+        do {
+            // 上传图片到 storage bucket
+            try await client.storage
+                .from("avatars") // 使用现有的 avatars bucket，或者可以创建新的 moments bucket
+                .upload(
+                    path: filePath,
+                    file: imageData,
+                    options: FileOptions(
+                        cacheControl: "3600",
+                        contentType: "image/jpeg"
+                    )
+                )
+            
+            print("✅ Moment image uploaded successfully")
+            
+            // 获取公共 URL
+            let publicURL = try client.storage
+                .from("avatars")
+                .getPublicURL(path: filePath)
+            
+            print("🔗 Public URL: \(publicURL)")
+            return publicURL.absoluteString
+            
+        } catch {
+            print("❌ Failed to upload moment image: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
     // MARK: - Profile Operations
     
     /// 创建用户资料
@@ -547,6 +582,15 @@ class SupabaseService: ObservableObject {
                 throw ProfileError.creationFailed("Failed to encode profile fields")
             }
             
+            // 处理 moments（可选字段）
+            var momentsDict: [String: AnyCodableValue]? = nil
+            if let moments = profile.moments {
+                let momentsData = try encoder.encode(moments)
+                if let momentsJson = try? JSONSerialization.jsonObject(with: momentsData) as? [String: Any] {
+                    momentsDict = momentsJson.mapValues { AnyCodableValue($0) }
+                }
+            }
+            
             // 创建一个符合 Codable 的结构体来包装插入数据
             struct ProfileInsert: Codable {
                 let user_id: String
@@ -555,6 +599,7 @@ class SupabaseService: ObservableObject {
                 let networking_intention: [String: AnyCodableValue]
                 let networking_preferences: [String: AnyCodableValue]
                 let personality_social: [String: AnyCodableValue]
+                let moments: [String: AnyCodableValue]?
                 let privacy_trust: [String: AnyCodableValue]
             }
             
@@ -636,6 +681,7 @@ class SupabaseService: ObservableObject {
                 networking_intention: convertDict(networkingIntention),
                 networking_preferences: convertDict(networkingPreferences),
                 personality_social: convertDict(personalitySocial),
+                moments: momentsDict,
                 privacy_trust: convertDict(privacyTrust)
             )
             
@@ -917,6 +963,15 @@ class SupabaseService: ObservableObject {
                 throw ProfileError.updateFailed("Failed to encode profile fields")
             }
             
+            // 处理 moments（可选字段）
+            var momentsDict: [String: AnyCodableValue]? = nil
+            if let moments = profile.moments {
+                let momentsData = try encoder.encode(moments)
+                if let momentsJson = try? JSONSerialization.jsonObject(with: momentsData) as? [String: Any] {
+                    momentsDict = momentsJson.mapValues { AnyCodableValue($0) }
+                }
+            }
+            
             // 创建一个符合 Codable 的结构体来包装更新数据（与 createProfile 完全相同的结构）
             struct ProfileUpdate: Codable {
                 let user_id: String
@@ -925,6 +980,7 @@ class SupabaseService: ObservableObject {
                 let networking_intention: [String: AnyCodableValue]
                 let networking_preferences: [String: AnyCodableValue]
                 let personality_social: [String: AnyCodableValue]
+                let moments: [String: AnyCodableValue]?
                 let privacy_trust: [String: AnyCodableValue]
             }
             
@@ -970,6 +1026,7 @@ class SupabaseService: ObservableObject {
                 networking_intention: convertDict(networkingIntention),
                 networking_preferences: convertDict(networkingPreferences),
                 personality_social: convertDict(personalitySocial),
+                moments: momentsDict,
                 privacy_trust: convertDict(privacyTrust)
             )
             
@@ -3267,6 +3324,9 @@ extension SupabaseService {
     func getAvailableRewards() async throws -> [Reward] {
         print("🔍 [兑换系统] 获取可兑换奖励列表")
         
+        // 首先确保咖啡代金券已初始化
+        try await initializeCoffeeVouchers()
+        
         let response = try await client
             .from("rewards")
             .select()
@@ -3315,6 +3375,67 @@ extension SupabaseService {
         return rewards
     }
     
+    /// 初始化咖啡代金券（如果不存在则创建）
+    private func initializeCoffeeVouchers() async throws {
+        print("🔍 [Rewards] Initializing coffee vouchers...")
+        
+        let coffeeVouchers: [(id: String, name: String, description: String, points: Int, imageName: String)] = [
+            ("coffee_voucher_1", "Starbucks Crème Frappuccino", "Free Crème Frappuccino® Blended Beverage", 45, "CoffeeVoucher1"),
+            ("coffee_voucher_2", "Starbucks Pumpkin Spice Latte", "Free Pumpkin Spice Latte or Iced Espresso", 55, "CoffeeVoucher2"),
+            ("coffee_voucher_3", "Dunkin' Cold Brew", "Free Cold Brew with Sweet Cold Foam", 35, "CoffeeVoucher3"),
+            ("coffee_voucher_4", "Tim Hortons Double Double", "Free Double Double Coffee", 25, "CoffeeVoucher4"),
+            ("coffee_voucher_5", "Dunkin' Caramel Craze", "Free Caramel Craze Signature Latte", 30, "CoffeeVoucher5")
+        ]
+        
+        // 创建符合 Encodable 的结构体
+        struct RewardInsert: Encodable {
+            let id: String
+            let name: String
+            let description: String
+            let points_required: Int
+            let category: String
+            let image_url: String
+            let is_active: Bool
+            let created_at: String
+            let updated_at: String
+        }
+        
+        for voucher in coffeeVouchers {
+            // 检查是否已存在
+            let checkResponse = try? await client
+                .from("rewards")
+                .select("id")
+                .eq("id", value: voucher.id)
+                .single()
+                .execute()
+            
+            if checkResponse == nil {
+                // 不存在，创建新的
+                let now = ISO8601DateFormatter().string(from: Date())
+                let reward = RewardInsert(
+                    id: voucher.id,
+                    name: voucher.name,
+                    description: voucher.description,
+                    points_required: voucher.points,
+                    category: "coffee",
+                    image_url: voucher.imageName,
+                    is_active: true,
+                    created_at: now,
+                    updated_at: now
+                )
+                
+                try await client
+                    .from("rewards")
+                    .insert(reward)
+                    .execute()
+                
+                print("✅ [Rewards] Created coffee voucher: \(voucher.name)")
+            }
+        }
+        
+        print("✅ [Rewards] Coffee vouchers initialized")
+    }
+    
     /// 获取用户的兑换记录
     func getUserRedemptions(userId: String) async throws -> [RedemptionRecord] {
         print("🔍 [兑换系统] 获取用户兑换记录: \(userId)")
@@ -3351,16 +3472,24 @@ extension SupabaseService {
             
             // 获取奖励名称
             var rewardName = "Unknown Reward"
-            if let rewardResponse = try? await client
-                .from("rewards")
-                .select("name")
-                .eq("id", value: rewardId)
-                .single()
-                .execute() {
-                let rewardData = rewardResponse.data
-                if let rewardJson = try? JSONSerialization.jsonObject(with: rewardData) as? [String: Any],
-                   let name = rewardJson["name"] as? String {
-                    rewardName = name
+            // 检查是否是提现记录
+            if rewardId.hasPrefix("cash_out_") {
+                // 计算现金金额（points_used / 10）
+                let cashAmount = Double(pointsUsed) / 10.0
+                rewardName = "Cash Out - $\(String(format: "%.2f", cashAmount))"
+            } else {
+                // 普通奖励，从 rewards 表查询
+                if let rewardResponse = try? await client
+                    .from("rewards")
+                    .select("name")
+                    .eq("id", value: rewardId)
+                    .single()
+                    .execute() {
+                    let rewardData = rewardResponse.data
+                    if let rewardJson = try? JSONSerialization.jsonObject(with: rewardData) as? [String: Any],
+                       let name = rewardJson["name"] as? String {
+                        rewardName = name
+                    }
                 }
             }
             
@@ -3389,7 +3518,7 @@ extension SupabaseService {
     
     /// 兑换奖励
     func redeemReward(userId: String, rewardId: String) async throws {
-        print("🔍 [兑换系统] 用户 \(userId) 兑换奖励 \(rewardId)")
+        print("🔍 [Redemption] User \(userId) redeeming reward \(rewardId)")
         
         // 1. 获取奖励信息
         let rewardResponse = try await client
@@ -3413,31 +3542,210 @@ extension SupabaseService {
             throw ProfileError.fetchFailed("Reward points_required invalid")
         }
         
-        // 2. 检查用户积分是否足够
-        let userPoints = try await getUserPoints(userId: userId)
-        guard userPoints >= pointsRequired else {
-            throw ProfileError.fetchFailed("Insufficient points")
+        // 2. 检查用户积分是否足够（使用当前数据库中的积分，不考虑自动同步）
+        let response = try await client
+            .from("users")
+            .select("credits")
+            .eq("id", value: userId)
+            .single()
+            .execute()
+        
+        let data = response.data
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let currentCredits = json["credits"] as? Int else {
+            throw ProfileError.fetchFailed("Failed to get user credits")
         }
         
-        // 3. 创建兑换记录
+        guard currentCredits >= pointsRequired else {
+            throw ProfileError.fetchFailed("Insufficient points. You need \(pointsRequired) points but only have \(currentCredits) points.")
+        }
+        
+        // 3. 扣除积分
+        let newCredits = currentCredits - pointsRequired
+        struct CreditsUpdate: Encodable {
+            let credits: Int
+        }
+        let update = CreditsUpdate(credits: newCredits)
+        
+        let updateResponse = try await client
+            .from("users")
+            .update(update)
+            .eq("id", value: userId)
+            .execute()
+        
+        // 验证更新是否成功
+        if updateResponse.status < 200 || updateResponse.status >= 300 {
+            print("❌ [Redemption] 积分更新失败，HTTP 状态码: \(updateResponse.status)")
+            throw ProfileError.fetchFailed("Failed to update credits. HTTP status: \(updateResponse.status)")
+        }
+        
+        // 再次查询验证积分是否真的更新了
+        let verifyResponse = try await client
+            .from("users")
+            .select("credits")
+            .eq("id", value: userId)
+            .single()
+            .execute()
+        
+        if let verifyJson = try? JSONSerialization.jsonObject(with: verifyResponse.data) as? [String: Any],
+           let verifiedCredits = verifyJson["credits"] as? Int {
+            if verifiedCredits != newCredits {
+                print("❌ [Redemption] 积分验证失败！期望: \(newCredits), 实际: \(verifiedCredits)")
+                throw ProfileError.fetchFailed("Credits update verification failed")
+            } else {
+                print("✅ [Redemption] Credits deducted and verified: \(currentCredits) -> \(newCredits)")
+            }
+        } else {
+            print("⚠️ [Redemption] 无法验证积分更新，但继续执行")
+        }
+        
+        // 4. 创建兑换记录
+        struct RedemptionInsert: Encodable {
+            let id: String
+            let user_id: String
+            let reward_id: String
+            let points_used: Int
+            let status: String
+            let redeemed_at: String
+            let created_at: String
+            let updated_at: String
+        }
+        
         let now = ISO8601DateFormatter().string(from: Date())
-        let redemption: [String: String] = [
-            "id": UUID().uuidString,
-            "user_id": userId,
-            "reward_id": rewardId,
-            "points_used": String(pointsRequired),
-            "status": "pending",
-            "redeemed_at": now,
-            "created_at": now,
-            "updated_at": now
-        ]
+        let redemption = RedemptionInsert(
+            id: UUID().uuidString,
+            user_id: userId,
+            reward_id: rewardId,
+            points_used: pointsRequired,
+            status: "completed",
+            redeemed_at: now,
+            created_at: now,
+            updated_at: now
+        )
         
         try await client
             .from("redemptions")
             .insert(redemption)
             .execute()
         
-        print("✅ [兑换系统] 兑换记录已创建，消耗 \(pointsRequired) 积分")
+        print("✅ [Redemption] Redemption record created, \(pointsRequired) points used")
+        
+        // 5. 发送通知更新积分（在主线程发送，确保所有监听者都能收到）
+        await MainActor.run {
+            print("📢 [Redemption] 发送积分更新通知")
+            NotificationCenter.default.post(
+                name: NSNotification.Name("UserCreditsUpdated"), 
+                object: nil,
+                userInfo: ["newCredits": newCredits, "userId": userId]
+            )
+        }
+    }
+    
+    /// 提现功能：将积分转换为现金
+    func cashOut(userId: String, points: Int, cashAmount: Double) async throws {
+        print("💰 [Cash Out] User \(userId) cashing out \(points) points for $\(cashAmount)")
+        
+        // 1. 检查用户积分是否足够
+        let response = try await client
+            .from("users")
+            .select("credits")
+            .eq("id", value: userId)
+            .single()
+            .execute()
+        
+        let data = response.data
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let currentCredits = json["credits"] as? Int else {
+            throw ProfileError.fetchFailed("Failed to get user credits")
+        }
+        
+        guard currentCredits >= points else {
+            throw ProfileError.fetchFailed("Insufficient points. You need \(points) points but only have \(currentCredits) points.")
+        }
+        
+        guard points >= 100 else {
+            throw ProfileError.fetchFailed("Minimum cash out is 100 points ($10.00)")
+        }
+        
+        // 2. 扣除积分
+        let newCredits = currentCredits - points
+        struct CreditsUpdate: Encodable {
+            let credits: Int
+        }
+        let update = CreditsUpdate(credits: newCredits)
+        
+        let updateResponse = try await client
+            .from("users")
+            .update(update)
+            .eq("id", value: userId)
+            .execute()
+        
+        // 验证更新是否成功
+        if updateResponse.status < 200 || updateResponse.status >= 300 {
+            print("❌ [Cash Out] 积分更新失败，HTTP 状态码: \(updateResponse.status)")
+            throw ProfileError.fetchFailed("Failed to update credits. HTTP status: \(updateResponse.status)")
+        }
+        
+        // 再次查询验证积分是否真的更新了
+        let verifyResponse = try await client
+            .from("users")
+            .select("credits")
+            .eq("id", value: userId)
+            .single()
+            .execute()
+        
+        if let verifyJson = try? JSONSerialization.jsonObject(with: verifyResponse.data) as? [String: Any],
+           let verifiedCredits = verifyJson["credits"] as? Int {
+            if verifiedCredits != newCredits {
+                print("❌ [Cash Out] 积分验证失败！期望: \(newCredits), 实际: \(verifiedCredits)")
+                throw ProfileError.fetchFailed("Credits update verification failed")
+            } else {
+                print("✅ [Cash Out] Credits deducted and verified: \(currentCredits) -> \(newCredits)")
+            }
+        } else {
+            print("⚠️ [Cash Out] 无法验证积分更新，但继续执行")
+        }
+        
+        // 3. 创建提现记录（使用 redemptions 表，但创建一个特殊的 reward_id）
+        struct CashOutInsert: Encodable {
+            let id: String
+            let user_id: String
+            let reward_id: String
+            let points_used: Int
+            let status: String
+            let redeemed_at: String
+            let created_at: String
+            let updated_at: String
+        }
+        
+        let now = ISO8601DateFormatter().string(from: Date())
+        let cashOutRecord = CashOutInsert(
+            id: UUID().uuidString,
+            user_id: userId,
+            reward_id: "cash_out_\(UUID().uuidString)", // 特殊的 reward_id 标识这是提现
+            points_used: points,
+            status: "completed",
+            redeemed_at: now,
+            created_at: now,
+            updated_at: now
+        )
+        
+        try await client
+            .from("redemptions")
+            .insert(cashOutRecord)
+            .execute()
+        
+        print("✅ [Cash Out] Cash out record created: \(points) points = $\(cashAmount)")
+        
+        // 4. 发送通知更新积分
+        await MainActor.run {
+            print("📢 [Cash Out] 发送积分更新通知")
+            NotificationCenter.default.post(
+                name: NSNotification.Name("UserCreditsUpdated"), 
+                object: nil,
+                userInfo: ["newCredits": newCredits, "userId": userId]
+            )
+        }
     }
     
     // MARK: - Coffee Chat Invitations
@@ -4122,19 +4430,35 @@ extension SupabaseService {
     // MARK: - Credits Management
     
     /// 获取用户的 credits，并自动同步已 met 的 coffee chat 数量
-    /// 严格根据 hasMet 的数量来计算和同步 credits
+    /// 考虑兑换扣除的积分，正确计算可用积分
     func getUserCredits(userId: String) async throws -> Int {
         print("🔍 [积分] 获取用户 \(userId) 的 credits")
         
-        // 获取已 met 的 coffee chat 数量（这是唯一真实来源）
+        // 1. 获取已 met 的 coffee chat 数量（这是唯一真实来源）
         let allSchedules = try await getCoffeeChatSchedules(userId: userId)
         let metSchedules = allSchedules.filter { $0.hasMet }
-        let expectedCredits = metSchedules.count * 10
+        let baseCredits = metSchedules.count * 10
         
         print("🔍 [积分] 已 met 的 coffee chat 数量: \(metSchedules.count)")
-        print("🔍 [积分] 根据 hasMet 计算的期望 credits: \(expectedCredits)")
+        print("🔍 [积分] 基础 credits（hasMet * 10）: \(baseCredits)")
         
-        // 获取数据库中的当前 credits
+        // 2. 获取已兑换的积分总和
+        var redeemedCredits: Int = 0
+        do {
+            let redemptions = try await getUserRedemptions(userId: userId)
+            redeemedCredits = redemptions
+                .filter { $0.status == .completed }
+                .reduce(0) { $0 + $1.pointsUsed }
+            print("🔍 [积分] 已兑换的 credits: \(redeemedCredits)")
+        } catch {
+            print("⚠️ [积分] 无法获取兑换记录，假设已兑换积分为 0: \(error.localizedDescription)")
+        }
+        
+        // 3. 计算实际可用积分 = 基础积分 - 已兑换积分
+        let actualCredits = baseCredits - redeemedCredits
+        print("🔍 [积分] 实际可用 credits: \(baseCredits) - \(redeemedCredits) = \(actualCredits)")
+        
+        // 4. 获取数据库中的当前 credits
         let response = try await client
             .from("users")
             .select("credits")
@@ -4151,17 +4475,16 @@ extension SupabaseService {
             print("⚠️ [积分] 无法解析 credits，使用默认值 0")
         }
         
-        // 强制同步：无论 credits 是大于还是小于期望值，都更新到正确值
-        if currentCredits != expectedCredits {
-            print("🔄 [积分] credits 不匹配，强制同步更新...")
+        // 5. 如果数据库中的积分与实际可用积分不一致，更新数据库
+        if currentCredits != actualCredits {
+            print("🔄 [积分] credits 不匹配，同步更新...")
             print("   - 当前 credits: \(currentCredits)")
-            print("   - 期望 credits（基于 hasMet）: \(expectedCredits)")
-            print("   - 差异: \(currentCredits > expectedCredits ? "多" : "少") \(abs(currentCredits - expectedCredits))")
+            print("   - 实际可用 credits: \(actualCredits)")
+            print("   - 差异: \(currentCredits > actualCredits ? "多" : "少") \(abs(currentCredits - actualCredits))")
             
-            // 直接设置 credits 为期望值（严格根据 hasMet 数量）
-            try await setUserCredits(userId: userId, credits: expectedCredits)
-            print("✅ [积分] credits 已强制同步: \(currentCredits) -> \(expectedCredits)")
-            return expectedCredits
+            try await setUserCredits(userId: userId, credits: actualCredits)
+            print("✅ [积分] credits 已同步: \(currentCredits) -> \(actualCredits)")
+            return actualCredits
         } else {
             print("✅ [积分] credits 已同步，无需更新")
             return currentCredits

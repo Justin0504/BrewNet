@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UIKit
 
 // MARK: - Local Cache Manager
 class LocalCacheManager {
@@ -489,6 +490,7 @@ struct ProfileDisplayView: View {
                         networkingIntention: profile.networkingIntention,
                         networkingPreferences: profile.networkingPreferences,
                         personalitySocial: profile.personalitySocial,
+                        moments: profile.moments,
                         privacyTrust: profile.privacyTrust
                     )
                     profile = updatedProfile
@@ -597,158 +599,162 @@ struct ProfileHeaderView: View {
         return Int((Double(completedFields) / Double(totalFields)) * 100)
     }
     
+    // MARK: - View Components
+    @ViewBuilder
+    private var avatarWithProgressView: some View {
+        ZStack {
+            // Progress Circle (outer, red)
+            Circle()
+                .stroke(Color.red.opacity(0.3), lineWidth: 4)
+                .frame(width: 100, height: 100)
+            
+            // Progress Circle (filled portion, red)
+            Circle()
+                .trim(from: 0, to: CGFloat(profileCompletionPercentage) / 100)
+                .stroke(Color.red, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                .frame(width: 100, height: 100)
+                .rotationEffect(.degrees(-90))
+            
+            // Profile Image (inner) - 使用 AvatarView 以便更好地控制缓存
+            Group {
+                if let imageURL = profile.coreIdentity.profileImage, !imageURL.isEmpty {
+                    AvatarView(avatarString: imageURL, size: 84)
+                } else {
+                    Image(systemName: "person.circle.fill")
+                        .font(.system(size: 60))
+                        .foregroundColor(.gray)
+                }
+            }
+            .frame(width: 84, height: 84)
+            .clipShape(Circle())
+            .id("profile-avatar-\(profile.coreIdentity.profileImage ?? "nil")")
+            .overlay(
+                Circle()
+                    .stroke(Color.white, lineWidth: 2)
+            )
+            
+            // Percentage badge at bottom
+            VStack {
+                Spacer()
+                Text("\(profileCompletionPercentage)%")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(Color.white)
+                    .cornerRadius(8)
+                    .offset(y: 5)
+            }
+            .frame(width: 100, height: 100)
+        }
+    }
+    
+    @ViewBuilder
+    private var nameAndIconsView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Name
+            HStack(spacing: 4) {
+                Text(profile.coreIdentity.name)
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundColor(.black)
+            }
+            
+            // Icons row
+            HStack(spacing: 12) {
+                // Camera icon (blue) - 可点击更换头像
+                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                    ZStack {
+                        if isUploadingImage {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(.blue)
+                        }
+                    }
+                    .frame(width: 24, height: 24)
+                    .background(Color.blue.opacity(0.1))
+                    .clipShape(Circle())
+                }
+                
+                // Verification icon (grey)
+                Image(systemName: "person.badge.shield.checkmark.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+                    .frame(width: 24, height: 24)
+                    .background(Color.gray.opacity(0.1))
+                    .clipShape(Circle())
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var companyTitleView: some View {
+        HStack {
+            // 优先显示公司，如果没有则显示学校
+            if let company = profile.professionalBackground.currentCompany, !company.isEmpty {
+                if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
+                    Text("\(company) · \(jobTitle)")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.black)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                } else {
+                    Text(company)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.black)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            } else if let education = profile.professionalBackground.education, !education.isEmpty {
+                // 如果没有公司，显示学校
+                if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
+                    Text("\(education) · \(jobTitle)")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.black)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                } else {
+                    Text(education)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.black)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            } else {
+                // 如果都没有，显示占位符
+                Text("Complete Your Profile")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.gray)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.white)
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+        )
+    }
+    
     var body: some View {
         VStack(spacing: 12) {
-            // Top Row: Avatar + Progress Circle on left, Name + Age + Icons on right
-            // 整个区域包装成可点击的 Button
             Button(action: {
                 onShowProfileCard?()
             }) {
                 HStack(alignment: .top, spacing: 16) {
-                    // Left: Profile Image with Progress Circle
-                    ZStack {
-                        // Progress Circle (outer, red)
-                        Circle()
-                            .stroke(Color.red.opacity(0.3), lineWidth: 4)
-                            .frame(width: 100, height: 100)
-                        
-                        // Progress Circle (filled portion, red)
-                        Circle()
-                            .trim(from: 0, to: CGFloat(profileCompletionPercentage) / 100)
-                            .stroke(Color.red, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                            .frame(width: 100, height: 100)
-                            .rotationEffect(.degrees(-90))
-                        
-                        // Profile Image (inner) - 使用 AvatarView 以便更好地控制缓存
-                        Group {
-                            if let imageURL = profile.coreIdentity.profileImage, !imageURL.isEmpty {
-                                AvatarView(avatarString: imageURL, size: 84)
-                            } else {
-                                Image(systemName: "person.circle.fill")
-                                    .font(.system(size: 60))
-                                    .foregroundColor(.gray)
-                            }
-                        }
-                        .frame(width: 84, height: 84)
-                        .clipShape(Circle())
-                        .id("profile-avatar-\(profile.coreIdentity.profileImage ?? "nil")") // 强制刷新当头像URL变化时
-                        .overlay(
-                            Circle()
-                                .stroke(Color.white, lineWidth: 2)
-                        )
-                        
-                        // Percentage badge at bottom
-                        VStack {
-                            Spacer()
-                            Text("\(profileCompletionPercentage)%")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(.black)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2)
-                                .background(Color.white)
-                                .cornerRadius(8)
-                                .offset(y: 5)
-                        }
-                        .frame(width: 100, height: 100)
-                    }
+                    avatarWithProgressView
                     
-                    // Right: Name, Age, Icons, and Company/Title button
                     VStack(alignment: .leading, spacing: 8) {
-                        // Name and Age (横向并列)
-                        HStack(spacing: 4) {
-                            Text(profile.coreIdentity.name)
-                                .font(.system(size: 22, weight: .bold))
-                                .foregroundColor(.black)
-                            
-                            // Pro badge
-                            if let user = authManager.currentUser, user.isProActive {
-                                ProBadge(size: .medium)
-                            }
-                            
-                            // Age would need to be calculated from birthdate if available
-                            // For now, we'll skip it if not available
-                        }
-                        
-                        // Icons row (横向并列)
-                        HStack(spacing: 12) {
-                            // Camera icon (blue) - 可点击更换头像
-                            PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                                ZStack {
-                                    if isUploadingImage {
-                                        ProgressView()
-                                            .progressViewStyle(CircularProgressViewStyle(tint: .blue))
-                                            .scaleEffect(0.8)
-                                    } else {
-                                        Image(systemName: "camera.fill")
-                                            .font(.system(size: 14))
-                                            .foregroundColor(.blue)
-                                    }
-                                }
-                                .frame(width: 24, height: 24)
-                                .background(Color.blue.opacity(0.1))
-                                .clipShape(Circle())
-                            }
-                            
-                            // Verification icon (grey)
-                            Image(systemName: "person.badge.shield.checkmark.fill")
-                                .font(.system(size: 14))
-                                .foregroundColor(.gray)
-                                .frame(width: 24, height: 24)
-                                .background(Color.gray.opacity(0.1))
-                                .clipShape(Circle())
-                        }
-                        
-                        // Company/School and Title display (仅显示，不可点击)
-                        HStack {
-                            // 优先显示公司，如果没有则显示学校
-                            if let company = profile.professionalBackground.currentCompany, !company.isEmpty {
-                                if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
-                                    Text("\(company) · \(jobTitle)")
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(.black)
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-                                } else {
-                                    Text(company)
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(.black)
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-                                }
-                            } else if let education = profile.professionalBackground.education, !education.isEmpty {
-                                // 如果没有公司，显示学校
-                                if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
-                                    Text("\(education) · \(jobTitle)")
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(.black)
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-                                } else {
-                                    Text(education)
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(.black)
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-                                }
-                            } else {
-                                // 如果都没有，显示占位符
-                                Text("Complete Your Profile")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.gray)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                            }
-                            
-                            Spacer()
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(Color.white)
-                        .cornerRadius(12)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-                        )
+                        nameAndIconsView
+                        companyTitleView
                     }
                     
                     Spacer()
@@ -808,6 +814,7 @@ struct ProfileHeaderView: View {
                                 networkingIntention: profile.networkingIntention,
                                 networkingPreferences: profile.networkingPreferences,
                                 personalitySocial: profile.personalitySocial,
+                                moments: profile.moments,
                                 privacyTrust: profile.privacyTrust
                             )
                             
@@ -820,6 +827,7 @@ struct ProfileHeaderView: View {
                                 networkingIntention: profile.networkingIntention,
                                 networkingPreferences: profile.networkingPreferences,
                                 personalitySocial: profile.personalitySocial,
+                                moments: profile.moments,
                                 privacyTrust: profile.privacyTrust,
                                 createdAt: profile.createdAt,
                                 updatedAt: ISO8601DateFormatter().string(from: Date())
@@ -2775,6 +2783,9 @@ struct RedemptionSystemView: View {
     @State private var myRedemptions: [RedemptionRecord] = []
     @State private var isLoading = true
     @State private var refreshID = UUID() // 用于强制刷新 toolbar
+    @State private var showRedeemAlert = false
+    @State private var redeemAlertMessage = ""
+    @State private var cashOutAmount: String = "" // 提现积分输入
     
     // Cached filtered rewards to improve performance
     @State private var cachedCoffeeRewards: [Reward] = []
@@ -2801,20 +2812,40 @@ struct RedemptionSystemView: View {
         
         lastRewardsHash = currentHash
         
+        print("🔍 [Redeem] 开始过滤奖励，总数: \(availableRewards.count)")
+        for reward in availableRewards {
+            print("   - \(reward.name) (category: \(reward.category), id: \(reward.id))")
+        }
+        
         // 使用并行过滤提高性能
         let coffeeFilter: (Reward) -> Bool = { reward in
-            reward.category == .coffee || reward.name.lowercased().contains("coffee")
+            // 匹配 category 为 coffee 的奖励
+            // 或者名称中包含 coffee、starbucks、dunkin、tim hortons、frappuccino、latte、brew 等关键词
+            let nameLower = reward.name.lowercased()
+            return reward.category == .coffee || 
+                   nameLower.contains("coffee") ||
+                   nameLower.contains("starbucks") ||
+                   nameLower.contains("dunkin") ||
+                   nameLower.contains("tim hortons") ||
+                   nameLower.contains("frappuccino") ||
+                   nameLower.contains("latte") ||
+                   nameLower.contains("brew") ||
+                   nameLower.contains("voucher")
         }
         
         let membershipFilter: (Reward) -> Bool = { reward in
-            reward.name.lowercased().contains("premium") || 
-            reward.name.lowercased().contains("ultimate") ||
-            reward.name.lowercased().contains("membership")
+            let nameLower = reward.name.lowercased()
+            return nameLower.contains("premium") || 
+                   nameLower.contains("ultimate") ||
+                   nameLower.contains("membership") ||
+                   nameLower.contains("brewnet")
         }
         
         // 只过滤一次，然后分别提取
         let newCoffeeRewards = availableRewards.filter(coffeeFilter)
         let newMembershipRewards = availableRewards.filter(membershipFilter)
+        
+        print("✅ [Redeem] 过滤结果 - 咖啡代金券: \(newCoffeeRewards.count), 会员奖励: \(newMembershipRewards.count)")
         
         // 使用 Set 进行快速比较
         let coffeeIds = Set(newCoffeeRewards.map { $0.id })
@@ -2867,15 +2898,20 @@ struct RedemptionSystemView: View {
                     icon: "cup.and.saucer.fill",
                     message: "No coffee vouchers available"
                 )
+                .frame(height: 200)
             } else {
-                LazyVStack(spacing: 12) {
-                    ForEach(coffeeRewards, id: \.id) { reward in
-                        RewardCard(reward: reward, userPoints: totalCredits) {
-                            redeemReward(reward)
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(coffeeRewards, id: \.id) { reward in
+                            RewardCard(reward: reward, userPoints: totalCredits) {
+                                redeemReward(reward)
+                            }
+                            .equatable() // 使用 Equatable 优化，避免不必要的重绘
                         }
-                        .equatable() // 使用 Equatable 优化，避免不必要的重绘
                     }
+                    .padding(.vertical, 4)
                 }
+                .frame(height: 400) // 固定高度，可以滚动
             }
         } label: {
             sectionLabel(icon: "cup.and.saucer.fill", title: "Coffee Vouchers")
@@ -2909,14 +2945,178 @@ struct RedemptionSystemView: View {
     
     private var cashOutSection: some View {
         DisclosureGroup {
-            emptyStateView(
-                icon: "dollarsign.circle.fill",
-                message: "Cash out feature coming soon"
-            )
+            VStack(spacing: 20) {
+                // 输入和显示区域
+                HStack(spacing: 16) {
+                    // 左边：输入积分
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Credits to Cash Out")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.gray)
+                        
+                        TextField("Enter credits", text: $cashOutAmount)
+                            .keyboardType(.numberPad)
+                            .font(.system(size: 18, weight: .semibold))
+                            .padding(12)
+                            .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+                            .cornerRadius(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.3), lineWidth: 1)
+                            )
+                            .onChange(of: cashOutAmount) { newValue in
+                                // 限制输入不超过用户的 credits 数量
+                                if let enteredValue = Int(newValue), enteredValue > totalCredits {
+                                    cashOutAmount = String(totalCredits)
+                                }
+                            }
+                    }
+                    
+                    // 右边：显示现金
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Cash Amount")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.gray)
+                        
+                        HStack(spacing: 4) {
+                            Text("$")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            Text(String(format: "%.2f", cashOutValue))
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                }
+                
+                // 兑换比例提示
+                HStack(spacing: 4) {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                    Text("100 credits = $10.00")
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                }
+                
+                // 提现按钮
+                Button(action: {
+                    processCashOut()
+                }) {
+                    Text("Cash Out")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(canCashOut ? 1.0 : 0.5))
+                        .cornerRadius(8)
+                }
+                .disabled(!canCashOut)
+            }
+            .padding(.vertical, 8)
         } label: {
             sectionLabel(icon: "dollarsign.circle.fill", title: "Cash Out")
         }
         .id("cashout-section")
+    }
+    
+    // 计算现金金额（100 积分 = 10 美元）
+    private var cashOutValue: Double {
+        guard let points = Int(cashOutAmount), points > 0 else {
+            return 0.0
+        }
+        return Double(points) / 10.0
+    }
+    
+    // 检查是否可以提现
+    private var canCashOut: Bool {
+        guard let points = Int(cashOutAmount),
+              points > 0,
+              points <= totalCredits,
+              points >= 100 else { // 最少提现 100 积分
+            return false
+        }
+        return true
+    }
+    
+    // 处理提现
+    private func processCashOut() {
+        guard let points = Int(cashOutAmount),
+              points > 0,
+              points <= totalCredits else {
+            showRedeemAlert(message: "Invalid amount or insufficient points")
+            return
+        }
+        
+        guard points >= 100 else {
+            showRedeemAlert(message: "Minimum cash out is 100 points ($10.00)")
+            return
+        }
+        
+        guard let currentUser = authManager.currentUser else { return }
+        
+        Task {
+            do {
+                // 先保存现金金额（在清空输入前）
+                let cashAmount = cashOutValue
+                
+                // 先立即更新 UI 中的积分（乐观更新）
+                let newCredits = totalCredits - points
+                await MainActor.run {
+                    totalCredits = newCredits
+                    refreshID = UUID()
+                    LocalCacheManager.shared.updateRedeemCredits(userId: currentUser.id, credits: newCredits)
+                }
+                
+                // 执行提现：扣除积分并创建提现记录
+                try await supabaseService.cashOut(userId: currentUser.id, points: points, cashAmount: cashAmount)
+                
+                // 清空输入
+                await MainActor.run {
+                    cashOutAmount = ""
+                }
+                
+                // 等待一小段时间确保数据库更新完成
+                try? await Task.sleep(nanoseconds: 300_000_000) // 0.3秒
+                
+                // 重新加载数据以确保同步
+                await loadRedemptionData()
+                
+                // 显示成功提示
+                await MainActor.run {
+                    showRedeemAlert(message: "Successfully cashed out $\(String(format: "%.2f", cashAmount))! Your payment will be processed.")
+                }
+            } catch {
+                print("❌ Failed to cash out: \(error.localizedDescription)")
+                
+                // 如果失败，恢复积分
+                await MainActor.run {
+                    Task {
+                        do {
+                            let actualCredits = try await supabaseService.getUserCredits(userId: currentUser.id)
+                            await MainActor.run {
+                                totalCredits = actualCredits
+                                refreshID = UUID()
+                                LocalCacheManager.shared.updateRedeemCredits(userId: currentUser.id, credits: actualCredits)
+                            }
+                        } catch {
+                            print("⚠️ Failed to restore credits: \(error.localizedDescription)")
+                        }
+                    }
+                }
+                
+                let errorMessage = error.localizedDescription.contains("Insufficient") 
+                    ? error.localizedDescription 
+                    : "Failed to cash out. Please try again."
+                await MainActor.run {
+                    showRedeemAlert(message: errorMessage)
+                }
+            }
+        }
     }
     
     private func emptyStateView(icon: String, message: String) -> some View {
@@ -3072,6 +3272,11 @@ struct RedemptionSystemView: View {
                     updateCachedRewards()
                 }
             }
+            .alert("Redemption", isPresented: $showRedeemAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(redeemAlertMessage)
+            }
         }
     }
     
@@ -3089,8 +3294,10 @@ struct RedemptionSystemView: View {
             if let cachedCoffee = cached.coffeeRewards, let cachedMembership = cached.membershipRewards {
                 cachedCoffeeRewards = cachedCoffee
                 cachedMembershipRewards = cachedMembership
+                print("✅ [Redeem] 从缓存加载预过滤奖励 - 咖啡: \(cachedCoffee.count), 会员: \(cachedMembership.count)")
             } else {
-                // 如果没有预过滤数据，执行过滤（但不在主线程阻塞）
+                // 如果没有预过滤数据，执行过滤
+                print("⚠️ [Redeem] 缓存中没有预过滤数据，执行过滤...")
                 updateCachedRewards()
             }
             
@@ -3157,6 +3364,14 @@ struct RedemptionSystemView: View {
                     let currentRewardIds = Set(availableRewards.map { $0.id })
                     
                     if newRewardIds != currentRewardIds {
+                        print("🔄 [Redeem] 奖励列表已更新，从 \(availableRewards.count) 个变为 \(rewards.count) 个")
+                        availableRewards = rewards
+                        // 立即更新缓存奖励
+                        updateCachedRewards()
+                        needsUpdate = true
+                    } else if availableRewards.isEmpty && !rewards.isEmpty {
+                        // 如果当前为空但新数据不为空，也要更新
+                        print("🔄 [Redeem] 首次加载奖励数据: \(rewards.count) 个")
                         availableRewards = rewards
                         updateCachedRewards()
                         needsUpdate = true
@@ -3196,15 +3411,84 @@ struct RedemptionSystemView: View {
     private func redeemReward(_ reward: Reward) {
         guard let currentUser = authManager.currentUser else { return }
         
+        // 先检查积分是否足够
+        if totalCredits < reward.pointsRequired {
+            showRedeemAlert(message: "Insufficient points. You need \(reward.pointsRequired) points but only have \(totalCredits) points.")
+            return
+        }
+        
         Task {
             do {
+                // 先立即更新 UI 中的积分（乐观更新）
+                let newCredits = totalCredits - reward.pointsRequired
+                await MainActor.run {
+                    totalCredits = newCredits
+                    refreshID = UUID()
+                    // 更新缓存
+                    LocalCacheManager.shared.updateRedeemCredits(userId: currentUser.id, credits: newCredits)
+                }
+                
+                // 执行兑换
                 try await supabaseService.redeemReward(userId: currentUser.id, rewardId: reward.id)
-                // 重新加载数据
+                
+                // 等待一小段时间确保数据库更新完成
+                try? await Task.sleep(nanoseconds: 300_000_000) // 0.3秒
+                
+                // 重新加载数据以确保同步
                 await loadRedemptionData()
+                
+                // 再次确认积分已更新
+                do {
+                    let finalCredits = try await supabaseService.getUserCredits(userId: currentUser.id)
+                    await MainActor.run {
+                        if totalCredits != finalCredits {
+                            print("🔄 [Redeem] 同步最终积分: \(totalCredits) -> \(finalCredits)")
+                            totalCredits = finalCredits
+                            refreshID = UUID()
+                            LocalCacheManager.shared.updateRedeemCredits(userId: currentUser.id, credits: finalCredits)
+                        }
+                    }
+                } catch {
+                    print("⚠️ [Redeem] 无法获取最终积分: \(error.localizedDescription)")
+                }
+                
+                // 显示成功提示
+                await MainActor.run {
+                    showRedeemAlert(message: "Successfully redeemed \(reward.name)! Your voucher has been saved.")
+                }
             } catch {
                 print("❌ Failed to redeem reward: \(error.localizedDescription)")
+                
+                // 如果失败，恢复积分
+                await MainActor.run {
+                    // 重新获取实际积分
+                    Task {
+                        do {
+                            let actualCredits = try await supabaseService.getUserCredits(userId: currentUser.id)
+                            await MainActor.run {
+                                totalCredits = actualCredits
+                                refreshID = UUID()
+                                LocalCacheManager.shared.updateRedeemCredits(userId: currentUser.id, credits: actualCredits)
+                            }
+                        } catch {
+                            print("⚠️ Failed to restore credits: \(error.localizedDescription)")
+                        }
+                    }
+                }
+                
+                let errorMessage = error.localizedDescription.contains("Insufficient points") 
+                    ? error.localizedDescription 
+                    : "Failed to redeem reward. Please try again."
+                await MainActor.run {
+                    showRedeemAlert(message: errorMessage)
+                }
             }
         }
+    }
+    
+    private func showRedeemAlert(message: String) {
+        redeemAlertMessage = message
+        showRedeemAlert = true
     }
 }
 
@@ -3242,56 +3526,82 @@ struct RewardCard: View, Equatable {
     }
     
     var body: some View {
-        HStack(spacing: 16) {
-            // Reward Icon/Image
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
-                    .frame(width: 60, height: 60)
-                
-                Image(systemName: rewardIcon)
-                    .font(.system(size: 28))
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-            }
-            
-            // Reward Info
-            VStack(alignment: .leading, spacing: 6) {
-                Text(reward.name)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.black)
-                
-                Text(reward.description)
-                    .font(.system(size: 14))
-                    .foregroundColor(.gray)
-                    .lineLimit(2)
-                
-                HStack(spacing: 4) {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 12))
-                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                    Text("\(reward.pointsRequired) points")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+        VStack(spacing: 12) {
+            // 第一行：图片和信息
+            HStack(spacing: 16) {
+                // Reward Icon/Image
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                        .frame(width: 100, height: 100)
+                    
+                    // 如果有图片名称，尝试从 Assets 加载
+                    if let imageName = reward.imageUrl, !imageName.isEmpty {
+                        // 尝试加载图片，如果失败则显示默认图标
+                        Group {
+                            if UIImage(named: imageName) != nil {
+                                Image(imageName)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 100, height: 100)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                            } else {
+                                Image(systemName: rewardIcon)
+                                    .font(.system(size: 40))
+                                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            }
+                        }
+                    } else {
+                        Image(systemName: rewardIcon)
+                            .font(.system(size: 40))
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    }
                 }
-            }
-            
-            Spacer()
-            
-            // Redeem Button
-            Button(action: {
-                if canRedeem {
-                    onRedeem()
+                
+                // Reward Info
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(reward.name)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.black)
+                    
+                    Text(reward.description)
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                        .lineLimit(2)
+                    
+                    HStack(spacing: 4) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("\(reward.pointsRequired) points")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    }
                 }
-            }) {
-                Text(canRedeem ? "Redeem" : "Insufficient Points")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(canRedeem ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray)
-                    .cornerRadius(8)
+                
+                Spacer()
             }
-            .disabled(!canRedeem)
+            
+            // 第二行：按钮
+            HStack {
+                Spacer()
+                
+                // Redeem Button
+                Button(action: {
+                    if canRedeem {
+                        onRedeem()
+                    }
+                }) {
+                    Text(canRedeem ? "Redeem" : "Insufficient Points")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(canRedeem ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray)
+                        .cornerRadius(8)
+                }
+                .disabled(!canRedeem)
+            }
         }
         .padding(16)
         .background(Color(red: 0.98, green: 0.97, blue: 0.95))
@@ -3391,7 +3701,7 @@ struct StatusBadge: View {
         case .pending:
             return "Pending"
         case .completed:
-            return "Completed"
+            return "Use"
         case .cancelled:
             return "Cancelled"
         }
@@ -3402,7 +3712,7 @@ struct StatusBadge: View {
         case .pending:
             return .orange
         case .completed:
-            return .green
+            return Color(red: 0.6, green: 0.4, blue: 0.2)
         case .cancelled:
             return .gray
         }

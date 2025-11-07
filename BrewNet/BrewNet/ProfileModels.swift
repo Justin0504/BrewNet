@@ -23,7 +23,10 @@ struct BrewNetProfile: Codable, Identifiable {
     // MARK: - 5. Personality & Social Layer
     let personalitySocial: PersonalitySocial
     
-    // MARK: - 6. Privacy & Trust Controls
+    // MARK: - 6. Moments
+    let moments: Moments?
+    
+    // MARK: - 7. Privacy & Trust Controls
     let privacyTrust: PrivacyTrust
     
     enum CodingKeys: String, CodingKey {
@@ -36,6 +39,7 @@ struct BrewNetProfile: Codable, Identifiable {
         case networkingIntention = "networking_intention"
         case networkingPreferences = "networking_preferences"
         case personalitySocial = "personality_social"
+        case moments
         case privacyTrust = "privacy_trust"
     }
 }
@@ -295,6 +299,37 @@ struct PersonalitySocial: Codable {
             try container.encode(preferredMeetingVibes, forKey: .preferredMeetingVibes)
         }
         try container.encodeIfPresent(selfIntroduction, forKey: .selfIntroduction)
+    }
+}
+
+// MARK: - 6. Moments
+struct Moments: Codable, Equatable {
+    var moments: [Moment]
+    
+    enum CodingKeys: String, CodingKey {
+        case moments
+    }
+    
+    init(moments: [Moment] = []) {
+        self.moments = moments
+    }
+}
+
+struct Moment: Codable, Equatable, Identifiable {
+    let id: String
+    var imageUrl: String?
+    var caption: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case imageUrl = "image_url"
+        case caption
+    }
+    
+    init(id: String = UUID().uuidString, imageUrl: String? = nil, caption: String? = nil) {
+        self.id = id
+        self.imageUrl = imageUrl
+        self.caption = caption
     }
 }
 
@@ -729,6 +764,7 @@ struct ProfileCreationData {
     var networkingIntention: NetworkingIntention?
     var networkingPreferences: NetworkingPreferences?
     var personalitySocial: PersonalitySocial?
+    var moments: Moments?
     var privacyTrust: PrivacyTrust?
     
     var isComplete: Bool {
@@ -747,10 +783,11 @@ struct ProfileCreationData {
             networkingIntention != nil,
             networkingPreferences != nil,
             personalitySocial != nil,
+            moments != nil,
             privacyTrust != nil
-        ].filter { $0 }.count
-        
-        return Double(completedSections) / 6.0
+        ]
+        let completedCount = completedSections.filter { $0 }.count
+        return Double(completedCount) / Double(completedSections.count) * 100
     }
 }
 
@@ -811,6 +848,7 @@ extension BrewNetProfile {
                 preferredMeetingVibes: [.casual],
                 selfIntroduction: nil
             ),
+            moments: nil,
             privacyTrust: PrivacyTrust(
                 visibilitySettings: VisibilitySettings.createDefault(),
                 verifiedStatus: .unverified,

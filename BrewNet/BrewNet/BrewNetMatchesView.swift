@@ -1602,6 +1602,7 @@ struct BrewNetMatchesView: View {
                 preferredMeetingVibes: [.reflective],
                 selfIntroduction: "I love bridging design and data to solve real-world problems. When I'm not designing products, you'll find me exploring coffee shops or capturing moments with my camera."
             ),
+            moments: nil,
             privacyTrust: PrivacyTrust(
                 visibilitySettings: VisibilitySettings.createDefault(),
                 verifiedStatus: .verifiedProfessional,
@@ -1683,6 +1684,7 @@ struct BrewNetMatchesView: View {
                 preferredMeetingVibes: [.casual],
                 selfIntroduction: "Passionate about mobile apps and building great user experiences."
             ),
+            moments: nil,
             privacyTrust: PrivacyTrust(
                 visibilitySettings: VisibilitySettings.createDefault(),
                 verifiedStatus: .verifiedProfessional,

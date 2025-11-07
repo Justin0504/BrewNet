@@ -1828,6 +1828,7 @@ struct ChatInterfaceView: View {
                 preferredMeetingVibes: [.casual],
                 selfIntroduction: user.bio.isEmpty ? "Hi! I'm \(user.name). Let's connect!" : user.bio
             ),
+            moments: nil,
             privacyTrust: PrivacyTrust(
                 visibilitySettings: VisibilitySettings.createDefault(),
                 verifiedStatus: .unverified,

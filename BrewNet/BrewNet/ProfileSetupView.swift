@@ -20,7 +20,7 @@ struct ProfileSetupView: View {
     @State private var contentHeight: CGFloat = 0
     @State private var scrollViewHeight: CGFloat = 0
     
-    private let totalSteps = 6
+    private let totalSteps = 7
     
     // MARK: - Computed Properties
     private var progressPercentage: Int {
@@ -267,8 +267,11 @@ struct ProfileSetupView: View {
                                                 PersonalitySocialStep(profileData: $profileData)
                                                     .id("step-5")
                                             case 6:
-                                                PrivacyTrustStep(profileData: $profileData)
+                                                MomentsStep(profileData: $profileData)
                                                     .id("step-6")
+                                            case 7:
+                                                PrivacyTrustStep(profileData: $profileData)
+                                                    .id("step-7")
                                             default:
                                                 EmptyView()
                                             }
@@ -375,7 +378,8 @@ struct ProfileSetupView: View {
         case 3: return "Networking Intention"
         case 4: return "Networking Preferences"
         case 5: return "Personality & Social"
-        case 6: return "Privacy & Trust"
+        case 6: return "Highlights"
+        case 7: return "Privacy & Trust"
         default: return ""
         }
     }
@@ -387,7 +391,8 @@ struct ProfileSetupView: View {
         case 3: return "Define your networking goals and intentions"
         case 4: return "Set your networking preferences and availability"
         case 5: return "Show your personality and what makes you unique"
-        case 6: return "Control your privacy and how others can discover you"
+        case 6: return "Share your highlights - upload up to 6 photos with captions"
+        case 7: return "Control your privacy and how others can discover you"
         default: return ""
         }
     }
@@ -431,6 +436,7 @@ struct ProfileSetupView: View {
                         networkingIntention: profileData.networkingIntention ?? existing.networkingIntention,
                         networkingPreferences: profileData.networkingPreferences ?? existing.networkingPreferences,
                         personalitySocial: profileData.personalitySocial ?? existing.personalitySocial,
+                        moments: profileData.moments ?? existing.moments,
                         privacyTrust: profileData.privacyTrust ?? existing.privacyTrust,
                         createdAt: existing.createdAt,
                         updatedAt: ISO8601DateFormatter().string(from: Date())
@@ -452,6 +458,7 @@ struct ProfileSetupView: View {
                         networkingIntention: updatedProfile.networkingIntention,
                         networkingPreferences: updatedProfile.networkingPreferences,
                         personalitySocial: updatedProfile.personalitySocial,
+                        moments: updatedProfile.moments,
                         privacyTrust: updatedProfile.privacyTrust,
                         createdAt: updatedProfile.createdAt,
                         updatedAt: updatedProfile.updatedAt
@@ -522,6 +529,7 @@ struct ProfileSetupView: View {
                         networkingIntention: profileData.networkingIntention ?? existing.networkingIntention,
                         networkingPreferences: profileData.networkingPreferences ?? existing.networkingPreferences,
                         personalitySocial: profileData.personalitySocial ?? existing.personalitySocial,
+                        moments: profileData.moments ?? existing.moments,
                         privacyTrust: profileData.privacyTrust ?? existing.privacyTrust,
                         createdAt: existing.createdAt,
                         updatedAt: ISO8601DateFormatter().string(from: Date())
@@ -543,6 +551,7 @@ struct ProfileSetupView: View {
                         networkingIntention: updatedProfile.networkingIntention,
                         networkingPreferences: updatedProfile.networkingPreferences,
                         personalitySocial: updatedProfile.personalitySocial,
+                        moments: updatedProfile.moments,
                         privacyTrust: updatedProfile.privacyTrust,
                         createdAt: updatedProfile.createdAt,
                         updatedAt: updatedProfile.updatedAt
@@ -635,6 +644,7 @@ struct ProfileSetupView: View {
         let networkingIntention = profileData.networkingIntention ?? profile.networkingIntention
         let networkingPreferences = profileData.networkingPreferences ?? profile.networkingPreferences
         let personalitySocial = profileData.personalitySocial ?? profile.personalitySocial
+        let moments = profileData.moments ?? profile.moments
         let privacyTrust = profileData.privacyTrust ?? profile.privacyTrust
         
         updatedProfile = BrewNetProfile(
@@ -647,6 +657,7 @@ struct ProfileSetupView: View {
             networkingIntention: networkingIntention,
             networkingPreferences: networkingPreferences,
             personalitySocial: personalitySocial,
+            moments: moments,
             privacyTrust: privacyTrust
         )
         
@@ -693,6 +704,7 @@ struct ProfileSetupView: View {
                         profileData.networkingIntention = existingProfile.networkingIntention
                         profileData.networkingPreferences = existingProfile.networkingPreferences
                         profileData.personalitySocial = existingProfile.personalitySocial
+                        profileData.moments = existingProfile.moments
                         profileData.privacyTrust = existingProfile.privacyTrust
                         
                         print("✅ Profile data loaded into profileData")
@@ -2893,7 +2905,379 @@ struct PersonalitySocialStep: View {
     }
 }
 
-// MARK: - Step 6: Privacy & Trust
+// MARK: - Step 6: Highlights
+struct MomentsStep: View {
+    @Binding var profileData: ProfileCreationData
+    @EnvironmentObject var supabaseService: SupabaseService
+    @EnvironmentObject var authManager: AuthManager
+    
+    @State private var moments: [Moment] = []
+    @State private var selectedPhotoItems: [PhotosPickerItem?] = Array(repeating: nil, count: 6)
+    @State private var imageDataArray: [Data?] = Array(repeating: nil, count: 6)
+    @State private var captions: [String] = Array(repeating: "", count: 6)
+    @State private var isUploading: [Int: Bool] = [:]
+    @State private var uploadedImageURLs: [Int: String] = [:]
+    @State private var currentPageIndex: Int = 0
+    
+    // 计算总页面数
+    private var totalPages: Int {
+        let validMomentsCount = moments.filter { $0.imageUrl != nil && !($0.imageUrl?.isEmpty ?? true) }.count
+        let uploadingCount = imageDataArray.enumerated().filter { $0.element != nil && uploadedImageURLs[$0.offset] == nil }.count
+        let totalItems = validMomentsCount + uploadingCount
+        return max(1, min(totalItems + (totalItems < 6 ? 1 : 0), 6))
+    }
+    
+    // 判断是否显示下一张箭头
+    private func shouldShowNextArrow(for index: Int) -> Bool {
+        // 当前页面有图片（已上传或正在上传），且不是最后一页，且还有空位
+        let hasImage = (uploadedImageURLs[index] != nil && !uploadedImageURLs[index]!.isEmpty) || imageDataArray[index] != nil
+        let isNotLastPage = index < totalPages - 1
+        let hasMoreSpace = totalPages < 6 || index < 5
+        
+        return hasImage && isNotLastPage && hasMoreSpace
+    }
+    
+    var body: some View {
+        VStack(spacing: 24) {
+            // 始终使用 TabView 显示，支持翻页
+            ZStack {
+                TabView(selection: $currentPageIndex) {
+                    ForEach(0..<totalPages, id: \.self) { index in
+                        HighlightUploadCard(
+                            selectedPhotoItem: $selectedPhotoItems[index],
+                            imageData: $imageDataArray[index],
+                            caption: $captions[index],
+                            isUploading: Binding(
+                                get: { isUploading[index] ?? false },
+                                set: { isUploading[index] = $0 }
+                            ),
+                            uploadedImageURL: Binding(
+                                get: { uploadedImageURLs[index] },
+                                set: { uploadedImageURLs[index] = $0 }
+                            ),
+                            onImageSelected: { item in
+                                selectedPhotoItems[index] = item
+                                loadImageData(for: index, item: item)
+                            },
+                            onRemove: {
+                                removeMoment(at: index)
+                                // 如果删除后还有图片，保持在当前页面，否则回到第一页
+                                if moments.isEmpty && imageDataArray.allSatisfy({ $0 == nil }) {
+                                    currentPageIndex = 0
+                                } else if currentPageIndex >= totalPages - 1 {
+                                    currentPageIndex = max(0, totalPages - 2)
+                                }
+                            },
+                            onCaptionChanged: { newCaption in
+                                captions[index] = newCaption
+                                updateProfileData()
+                            },
+                            showNextArrow: shouldShowNextArrow(for: index)
+                        )
+                        .tag(index)
+                    }
+                }
+                .tabViewStyle(.page)
+                .indexViewStyle(.page(backgroundDisplayMode: .always))
+                .frame(height: 420) // 固定高度：280 (图片) + 20 (间距) + 100 (输入框) + 20 (padding)
+                
+                // 右侧箭头按钮（若隐若现）
+                if shouldShowNextArrow(for: currentPageIndex) {
+                    HStack {
+                        Spacer()
+                        Button(action: {
+                            // 切换到下一页
+                            if currentPageIndex < totalPages - 1 {
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    currentPageIndex = currentPageIndex + 1
+                                }
+                            }
+                        }) {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 28, weight: .light))
+                                .foregroundColor(.white.opacity(0.7))
+                                .padding(16)
+                                .background(
+                                    Circle()
+                                        .fill(Color.black.opacity(0.2))
+                                        .blur(radius: 2)
+                                )
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                                )
+                                .shadow(color: Color.black.opacity(0.15), radius: 6, x: 0, y: 2)
+                        }
+                        .padding(.trailing, 16)
+                        .padding(.top, 140) // 垂直居中在图片区域
+                    }
+                    .frame(height: 420)
+                    .allowsHitTesting(true)
+                }
+            }
+        }
+        .onAppear {
+            loadExistingMoments()
+        }
+        .onChange(of: imageDataArray) { _ in
+            // 当图片数据加载完成时，自动上传
+            for index in 0..<6 {
+                if imageDataArray[index] != nil && uploadedImageURLs[index] == nil && !(isUploading[index] ?? false) {
+                    uploadImage(for: index)
+                }
+            }
+        }
+        .onChange(of: uploadedImageURLs) { _ in
+            // 当图片上传成功后，强制刷新视图
+            // 不再自动切换页面，让用户手动点击箭头切换
+            let validCount = moments.filter { $0.imageUrl != nil && !($0.imageUrl?.isEmpty ?? true) }.count
+            let uploadingCount = imageDataArray.enumerated().filter { $0.element != nil && uploadedImageURLs[$0.offset] == nil }.count
+            let totalItems = validCount + uploadingCount
+            
+            print("🔄 [Highlight] uploadedImageURLs 变化，validCount: \(validCount), uploadingCount: \(uploadingCount), totalItems: \(totalItems)")
+        }
+        .onChange(of: moments) { _ in
+            // 当 moments 更新时，也刷新视图
+            print("🔄 [Highlight] moments 更新，数量: \(moments.count)")
+        }
+    }
+    
+    private func loadExistingMoments() {
+        if let existingMoments = profileData.moments {
+            moments = existingMoments.moments
+            // 加载已有的图片和文字
+            for (index, moment) in moments.enumerated() {
+                if index < 6 {
+                    captions[index] = moment.caption ?? ""
+                    if let imageUrl = moment.imageUrl {
+                        uploadedImageURLs[index] = imageUrl
+                    }
+                }
+            }
+            // 如果有已存在的 moments，设置当前页面为第一个
+            if !moments.isEmpty {
+                currentPageIndex = 0
+            }
+        }
+    }
+    
+    private func loadImageData(for index: Int, item: PhotosPickerItem?) {
+        guard let item = item else { return }
+        
+        Task {
+            do {
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    await MainActor.run {
+                        imageDataArray[index] = data
+                        // 自动上传
+                        uploadImage(for: index)
+                    }
+                }
+            } catch {
+                print("❌ Failed to load image: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    private func uploadImage(for index: Int) {
+        guard let imageData = imageDataArray[index],
+              let currentUser = authManager.currentUser else { return }
+        
+        isUploading[index] = true
+        
+        Task {
+            do {
+                let fileName = "moment_\(currentUser.id)_\(UUID().uuidString).jpg"
+                let imageURL = try await supabaseService.uploadMomentImage(
+                    userId: currentUser.id,
+                    imageData: imageData,
+                    fileName: fileName
+                )
+                
+                await MainActor.run {
+                    uploadedImageURLs[index] = imageURL
+                    isUploading[index] = false
+                    
+                    // 注意：不清除本地图片数据，保持显示本地图片
+                    // 这样用户可以看到图片，即使网络有问题也能看到
+                    // imageDataArray[index] = nil  // 注释掉，保持本地图片显示
+                    
+                    // 确保 moments 数组有足够的元素
+                    while moments.count <= index {
+                        moments.append(Moment(id: UUID().uuidString, imageUrl: nil, caption: nil))
+                    }
+                    
+                    // 更新或创建 moment
+                    let moment = Moment(
+                        id: moments[index].id,
+                        imageUrl: imageURL,
+                        caption: captions[index].isEmpty ? nil : captions[index]
+                    )
+                    
+                    moments[index] = moment
+                    
+                    updateProfileData()
+                    
+                    print("✅ [Highlight] 图片上传成功，URL: \(imageURL)")
+                    print("✅ [Highlight] 当前 uploadedImageURLs[\(index)]: \(uploadedImageURLs[index] ?? "nil")")
+                }
+            } catch {
+                print("❌ Failed to upload image: \(error.localizedDescription)")
+                await MainActor.run {
+                    isUploading[index] = false
+                }
+            }
+        }
+    }
+    
+    private func removeMoment(at index: Int) {
+        // 移除对应位置的 moment
+        if index < moments.count {
+            moments.remove(at: index)
+        }
+        // 清空对应位置的数据
+        selectedPhotoItems[index] = nil
+        imageDataArray[index] = nil
+        captions[index] = ""
+        uploadedImageURLs[index] = nil
+        isUploading[index] = false
+        // 重新整理数组，保持连续性
+        // 注意：这里不重新整理，保持索引对应关系，空位置可以重新使用
+        updateProfileData()
+    }
+    
+    private func updateProfileData() {
+        // 只保存有图片的 moments（过滤掉空位置）
+        let validMoments = moments.filter { $0.imageUrl != nil && !($0.imageUrl?.isEmpty ?? true) }
+        let momentsData = Moments(moments: validMoments)
+        profileData.moments = momentsData
+    }
+}
+
+// MARK: - Highlight Upload Card
+struct HighlightUploadCard: View {
+    @Binding var selectedPhotoItem: PhotosPickerItem?
+    @Binding var imageData: Data?
+    @Binding var caption: String
+    @Binding var isUploading: Bool
+    @Binding var uploadedImageURL: String?
+    let onImageSelected: (PhotosPickerItem) -> Void
+    let onRemove: () -> Void
+    let onCaptionChanged: (String) -> Void
+    let showNextArrow: Bool
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            // 图片区域 - 更大的尺寸
+            ZStack {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(red: 0.98, green: 0.97, blue: 0.95))
+                    .frame(height: 280)
+                
+                // 优先显示本地选择的图片（立即显示，不等待上传）
+                if let data = imageData, let uiImage = UIImage(data: data) {
+                    ZStack {
+                        // 显示本地图片
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(height: 280)
+                            .clipped()
+                            .cornerRadius(16)
+                        
+                        // 如果正在上传，显示上传进度覆盖层
+                        if isUploading {
+                            Color.black.opacity(0.3)
+                                .cornerRadius(16)
+                            
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(1.2)
+                        }
+                    }
+                } else if let imageURL = uploadedImageURL, !imageURL.isEmpty {
+                    // 显示已上传的图片（当本地图片数据被清除后）
+                    AsyncImage(url: URL(string: imageURL)) { phase in
+                        switch phase {
+                        case .empty:
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(height: 280)
+                                .clipped()
+                                .cornerRadius(16)
+                        case .failure:
+                            Image(systemName: "photo.fill")
+                                .font(.system(size: 60))
+                                .foregroundColor(.gray)
+                        @unknown default:
+                            EmptyView()
+                        }
+                    }
+                } else {
+                    // 空状态 - 只显示图标，不显示文字
+                    Image(systemName: "photo.badge.plus")
+                        .font(.system(size: 64))
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                }
+                
+                // 删除按钮（如果有图片）
+                if uploadedImageURL != nil || imageData != nil {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Button(action: onRemove) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 28))
+                                    .foregroundColor(.white)
+                                    .background(Color.black.opacity(0.5))
+                                    .clipShape(Circle())
+                            }
+                            .padding(12)
+                        }
+                        Spacer()
+                    }
+                }
+                
+                // 图片选择器覆盖层 - 只在图片区域，不延伸到文本框
+                if uploadedImageURL == nil && imageData == nil {
+                    PhotosPicker(
+                        selection: $selectedPhotoItem,
+                        matching: .images,
+                        photoLibrary: .shared()
+                    ) {
+                        Color.clear
+                            .frame(height: 280)
+                            .contentShape(Rectangle())
+                    }
+                    .onChange(of: selectedPhotoItem) { newItem in
+                        if let item = newItem {
+                            onImageSelected(item)
+                        }
+                    }
+                }
+            }
+            
+            // 文字输入框 - 更大的尺寸
+            TextField("Write something", text: $caption, axis: .vertical)
+                .font(.system(size: 16))
+                .padding(16)
+                .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+                .cornerRadius(12)
+                .frame(minHeight: 100)
+                .lineLimit(4...8)
+                .onChange(of: caption) { newValue in
+                    onCaptionChanged(newValue)
+                }
+        }
+        .padding(.horizontal)
+    }
+}
+
+// MARK: - Step 7: Privacy & Trust
 struct PrivacyTrustStep: View {
     @Binding var profileData: ProfileCreationData
     @State private var companyVisibility = VisibilityLevel.public_
