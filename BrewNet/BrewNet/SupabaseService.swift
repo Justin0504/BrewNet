@@ -4621,6 +4621,105 @@ extension SupabaseService {
         try await upgradeUserToPro(userId: userId, durationSeconds: oneWeekInSeconds)
     }
     
+    private func normalizedProDateCandidates(from value: String) -> [String] {
+        var candidates: Set<String> = []
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        candidates.insert(trimmed)
+        
+        if trimmed.contains(" "), !trimmed.contains("T") {
+            candidates.insert(trimmed.replacingOccurrences(of: " ", with: "T"))
+        }
+        
+        for candidate in candidates {
+            if let range = candidate.range(of: "([+-]\\d{2})(\\d{2})$", options: .regularExpression) {
+                let tz = candidate[range]
+                let hours = tz.prefix(3)
+                let minutes = tz.suffix(tz.count - 3)
+                let replaced = candidate.replacingCharacters(in: range, with: "\(hours):\(minutes)")
+                candidates.insert(replaced)
+            }
+            if let range = candidate.range(of: "([+-]\\d{2})$", options: .regularExpression) {
+                let tz = candidate[range]
+                let replaced = candidate.replacingCharacters(in: range, with: "\(tz):00")
+                candidates.insert(replaced)
+            }
+        }
+        
+        return Array(candidates)
+    }
+    
+    private func parseProEndDate(_ value: String) -> Date? {
+        let iso8601WithFractionalSecondsFormatter: ISO8601DateFormatter = {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return formatter
+        }()
+        
+        let iso8601Formatter: ISO8601DateFormatter = {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            return formatter
+        }()
+        
+        let iso8601WithSpaceFormatter: ISO8601DateFormatter = {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withFullDate, .withFullTime, .withSpaceBetweenDateAndTime]
+            return formatter
+        }()
+        
+        let fallbackProDateFormatter: DateFormatter = {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd HH:mm:ssXXXXX"
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            return formatter
+        }()
+        
+        let fallbackProDateFormatterNoColonTZ: DateFormatter = {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd HH:mm:ssZ"
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            return formatter
+        }()
+        
+        let fallbackProDateFormatterNoTZ: DateFormatter = {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            return formatter
+        }()
+        
+        let candidates = normalizedProDateCandidates(from: value)
+        
+        for candidate in candidates {
+            if let date = iso8601WithFractionalSecondsFormatter.date(from: candidate) {
+                return date
+            }
+            if let date = iso8601Formatter.date(from: candidate) {
+                return date
+            }
+            if let date = iso8601WithSpaceFormatter.date(from: candidate) {
+                return date
+            }
+        }
+        
+        for candidate in candidates {
+            if let date = fallbackProDateFormatter.date(from: candidate) {
+                return date
+            }
+            if let date = fallbackProDateFormatterNoColonTZ.date(from: candidate) {
+                return date
+            }
+            if let date = fallbackProDateFormatterNoTZ.date(from: candidate) {
+                return date
+            }
+        }
+        
+        return nil
+    }
+    
     /// Check if user's Pro has expired and update status
     func checkAndUpdateProExpiration(userId: String) async throws -> Bool {
         print("🔍 [Pro] 检查用户 \(userId) 的 Pro 是否过期")
@@ -4633,11 +4732,18 @@ extension SupabaseService {
             .execute()
         
         let data = response.data
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let isPro = json["is_pro"] as? Bool,
-              let proEndStr = json["pro_end"] as? String else {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return false
         }
+        
+        let isPro = json["is_pro"] as? Bool ?? false
+        let proEndAny = json["pro_end"]
+        let proEndStr: String? = (proEndAny as? String) ?? {
+            if let dict = proEndAny as? [String: Any], let value = dict["date"] as? String {
+                return value
+            }
+            return nil
+        }()
         
         // If not Pro, no need to check
         if !isPro {
@@ -4645,12 +4751,13 @@ extension SupabaseService {
             return false
         }
         
-        // Check if expired
-        let formatter = ISO8601DateFormatter()
-        guard let proEnd = formatter.date(from: proEndStr) else {
+        guard let proEndStr,
+              let proEnd = parseProEndDate(proEndStr) else {
+            print("⚠️ [Pro] 无法解析 Pro 截止日期，跳过更新")
             return false
         }
         
+        // Check if expired
         if proEnd < Date() {
             print("⚠️ [Pro] 用户的 Pro 已过期，更新状态")
             
