@@ -3619,6 +3619,32 @@ extension SupabaseService {
         return invitationId
     }
     
+    /// 获取邀请状态（用于显示邀请的当前状态）
+    func getCoffeeChatInvitationStatus(senderId: String, receiverId: String) async throws -> CoffeeChatInvitation.InvitationStatus? {
+        print("🔍 [咖啡聊天] 获取邀请状态: senderId=\(senderId), receiverId=\(receiverId)")
+        
+        let response = try await client
+            .from("coffee_chat_invitations")
+            .select("status")
+            .eq("sender_id", value: senderId)
+            .eq("receiver_id", value: receiverId)
+            .order("created_at", ascending: false)
+            .limit(1)
+            .execute()
+        
+        let data = response.data
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              let firstInvitation = jsonArray.first,
+              let statusString = firstInvitation["status"] as? String else {
+            print("⚠️ [咖啡聊天] 未找到邀请")
+            return nil
+        }
+        
+        let status = CoffeeChatInvitation.InvitationStatus(rawValue: statusString)
+        print("✅ [咖啡聊天] 邀请状态: \(statusString)")
+        return status
+    }
+    
     /// 获取用户的咖啡聊天日程列表
     func getCoffeeChatSchedules(userId: String) async throws -> [CoffeeChatSchedule] {
         print("📅 [咖啡聊天] 获取日程列表，用户ID: \(userId)")

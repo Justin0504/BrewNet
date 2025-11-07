@@ -33,6 +33,7 @@ struct ChatInterfaceView: View {
     @State private var showingCoffeeInviteAnimation = false // 显示发送动画
     @State private var showingCoffeeChatSchedule = false // 显示咖啡聊天日程列表
     @State private var textAnimationState: (line1: Bool, line2: Bool, question: Bool) = (false, false, false) // 文字动画状态
+    @State private var invitationStatusCache: [String: CoffeeChatInvitation.InvitationStatus] = [:] // 邀请状态缓存，key: "senderId-receiverId"
     
     var body: some View {
         mainContent
@@ -666,7 +667,11 @@ struct ChatInterfaceView: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(session.messages) { message in
-                            MessageBubbleView(message: message, session: session)
+                            MessageBubbleView(
+                                message: message,
+                                session: session,
+                                invitationStatusCache: $invitationStatusCache
+                            )
                                 .environmentObject(authManager)
                                 .environmentObject(supabaseService)
                                 .id(message.id)
@@ -2356,6 +2361,7 @@ struct ChatSessionRowView: View {
 struct MessageBubbleView: View {
     let message: ChatMessage
     let session: ChatSession
+    @Binding var invitationStatusCache: [String: CoffeeChatInvitation.InvitationStatus]
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var supabaseService: SupabaseService
     @State private var invitationStatus: CoffeeChatInvitation.InvitationStatus? = nil
@@ -2363,6 +2369,7 @@ struct MessageBubbleView: View {
     @State private var selectedDate = Date()
     @State private var locationText = ""
     @State private var notesText = ""
+    @State private var isLoadingStatus = false
     
     var body: some View {
         HStack {
@@ -2372,6 +2379,11 @@ struct MessageBubbleView: View {
             } else {
                 messageBubble
                 Spacer()
+            }
+        }
+        .onAppear {
+            if message.messageType == .coffeeChatInvitation && invitationStatus == nil {
+                loadInvitationStatus()
             }
         }
     }
@@ -2451,37 +2463,20 @@ struct MessageBubbleView: View {
                         Spacer()
                     }
                     
-                    // 第二行：两个按钮并排
-                    HStack(spacing: 10) {
-                        Button(action: {
-                            showingAcceptSheet = true
-                        }) {
-                            Text("Accept")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 40)
-                                .background(
-                                    LinearGradient(
-                                        colors: [
-                                            Color(red: 0.7, green: 0.55, blue: 0.4),
-                                            Color(red: 0.6, green: 0.45, blue: 0.3)
-                                        ],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .cornerRadius(20)
-                                .shadow(color: Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.4), radius: 5, x: 0, y: 2)
-                        }
-                        
-                        Button(action: {
-                            let invitationId = getInvitationId()
-                            rejectCoffeeChatInvitation(invitationId: invitationId)
-                        }) {
-                            Text("Decline")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(Color(red: 0.5, green: 0.4, blue: 0.3))
+                    // 第二行：根据状态显示按钮或状态图案
+                    if let status = invitationStatus {
+                        // 有状态时显示状态图案
+                        HStack(spacing: 8) {
+                            if status == .accepted {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 18))
+                                        .foregroundColor(Color(red: 0.6, green: 0.45, blue: 0.3))
+                                    
+                                    Text("Accepted")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(Color(red: 0.6, green: 0.45, blue: 0.3))
+                                }
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 40)
                                 .background(
@@ -2498,18 +2493,108 @@ struct MessageBubbleView: View {
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 20)
                                         .stroke(
-                                            LinearGradient(
-                                                colors: [
-                                                    Color(red: 0.8, green: 0.7, blue: 0.6),
-                                                    Color(red: 0.7, green: 0.6, blue: 0.5)
-                                                ],
-                                                startPoint: .leading,
-                                                endPoint: .trailing
-                                            ),
+                                            Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.3),
                                             lineWidth: 1.5
                                         )
                                 )
-                                .shadow(color: Color(red: 0.4, green: 0.3, blue: 0.2).opacity(0.1), radius: 3, x: 0, y: 2)
+                            } else if status == .rejected {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 18))
+                                        .foregroundColor(Color(red: 0.6, green: 0.45, blue: 0.3))
+                                    
+                                    Text("Declined")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(Color(red: 0.6, green: 0.45, blue: 0.3))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 40)
+                                .background(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 0.98, green: 0.96, blue: 0.94),
+                                            Color(red: 0.95, green: 0.92, blue: 0.88)
+                                        ],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .cornerRadius(20)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .stroke(
+                                            Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.3),
+                                            lineWidth: 1.5
+                                        )
+                                )
+                            }
+                        }
+                    } else {
+                        // 无状态时显示两个按钮
+                        HStack(spacing: 10) {
+                            Button(action: {
+                                showingAcceptSheet = true
+                            }) {
+                                Text("Accept")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 40)
+                                    .background(
+                                        LinearGradient(
+                                            colors: [
+                                                Color(red: 0.7, green: 0.55, blue: 0.4),
+                                                Color(red: 0.6, green: 0.45, blue: 0.3)
+                                            ],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .cornerRadius(20)
+                                    .shadow(color: Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.4), radius: 5, x: 0, y: 2)
+                            }
+                            
+                            Button(action: {
+                                Task {
+                                    guard let invitationId = await getInvitationId() else {
+                                        print("❌ [拒绝邀请] 无法获取邀请ID")
+                                        return
+                                    }
+                                    rejectCoffeeChatInvitation(invitationId: invitationId)
+                                }
+                            }) {
+                                Text("Decline")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(Color(red: 0.5, green: 0.4, blue: 0.3))
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 40)
+                                    .background(
+                                        LinearGradient(
+                                            colors: [
+                                                Color(red: 0.98, green: 0.96, blue: 0.94),
+                                                Color(red: 0.95, green: 0.92, blue: 0.88)
+                                            ],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .cornerRadius(20)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 20)
+                                            .stroke(
+                                                LinearGradient(
+                                                    colors: [
+                                                        Color(red: 0.8, green: 0.7, blue: 0.6),
+                                                        Color(red: 0.7, green: 0.6, blue: 0.5)
+                                                    ],
+                                                    startPoint: .leading,
+                                                    endPoint: .trailing
+                                                ),
+                                                lineWidth: 1.5
+                                            )
+                                    )
+                                    .shadow(color: Color(red: 0.4, green: 0.3, blue: 0.2).opacity(0.1), radius: 3, x: 0, y: 2)
+                            }
                         }
                     }
                 }
@@ -2544,56 +2629,29 @@ struct MessageBubbleView: View {
                     
                     Spacer()
                     
-                    // 状态文字
+                    // 状态显示：✅ 或 ❌（带背景框）
                     if let status = invitationStatus {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: status == .accepted ? [
-                                            Color(red: 0.7, green: 0.55, blue: 0.4),
-                                            Color(red: 0.6, green: 0.45, blue: 0.3)
-                                        ] : [
-                                            Color(red: 0.6, green: 0.5, blue: 0.4),
-                                            Color(red: 0.5, green: 0.4, blue: 0.3)
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 8, height: 8)
-                            
-                            Text(status == .accepted ? "Accepted" : status == .rejected ? "Declined" : "Pending")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(Color(red: 0.5, green: 0.4, blue: 0.3))
+                        if status == .accepted {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(red: 0.6, green: 0.45, blue: 0.3))
+                                    .frame(width: 28, height: 28)
+                                
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.white)
+                            }
+                        } else if status == .rejected {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(red: 0.6, green: 0.45, blue: 0.3))
+                                    .frame(width: 28, height: 28)
+                                
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.white)
+                            }
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.98, green: 0.96, blue: 0.94),
-                                    Color(red: 0.95, green: 0.92, blue: 0.88)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .cornerRadius(14)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [
-                                            Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.5),
-                                            Color(red: 0.85, green: 0.8, blue: 0.75).opacity(0.3)
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1
-                                )
-                        )
                     }
                 }
             }
@@ -2638,8 +2696,16 @@ struct MessageBubbleView: View {
                 locationText: $locationText,
                 notesText: $notesText,
                 onAccept: {
-                    let invitationId = getInvitationId()
-                    acceptCoffeeChatInvitation(invitationId: invitationId)
+                    Task {
+                        guard let invitationId = await getInvitationId() else {
+                            print("❌ [接受邀请] 无法获取邀请ID")
+                            await MainActor.run {
+                                // 可以显示错误提示
+                            }
+                            return
+                        }
+                        acceptCoffeeChatInvitation(invitationId: invitationId)
+                    }
                 },
                 onCancel: {
                     showingAcceptSheet = false
@@ -2649,31 +2715,80 @@ struct MessageBubbleView: View {
     }
     
     private func acceptCoffeeChatInvitation(invitationId: String) {
+        // 验证必填字段
+        guard !locationText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            print("❌ [接受邀请] 地点不能为空")
+            // TODO: 显示错误提示给用户
+            return
+        }
+        
+        guard let currentUser = authManager.currentUser,
+              let otherUserId = session.user.userId else {
+            return
+        }
+        
+        // 确定 senderId 和 receiverId（别人发送的邀请）
+        let senderId = otherUserId
+        let receiverId = currentUser.id
+        let cacheKey = getCacheKey(senderId: senderId, receiverId: receiverId)
+        
         Task {
             do {
+                print("🔄 [接受邀请] 开始接受邀请，invitationId: \(invitationId)")
+                print("🔄 [接受邀请] scheduledDate: \(selectedDate)")
+                print("🔄 [接受邀请] location: \(locationText)")
+                print("🔄 [接受邀请] notes: \(notesText)")
+                
                 try await supabaseService.acceptCoffeeChatInvitation(
                     invitationId: invitationId,
                     scheduledDate: selectedDate,
-                    location: locationText.isEmpty ? "To be determined" : locationText,
-                    notes: notesText.isEmpty ? nil : notesText
+                    location: locationText.trimmingCharacters(in: .whitespacesAndNewlines),
+                    notes: notesText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notesText.trimmingCharacters(in: .whitespacesAndNewlines)
                 )
+                
                 await MainActor.run {
                     invitationStatus = .accepted
+                    // 更新缓存
+                    invitationStatusCache[cacheKey] = .accepted
                     showingAcceptSheet = false
+                    
+                    // 发送通知，触发日程列表刷新
+                    NotificationCenter.default.post(name: NSNotification.Name("CoffeeChatScheduleUpdated"), object: nil)
+                    print("✅ [接受邀请] 已发送日程更新通知，已更新缓存")
                 }
-                print("✅ Coffee chat invitation accepted")
+                
+                print("✅ [接受邀请] Coffee chat invitation accepted successfully")
             } catch {
-                print("❌ Failed to accept invitation: \(error.localizedDescription)")
+                print("❌ [接受邀请] Failed to accept invitation: \(error.localizedDescription)")
+                print("❌ [接受邀请] 错误详情: \(error)")
+                
+                await MainActor.run {
+                    // TODO: 显示错误提示给用户
+                    // 可以添加一个 @State 变量来显示错误消息
+                }
             }
         }
     }
     
     private func rejectCoffeeChatInvitation(invitationId: String) {
+        guard let currentUser = authManager.currentUser,
+              let otherUserId = session.user.userId else {
+            return
+        }
+        
+        // 确定 senderId 和 receiverId（别人发送的邀请）
+        let senderId = otherUserId
+        let receiverId = currentUser.id
+        let cacheKey = getCacheKey(senderId: senderId, receiverId: receiverId)
+        
         Task {
             do {
                 try await supabaseService.rejectCoffeeChatInvitation(invitationId: invitationId)
                 await MainActor.run {
                     invitationStatus = .rejected
+                    // 更新缓存
+                    invitationStatusCache[cacheKey] = .rejected
+                    print("✅ [拒绝邀请] 已更新缓存")
                 }
                 print("✅ Coffee chat invitation rejected")
             } catch {
@@ -2682,11 +2797,102 @@ struct MessageBubbleView: View {
         }
     }
     
-    // 从消息中提取邀请ID（临时方案：从消息内容或其他方式获取）
-    private func getInvitationId() -> String {
-        // TODO: 从消息元数据或数据库中查找对应的邀请ID
-        // 暂时返回消息ID作为临时方案
-        return message.id.uuidString
+    // 获取缓存键
+    private func getCacheKey(senderId: String, receiverId: String) -> String {
+        return "\(senderId)-\(receiverId)"
+    }
+    
+    // 加载邀请状态（带缓存）
+    private func loadInvitationStatus() {
+        guard !isLoadingStatus else { return }
+        
+        guard let currentUser = authManager.currentUser else {
+            print("❌ [加载邀请状态] 当前用户为空")
+            return
+        }
+        
+        // 从 session 中获取对方的 userId
+        guard let otherUserId = session.user.userId else {
+            print("❌ [加载邀请状态] 无法获取对方的 userId")
+            return
+        }
+        
+        let senderId: String
+        let receiverId: String
+        
+        if message.isFromUser {
+            // 自己发送的邀请：senderId 是自己，receiverId 是对方
+            senderId = currentUser.id
+            receiverId = otherUserId
+        } else {
+            // 别人发送的邀请：senderId 是对方，receiverId 是自己
+            senderId = otherUserId
+            receiverId = currentUser.id
+        }
+        
+        let cacheKey = getCacheKey(senderId: senderId, receiverId: receiverId)
+        
+        // 先从缓存读取
+        if let cachedStatus = invitationStatusCache[cacheKey] {
+            invitationStatus = cachedStatus
+            print("✅ [加载邀请状态] 从缓存读取: \(cachedStatus.rawValue)")
+            return
+        }
+        
+        // 缓存中没有，从数据库加载
+        isLoadingStatus = true
+        
+        Task {
+            do {
+                let status = try await supabaseService.getCoffeeChatInvitationStatus(
+                    senderId: senderId,
+                    receiverId: receiverId
+                )
+                
+                await MainActor.run {
+                    invitationStatus = status
+                    // 更新缓存
+                    if let status = status {
+                        invitationStatusCache[cacheKey] = status
+                        print("✅ [加载邀请状态] 已缓存: \(status.rawValue)")
+                    }
+                    isLoadingStatus = false
+                    print("✅ [加载邀请状态] 状态: \(status?.rawValue ?? "nil")")
+                }
+            } catch {
+                print("❌ [加载邀请状态] 失败: \(error.localizedDescription)")
+                await MainActor.run {
+                    isLoadingStatus = false
+                }
+            }
+        }
+    }
+    
+    // 从消息中提取邀请ID
+    private func getInvitationId() async -> String? {
+        guard let currentUser = authManager.currentUser else {
+            print("❌ [接受邀请] 当前用户为空")
+            return nil
+        }
+        
+        // 从 session 中获取对方的 userId
+        guard let receiverUserId = session.user.userId else {
+            print("❌ [接受邀请] 无法获取对方的 userId")
+            return nil
+        }
+        
+        // 使用 findPendingInvitationId 查找对应的邀请ID
+        do {
+            let invitationId = try await supabaseService.findPendingInvitationId(
+                senderId: receiverUserId, // 对方是发送者
+                receiverId: currentUser.id // 当前用户是接收者
+            )
+            print("✅ [接受邀请] 找到邀请ID: \(invitationId ?? "nil")")
+            return invitationId
+        } catch {
+            print("❌ [接受邀请] 查找邀请ID失败: \(error.localizedDescription)")
+            return nil
+        }
     }
     
     private func formatTime(_ date: Date) -> String {
