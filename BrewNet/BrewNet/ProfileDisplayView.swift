@@ -2279,7 +2279,7 @@ struct PointsSystemView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var supabaseService: SupabaseService
     
-    @State private var totalPoints: Int = 0
+    @State private var totalCredits: Int = 0
     @State private var coffeeChatHistory: [CoffeeChatRecord] = []
     @State private var isLoading = true
     
@@ -2295,17 +2295,17 @@ struct PointsSystemView: View {
                 } else {
                     ScrollView {
                         VStack(spacing: 24) {
-                            // Points Display Card
+                            // Credits Display Card
                             VStack(spacing: 16) {
                                 Image(systemName: "star.fill")
                                     .font(.system(size: 50))
                                     .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                                 
-                                Text("Total Points")
+                                Text("Total Credits")
                                     .font(.system(size: 16, weight: .medium))
                                     .foregroundColor(.gray)
                                 
-                                Text("\(totalPoints)")
+                                Text("\(totalCredits)")
                                     .font(.system(size: 48, weight: .bold))
                                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                             }
@@ -2335,6 +2335,7 @@ struct PointsSystemView: View {
                                 } else {
                                     ForEach(coffeeChatHistory) { record in
                                         CoffeeChatRecordRow(record: record)
+                                            .environmentObject(supabaseService)
                                     }
                                 }
                             }
@@ -2343,16 +2344,16 @@ struct PointsSystemView: View {
                             .cornerRadius(16)
                             .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
                             
-                            // Points Rules
+                            // Credit Rules
                             VStack(alignment: .leading, spacing: 12) {
-                                Text("Points Rules")
+                                Text("Credit Rules")
                                     .font(.system(size: 18, weight: .bold))
                                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                                 
                                 VStack(alignment: .leading, spacing: 8) {
-                                    PointsRuleRow(icon: "checkmark.circle.fill", text: "Complete an in-person Coffee Chat to earn 10 points")
+                                    PointsRuleRow(icon: "checkmark.circle.fill", text: "Complete an in-person Coffee Chat to earn 10 credits")
                                     PointsRuleRow(icon: "checkmark.circle.fill", text: "Both parties need to confirm the meeting completion")
-                                    PointsRuleRow(icon: "checkmark.circle.fill", text: "Points can be used to redeem coffee coupons or other gifts")
+                                    PointsRuleRow(icon: "checkmark.circle.fill", text: "Credits can be used to redeem coffee coupons or other gifts")
                                 }
                             }
                             .padding(20)
@@ -2377,6 +2378,14 @@ struct PointsSystemView: View {
             .onAppear {
                 loadPointsData()
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CoffeeChatScheduleUpdated"))) { _ in
+                print("🔄 [Credit] 收到日程更新通知，重新加载")
+                loadPointsData()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserCreditsUpdated"))) { _ in
+                print("🔄 [Credit] 收到积分更新通知，重新加载")
+                loadPointsData()
+            }
         }
     }
     
@@ -2388,14 +2397,57 @@ struct PointsSystemView: View {
         
         Task {
             do {
-                // Load points and Coffee Chat history
-                let points = try await supabaseService.getUserPoints(userId: currentUser.id)
-                let history = try await supabaseService.getCoffeeChatHistory(userId: currentUser.id)
+                // 从数据库获取 credits
+                let credits = try await supabaseService.getUserCredits(userId: currentUser.id)
+                print("✅ [Credit] 从数据库获取 credits: \(credits)")
+                
+                // 获取所有已 met 的 coffee chat schedules（用于显示历史记录）
+                let allSchedules = try await supabaseService.getCoffeeChatSchedules(userId: currentUser.id)
+                let metSchedules = allSchedules.filter { $0.hasMet }
+                
+                print("✅ [Credit] 找到 \(metSchedules.count) 个已 met 的 coffee chat")
+                
+                // 转换为 CoffeeChatRecord 并获取头像
+                // 使用 Set 来去重，确保同一个 schedule 只显示一次
+                var seenScheduleIds = Set<String>()
+                var records: [CoffeeChatRecord] = []
+                
+                for schedule in metSchedules {
+                    // 使用 schedule.id 作为唯一标识符去重
+                    let scheduleIdString = schedule.id.uuidString
+                    if seenScheduleIds.contains(scheduleIdString) {
+                        print("⚠️ [Credit] 跳过重复的 schedule: \(scheduleIdString)")
+                        continue
+                    }
+                    seenScheduleIds.insert(scheduleIdString)
+                    
+                    // 获取参与者头像
+                    var avatarURL: String? = nil
+                    if let profile = try? await supabaseService.getProfile(userId: schedule.participantId) {
+                        avatarURL = profile.coreIdentity.profileImage
+                    }
+                    
+                    let record = CoffeeChatRecord(
+                        id: scheduleIdString,
+                        partnerId: schedule.participantId,
+                        partnerName: schedule.participantName,
+                        partnerAvatar: avatarURL,
+                        date: schedule.scheduledDate,
+                        pointsEarned: 10, // 每个已 met 的 coffee chat = 10 积分
+                        status: .completed
+                    )
+                    records.append(record)
+                    print("✅ [Credit] 添加记录: \(schedule.participantName), scheduleId: \(scheduleIdString)")
+                }
+                
+                // 按日期排序（最新的在前）
+                records.sort { $0.date > $1.date }
                 
                 await MainActor.run {
-                    totalPoints = points
-                    coffeeChatHistory = history
+                    totalCredits = credits // 使用数据库中的 credits
+                    coffeeChatHistory = records
                     isLoading = false
+                    print("✅ [Credit] 加载完成：总积分 = \(credits), 记录数 = \(records.count)")
                 }
             } catch {
                 print("❌ Failed to load points data: \(error.localizedDescription)")
@@ -2408,10 +2460,11 @@ struct PointsSystemView: View {
 }
 
 // MARK: - Coffee Chat Record
-struct CoffeeChatRecord: Identifiable {
+struct CoffeeChatRecord: Identifiable, Codable {
     let id: String
     let partnerId: String
     let partnerName: String
+    let partnerAvatar: String?
     let date: Date
     let pointsEarned: Int
     let status: CoffeeChatStatus
@@ -2425,24 +2478,56 @@ struct CoffeeChatRecord: Identifiable {
 // MARK: - Coffee Chat Record Row
 struct CoffeeChatRecordRow: View {
     let record: CoffeeChatRecord
+    @EnvironmentObject var supabaseService: SupabaseService
+    @State private var avatarURL: String? = nil
     
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "cup.and.saucer.fill")
-                .font(.system(size: 24))
-                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                .frame(width: 40, height: 40)
-                .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
-                .clipShape(Circle())
+            // Avatar
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.9, green: 0.85, blue: 0.8),
+                                Color(red: 0.85, green: 0.8, blue: 0.75)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 50, height: 50)
+                
+                if let avatar = avatarURL ?? record.partnerAvatar, !avatar.isEmpty {
+                    AvatarView(avatarString: avatar, size: 46)
+                } else {
+                    Image(systemName: "person.circle.fill")
+                        .font(.system(size: 46))
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                }
+            }
             
             VStack(alignment: .leading, spacing: 4) {
                 Text("Coffee Chat with \(record.partnerName)")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.black)
                 
-                Text(formatDate(record.date))
-                    .font(.system(size: 14))
-                    .foregroundColor(.gray)
+                HStack(spacing: 6) {
+                    Text(formatDate(record.date))
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                    
+                    if record.status == .completed {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(Color(red: 0.4, green: 0.6, blue: 0.3))
+                            Text("Met")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color(red: 0.4, green: 0.6, blue: 0.3))
+                        }
+                    }
+                }
             }
             
             Spacer()
@@ -2472,6 +2557,21 @@ struct CoffeeChatRecordRow: View {
         .padding(.horizontal, 16)
         .background(Color(red: 0.98, green: 0.97, blue: 0.95))
         .cornerRadius(12)
+        .onAppear {
+            loadAvatar()
+        }
+    }
+    
+    private func loadAvatar() {
+        if avatarURL == nil && record.partnerAvatar == nil {
+            Task {
+                if let profile = try? await supabaseService.getProfile(userId: record.partnerId) {
+                    await MainActor.run {
+                        avatarURL = profile.coreIdentity.profileImage
+                    }
+                }
+            }
+        }
     }
     
     private func formatDate(_ date: Date) -> String {
@@ -2509,10 +2609,11 @@ struct RedemptionSystemView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var supabaseService: SupabaseService
     
-    @State private var totalPoints: Int = 0
+    @State private var totalCredits: Int = 0
     @State private var availableRewards: [Reward] = []
     @State private var myRedemptions: [RedemptionRecord] = []
     @State private var isLoading = true
+    @State private var refreshID = UUID() // 用于强制刷新 toolbar
     
     var body: some View {
         NavigationView {
@@ -2526,29 +2627,6 @@ struct RedemptionSystemView: View {
                 } else {
                     ScrollView {
                         VStack(spacing: 24) {
-                            // Current Points Display
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Current Points")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.gray)
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "star.fill")
-                                            .font(.system(size: 20))
-                                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                                        Text("\(totalPoints)")
-                                            .font(.system(size: 24, weight: .bold))
-                                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                                    }
-                                }
-                                
-                                Spacer()
-                            }
-                            .padding(20)
-                            .background(Color.white)
-                            .cornerRadius(16)
-                            .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
-                            
                             // Available Rewards
                             VStack(alignment: .leading, spacing: 16) {
                                 Text("Available Credit")
@@ -2568,7 +2646,7 @@ struct RedemptionSystemView: View {
                                     .padding(.vertical, 40)
                                 } else {
                                     ForEach(availableRewards) { reward in
-                                        RewardCard(reward: reward, userPoints: totalPoints) {
+                                        RewardCard(reward: reward, userPoints: totalCredits) {
                                             redeemReward(reward)
                                         }
                                     }
@@ -2615,13 +2693,39 @@ struct RedemptionSystemView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        presentationMode.wrappedValue.dismiss()
+                    HStack(spacing: 6) {
+                        // Total Credits Display (右上角)
+                        HStack(spacing: 4) {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            Text("\(totalCredits)")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.white.opacity(0.8))
+                        .cornerRadius(8)
+                        .id("creditsBadge-\(totalCredits)-\(refreshID)") // 强制刷新整个 badge
+                        
+                        Button("Done") {
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                     }
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    .id("toolbar-\(refreshID)") // 强制刷新整个 toolbar
                 }
             }
             .onAppear {
+                loadRedemptionData()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CoffeeChatScheduleUpdated"))) { _ in
+                print("🔄 [Redeem] 收到日程更新通知，重新加载积分")
+                loadRedemptionData()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserCreditsUpdated"))) { _ in
+                print("🔄 [Redeem] 收到积分更新通知，重新加载")
                 loadRedemptionData()
             }
         }
@@ -2635,15 +2739,63 @@ struct RedemptionSystemView: View {
         
         Task {
             do {
-                let points = try await supabaseService.getUserPoints(userId: currentUser.id)
-                let rewards = try await supabaseService.getAvailableRewards()
-                let redemptions = try await supabaseService.getUserRedemptions(userId: currentUser.id)
+                // 获取所有已 met 的 coffee chat schedules（与 Credit 板块同步）
+                let allSchedules = try await supabaseService.getCoffeeChatSchedules(userId: currentUser.id)
+                print("🔄 [Redeem] 获取到 \(allSchedules.count) 个 schedules")
+                
+                let metSchedules = allSchedules.filter { $0.hasMet }
+                print("🔄 [Redeem] 其中 \(metSchedules.count) 个已 met")
+                
+                // 打印每个 schedule 的详细信息
+                for schedule in allSchedules {
+                    print("📅 [Redeem] Schedule: \(schedule.participantName), hasMet: \(schedule.hasMet)")
+                }
+                
+                // 从数据库获取 credits
+                let credits = try await supabaseService.getUserCredits(userId: currentUser.id)
+                print("✅ [Redeem] 从数据库获取 credits: \(credits)")
+                
+                // 先更新积分，即使获取奖励失败也不影响积分显示
+                await MainActor.run {
+                    let oldTotal = totalCredits
+                    print("🔄 [Redeem] 准备更新 totalCredits: \(oldTotal) -> \(credits)")
+                    
+                    totalCredits = credits
+                    refreshID = UUID() // 更新 refreshID 以强制刷新 toolbar
+                    
+                    print("✅ [Redeem] 积分已更新：totalCredits = \(totalCredits)")
+                    print("✅ [Redeem] UI 应该显示: \(totalCredits) credits")
+                    print("✅ [Redeem] refreshID 已更新: \(refreshID)")
+                }
+                
+                // 尝试获取奖励和兑换记录，即使失败也不影响积分显示
+                var rewards: [Reward] = []
+                var redemptions: [RedemptionRecord] = []
+                
+                do {
+                    rewards = try await supabaseService.getAvailableRewards()
+                    print("✅ [Redeem] 成功获取 \(rewards.count) 个奖励")
+                } catch {
+                    print("⚠️ [Redeem] 获取奖励失败（不影响积分显示）: \(error.localizedDescription)")
+                    // 如果 rewards 表不存在，使用空数组
+                    rewards = []
+                }
+                
+                do {
+                    redemptions = try await supabaseService.getUserRedemptions(userId: currentUser.id)
+                    print("✅ [Redeem] 成功获取 \(redemptions.count) 个兑换记录")
+                } catch {
+                    print("⚠️ [Redeem] 获取兑换记录失败（不影响积分显示）: \(error.localizedDescription)")
+                    // 如果 redemptions 表不存在，使用空数组
+                    redemptions = []
+                }
                 
                 await MainActor.run {
-                    totalPoints = points
                     availableRewards = rewards
                     myRedemptions = redemptions
                     isLoading = false
+                    
+                    print("✅ [Redeem] 加载完成：totalCredits = \(totalCredits), 记录数 = \(metSchedules.count)")
                 }
             } catch {
                 print("❌ Failed to load redemption data: \(error.localizedDescription)")
