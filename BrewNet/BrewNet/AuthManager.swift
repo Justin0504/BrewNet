@@ -72,51 +72,12 @@ class AuthManager: ObservableObject {
     // MARK: - Check Authentication Status
     private func checkAuthStatus() {
         print("🔍 [AuthManager] checkAuthStatus() 被调用")
-        print("   - supabaseService 是否为 nil: \(supabaseService == nil)")
-        // Check Supabase session
+        print("⚠️ [AuthManager] 自动登录功能已禁用，需要用户手动登录")
+        // 不再检查 session 并自动登录，直接设置为未认证状态
         Task {
-            do {
-                let session = try await SupabaseConfig.shared.client.auth.session
-                print("✅ [AuthManager] Supabase session found, user ID: \(session.user.id.uuidString)")
-                print("   - supabaseService 是否为 nil: \(supabaseService == nil)")
-                
-                // Get user info from Supabase
-                if let supabaseUser = try await supabaseService?.getUser(id: session.user.id.uuidString) {
-                    print("✅ [AuthManager] 获取到用户信息: \(supabaseUser.name)")
-                    let appUser = supabaseUser.toAppUser()
-                    
-                    // Check if user has profile
-                    // 使用 try? 而不是 try 因为 profile 可能不存在（这是正常的）
-                    let hasProfile = (try? await supabaseService?.getProfile(userId: supabaseUser.id)) != nil
-                    let finalAppUser = AppUser(
-                        id: appUser.id,
-                        email: appUser.email,
-                        name: appUser.name,
-                        isGuest: appUser.isGuest,
-                        profileSetupCompleted: appUser.profileSetupCompleted || hasProfile
-                    )
-                    
-                    await MainActor.run {
-                        saveUser(finalAppUser)
-                        print("✅ [AuthManager] Auto-login successful: \(finalAppUser.name)")
-                        // 重要：设置认证状态和当前用户
-                        self.currentUser = finalAppUser
-                        self.authState = .authenticated(finalAppUser)
-                        print("✅ [AuthManager] 认证状态已更新为 authenticated")
-                    }
-                    
-                    // 在线状态功能已移除
-                } else {
-                    print("⚠️ No user info found in Supabase")
-                    await MainActor.run {
-                        self.authState = .unauthenticated
-                    }
-                }
-            } catch {
-                print("ℹ️ No Supabase session found, showing login screen")
-                await MainActor.run {
-                    self.authState = .unauthenticated
-                }
+            await MainActor.run {
+                self.authState = .unauthenticated
+                print("✅ [AuthManager] 认证状态已设置为 unauthenticated（需要手动登录）")
             }
         }
     }
