@@ -3308,18 +3308,6 @@ struct ProfileCardSheetView: View {
                         
                         // Level 3: Deep Understanding
                         level3DeepUnderstandingView
-                        
-                        // Available Timeslot Grid (moved to bottom)
-                        if shouldShowTimeslot {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Divider()
-                                AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
-                                    .padding(.horizontal, 20)
-                                    .padding(.vertical, 16)
-                                    .padding(.bottom, 30)
-                                    .background(Color.white)
-                            }
-                        }
                     }
                 }
             }
@@ -3452,19 +3440,6 @@ struct ProfileCardSheetView: View {
             
             // Networking Intention Badge
             NetworkingIntentionBadgeView(intention: profile.networkingIntention.selectedIntention)
-            
-            // Preferred Chat Format
-            HStack(spacing: 8) {
-                Image(systemName: chatFormatIcon)
-                    .font(.system(size: 16))
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                
-                Text(profile.networkingPreferences.preferredChatFormat.displayName)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                
-                Spacer()
-            }
         }
         .padding(20)
         .background(Color.white)
@@ -3512,17 +3487,6 @@ struct ProfileCardSheetView: View {
                 .font(.system(size: 40))
                 .foregroundColor(.white)
         )
-    }
-    
-    private var chatFormatIcon: String {
-        switch profile.networkingPreferences.preferredChatFormat {
-        case .virtual:
-            return "video.fill"
-        case .inPerson:
-            return "person.2.fill"
-        case .either:
-            return "repeat"
-        }
     }
     
     // MARK: - Level 2: Matching Clues
@@ -3629,18 +3593,6 @@ struct ProfileCardSheetView: View {
                             }
                         }
                     }
-                }
-            }
-            
-            // Preferred Meeting Vibe
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Meeting Vibe:")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.gray)
-                    Text(profile.personalitySocial.preferredMeetingVibe.displayName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 }
             }
         }
@@ -3794,15 +3746,6 @@ struct ProfileCardSheetView: View {
         let visible = settings.location.isVisible(isConnection: isConnection)
         if !visible {
             print("   ⚠️ Location hidden: \(settings.location.rawValue), isConnection: \(isConnection)")
-        }
-        return visible
-    }
-    
-    private var shouldShowTimeslot: Bool {
-        let settings = privacySettings
-        let visible = settings.timeslot.isVisible(isConnection: isConnection)
-        if !visible {
-            print("   ⚠️ Timeslot hidden: \(settings.timeslot.rawValue), isConnection: \(isConnection)")
         }
         return visible
     }

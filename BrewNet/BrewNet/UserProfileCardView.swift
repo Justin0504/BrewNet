@@ -156,6 +156,7 @@ struct UserProfileCardView: View {
     @Binding var rotationAngle: Double
     let onSwipe: (SwipeDirection) -> Void
     let isConnection: Bool // Whether the current user is connected to this profile
+    let isPro: Bool // Pro status from users table (passed from parent)
     
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var supabaseService: SupabaseService
@@ -200,18 +201,6 @@ struct UserProfileCardView: View {
                     
                     // Level 3: Deep Understanding
                     level3DeepUnderstandingView
-                    
-                    // Available Timeslot Grid (moved to bottom)
-                    if shouldShowTimeslot {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Divider()
-                            AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 16)
-                                .padding(.bottom, 30)
-                                .background(Color.white)
-                        }
-                    }
                 }
                 .frame(maxWidth: screenWidth - 40)
             }
@@ -356,10 +345,16 @@ struct UserProfileCardView: View {
                 // Name and Pronouns
                 VStack(alignment: .leading, spacing: 8) {
                     // Name - 独立换行
-                    Text(profile.coreIdentity.name)
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                        .lineLimit(nil)
+                    HStack(spacing: 8) {
+                        Text(profile.coreIdentity.name)
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .lineLimit(nil)
+                        
+                        if isPro {
+                            ProBadge(size: .medium)
+                        }
+                    }
                     
                     // Pronouns - 独立一行
                     if let pronouns = profile.coreIdentity.pronouns {
@@ -465,20 +460,6 @@ struct UserProfileCardView: View {
                     }
                 }
             }
-            
-            // Preferred Chat Format
-            HStack(spacing: 8) {
-                // Chat Format Icon
-                Image(systemName: chatFormatIcon)
-                    .font(.system(size: 16))
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                
-                Text(profile.networkingPreferences.preferredChatFormat.displayName)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                
-                Spacer()
-            }
         }
         .padding(20)
         .background(Color.white)
@@ -526,17 +507,6 @@ struct UserProfileCardView: View {
                 .font(.system(size: 40))
                 .foregroundColor(.white)
         )
-    }
-    
-    private var chatFormatIcon: String {
-        switch profile.networkingPreferences.preferredChatFormat {
-        case .virtual:
-            return "video.fill"
-        case .inPerson:
-            return "person.2.fill"
-        case .either:
-            return "repeat"
-        }
     }
     
     // MARK: - Level 2: Matching Clues
@@ -724,30 +694,6 @@ struct UserProfileCardView: View {
                     }
                 }
             }
-
-            // Preferred Meeting Vibes
-            if !meetingVibesDisplay.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "person.3.fill")
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("Meeting Vibes")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                    }
-                    FlowLayout(spacing: 8) {
-                        ForEach(meetingVibesDisplay, id: \.self) { vibe in
-                            Text(vibe.displayName)
-                                .font(.system(size: 15))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(Color(red: 0.4, green: 0.2, blue: 0.1))
-                                .cornerRadius(12)
-                        }
-                    }
-                }
-            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -820,23 +766,6 @@ struct UserProfileCardView: View {
             print("   ⚠️ Location hidden (not public): \(settings.location.rawValue)")
         }
         return visible
-    }
-    
-    private var shouldShowTimeslot: Bool {
-        let settings = privacySettings
-        let visible = settings.timeslot.isVisible(isConnection: isConnection)
-        if !visible {
-            print("   ⚠️ Timeslot hidden (not public): \(settings.timeslot.rawValue)")
-        }
-        return visible
-    }
-    
-    private var meetingVibesDisplay: [MeetingVibe] {
-        let vibes = profile.personalitySocial.preferredMeetingVibes
-        if vibes.isEmpty {
-            return [profile.personalitySocial.preferredMeetingVibe]
-        }
-        return vibes
     }
 }
 
@@ -1180,20 +1109,6 @@ struct PublicProfileCardView: View {
                     }
                 }
             }
-            
-            // Preferred Chat Format
-            HStack(spacing: 8) {
-                // Chat Format Icon
-                Image(systemName: chatFormatIcon)
-                    .font(.system(size: 16))
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                
-                Text(profile.networkingPreferences.preferredChatFormat.displayName)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                
-                Spacer()
-            }
         }
         .padding(20)
         .background(Color.white)
@@ -1241,17 +1156,6 @@ struct PublicProfileCardView: View {
                 .font(.system(size: 40))
                 .foregroundColor(.white)
         )
-    }
-    
-    private var chatFormatIcon: String {
-        switch profile.networkingPreferences.preferredChatFormat {
-        case .virtual:
-            return "video.fill"
-        case .inPerson:
-            return "person.2.fill"
-        case .either:
-            return "repeat"
-        }
     }
     
     // MARK: - Level 2: Matching Clues (same as UserProfileCardView)
@@ -1440,29 +1344,6 @@ struct PublicProfileCardView: View {
                 }
             }
             
-            // Preferred Meeting Vibes
-            if !publicMeetingVibesDisplay.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "person.3.fill")
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("Meeting Vibes")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                    }
-                    FlowLayout(spacing: 8) {
-                        ForEach(publicMeetingVibesDisplay, id: \.self) { vibe in
-                            Text(vibe.displayName)
-                                .font(.system(size: 15))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(Color(red: 0.4, green: 0.2, blue: 0.1))
-                                .cornerRadius(12)
-                        }
-                    }
-                }
-            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -1534,23 +1415,6 @@ struct PublicProfileCardView: View {
             print("   ⚠️ Location hidden due to privacy: \(settings.location.rawValue), isConnection: \(isConnection)")
         }
         return visible
-    }
-    
-    private var shouldShowTimeslot: Bool {
-        let settings = privacySettings
-        let visible = settings.timeslot.isVisible(isConnection: isConnection)
-        if !visible {
-            print("   ⚠️ Timeslot hidden due to privacy: \(settings.timeslot.rawValue), isConnection: \(isConnection)")
-        }
-        return visible
-    }
-    
-    private var publicMeetingVibesDisplay: [MeetingVibe] {
-        let vibes = profile.personalitySocial.preferredMeetingVibes
-        if vibes.isEmpty {
-            return [profile.personalitySocial.preferredMeetingVibe]
-        }
-        return vibes
     }
 }
 
@@ -1667,7 +1531,8 @@ struct UserProfileCardView_Previews: PreviewProvider {
             dragOffset: .constant(.zero),
             rotationAngle: .constant(0),
             onSwipe: { _ in },
-            isConnection: false
+            isConnection: false,
+            isPro: true
         )
     }
 }

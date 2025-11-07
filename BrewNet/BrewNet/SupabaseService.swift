@@ -305,28 +305,58 @@ class SupabaseService: ObservableObject {
     
     /// 从 Supabase 获取用户
     func getUser(id: String) async throws -> SupabaseUser? {
-        let response = try await client
-            .from(SupabaseTable.users.rawValue)
-            .select()
-            .eq("id", value: id)
-            .single()
-            .execute()
-        
-        let data = response.data
-        return try JSONDecoder().decode(SupabaseUser.self, from: data)
+        // Try with Pro columns first
+        do {
+            let response = try await client
+                .from(SupabaseTable.users.rawValue)
+                .select("id, email, name, phone_number, is_guest, profile_image, bio, company, job_title, location, skills, interests, profile_setup_completed, created_at, last_login_at, updated_at, is_pro, pro_start, pro_end, likes_remaining, likes_depleted_at")
+                .eq("id", value: id)
+                .single()
+                .execute()
+            
+            let data = response.data
+            return try JSONDecoder().decode(SupabaseUser.self, from: data)
+        } catch {
+            // If Pro columns don't exist, try without them
+            print("⚠️ Failed to fetch with Pro columns, trying without: \(error.localizedDescription)")
+            let response = try await client
+                .from(SupabaseTable.users.rawValue)
+                .select("id, email, name, phone_number, is_guest, profile_image, bio, company, job_title, location, skills, interests, profile_setup_completed, created_at, last_login_at, updated_at")
+                .eq("id", value: id)
+                .single()
+                .execute()
+            
+            let data = response.data
+            return try JSONDecoder().decode(SupabaseUser.self, from: data)
+        }
     }
     
     /// 从 Supabase 通过邮箱获取用户
     func getUserByEmail(email: String) async throws -> SupabaseUser? {
-        let response = try await client
-            .from(SupabaseTable.users.rawValue)
-            .select()
-            .eq("email", value: email)
-            .single()
-            .execute()
-        
-        let data = response.data
-        return try JSONDecoder().decode(SupabaseUser.self, from: data)
+        // Try with Pro columns first
+        do {
+            let response = try await client
+                .from(SupabaseTable.users.rawValue)
+                .select("id, email, name, phone_number, is_guest, profile_image, bio, company, job_title, location, skills, interests, profile_setup_completed, created_at, last_login_at, updated_at, is_pro, pro_start, pro_end, likes_remaining, likes_depleted_at")
+                .eq("email", value: email)
+                .single()
+                .execute()
+            
+            let data = response.data
+            return try JSONDecoder().decode(SupabaseUser.self, from: data)
+        } catch {
+            // If Pro columns don't exist, try without them
+            print("⚠️ Failed to fetch with Pro columns, trying without: \(error.localizedDescription)")
+            let response = try await client
+                .from(SupabaseTable.users.rawValue)
+                .select("id, email, name, phone_number, is_guest, profile_image, bio, company, job_title, location, skills, interests, profile_setup_completed, created_at, last_login_at, updated_at")
+                .eq("email", value: email)
+                .single()
+                .execute()
+            
+            let data = response.data
+            return try JSONDecoder().decode(SupabaseUser.self, from: data)
+        }
     }
     
     /// 更新用户最后登录时间
@@ -4198,6 +4228,336 @@ extension SupabaseService {
     func syncUserCredits(userId: String) async throws -> Int {
         print("🔄 [积分] 同步用户 \(userId) 的 credits（基于 hasMet 数量）")
         return try await getUserCredits(userId: userId)
+    }
+    
+    // MARK: - BrewNet Pro Subscription Methods
+    
+    /// Upgrade user to Pro subscription
+    /// If user already has Pro, add duration to existing end date
+    func upgradeUserToPro(userId: String, durationSeconds: TimeInterval) async throws {
+        print("🔄 [Pro] 升级用户 \(userId) 为 Pro，时长: \(durationSeconds) 秒")
+        
+        // Get current user to check existing Pro status
+        let userResponse = try await client
+            .from("users")
+            .select("is_pro, pro_end")
+            .eq("id", value: userId)
+            .single()
+            .execute()
+        
+        let userData = userResponse.data
+        let json = try JSONSerialization.jsonObject(with: userData) as? [String: Any]
+        
+        let currentProEnd = json?["pro_end"] as? String
+        let formatter = ISO8601DateFormatter()
+        
+        let now = Date()
+        let proStart: Date
+        let proEnd: Date
+        
+        // If user already has Pro and it hasn't expired, extend it
+        if let proEndStr = currentProEnd,
+           let existingProEnd = formatter.date(from: proEndStr),
+           existingProEnd > now {
+            // Extend from existing end date
+            proStart = now
+            proEnd = existingProEnd.addingTimeInterval(durationSeconds)
+            print("✅ [Pro] 用户已有 Pro，延长时间至: \(proEnd)")
+        } else {
+            // Start new Pro subscription
+            proStart = now
+            proEnd = now.addingTimeInterval(durationSeconds)
+            print("✅ [Pro] 新建 Pro 订阅，结束时间: \(proEnd)")
+        }
+        
+        // Update user with Pro status
+        struct ProUpdate: Encodable {
+            let is_pro: Bool
+            let pro_start: String
+            let pro_end: String
+            let likes_remaining: Int
+        }
+        
+        let update = ProUpdate(
+            is_pro: true,
+            pro_start: formatter.string(from: proStart),
+            pro_end: formatter.string(from: proEnd),
+            likes_remaining: 999999 // Unlimited for Pro users
+        )
+        
+        let response = try await client
+            .from("users")
+            .update(update)
+            .eq("id", value: userId)
+            .execute()
+        
+        if response.status < 200 || response.status >= 300 {
+            print("❌ [Pro] 更新失败，HTTP 状态码: \(response.status)")
+            throw NSError(domain: "ProError", code: 1, userInfo: [NSLocalizedDescriptionKey: "升级到 Pro 失败：HTTP 状态码 \(response.status)"])
+        }
+        
+        print("✅ [Pro] 用户 \(userId) 已升级为 Pro")
+    }
+    
+    /// Grant free Pro trial to new user (1 week)
+    func grantFreeProTrial(userId: String) async throws {
+        print("🎁 [Pro] 给新用户 \(userId) 赠送一周免费 Pro")
+        let oneWeekInSeconds: TimeInterval = 7 * 24 * 60 * 60
+        try await upgradeUserToPro(userId: userId, durationSeconds: oneWeekInSeconds)
+    }
+    
+    /// Check if user's Pro has expired and update status
+    func checkAndUpdateProExpiration(userId: String) async throws -> Bool {
+        print("🔍 [Pro] 检查用户 \(userId) 的 Pro 是否过期")
+        
+        let response = try await client
+            .from("users")
+            .select("is_pro, pro_end")
+            .eq("id", value: userId)
+            .single()
+            .execute()
+        
+        let data = response.data
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let isPro = json["is_pro"] as? Bool,
+              let proEndStr = json["pro_end"] as? String else {
+            return false
+        }
+        
+        // If not Pro, no need to check
+        if !isPro {
+            print("✅ [Pro] 用户不是 Pro，无需检查")
+            return false
+        }
+        
+        // Check if expired
+        let formatter = ISO8601DateFormatter()
+        guard let proEnd = formatter.date(from: proEndStr) else {
+            return false
+        }
+        
+        if proEnd < Date() {
+            print("⚠️ [Pro] 用户的 Pro 已过期，更新状态")
+            
+            // Update to non-Pro
+            struct ProExpireUpdate: Encodable {
+                let is_pro: Bool
+                let likes_remaining: Int
+            }
+            
+            let update = ProExpireUpdate(
+                is_pro: false,
+                likes_remaining: 10
+            )
+            
+            try await client
+                .from("users")
+                .update(update)
+                .eq("id", value: userId)
+                .execute()
+            
+            print("✅ [Pro] 用户 Pro 状态已更新为过期")
+            return true // Pro expired
+        }
+        
+        print("✅ [Pro] 用户的 Pro 未过期")
+        return false
+    }
+    
+    /// Decrement user's like count (for non-Pro users)
+    /// Returns false if no likes remaining
+    func decrementUserLikes(userId: String) async throws -> Bool {
+        print("🔄 [Likes] 扣减用户 \(userId) 的点赞数")
+        
+        // Get current user status
+        let response = try await client
+            .from("users")
+            .select("is_pro, likes_remaining, likes_depleted_at")
+            .eq("id", value: userId)
+            .single()
+            .execute()
+        
+        let data = response.data
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NSError(domain: "LikesError", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法获取用户点赞信息"])
+        }
+        
+        let isPro = json["is_pro"] as? Bool ?? false
+        
+        // Pro users have unlimited likes
+        if isPro {
+            print("✅ [Likes] Pro 用户，无需扣减")
+            return true
+        }
+        
+        let likesRemaining = json["likes_remaining"] as? Int ?? 0
+        let likesDepletedStr = json["likes_depleted_at"] as? String
+        
+        // Check if likes need to be reset (24h passed)
+        if let depletedStr = likesDepletedStr {
+            let formatter = ISO8601DateFormatter()
+            if let depletedDate = formatter.date(from: depletedStr) {
+                let hoursPassed = Date().timeIntervalSince(depletedDate) / 3600
+                if hoursPassed >= 24 {
+                    // Reset likes
+                    print("🔄 [Likes] 24小时已过，重置点赞数为 10")
+                    struct LikesReset: Encodable {
+                        let likes_remaining: Int
+                        let likes_depleted_at: String?
+                    }
+                    
+                    let reset = LikesReset(likes_remaining: 10, likes_depleted_at: nil)
+                    try await client
+                        .from("users")
+                        .update(reset)
+                        .eq("id", value: userId)
+                        .execute()
+                    
+                    // After reset, decrement one
+                    try await decrementLikesDirectly(userId: userId, newCount: 9)
+                    return true
+                }
+            }
+        }
+        
+        // Check if user has likes remaining
+        if likesRemaining <= 0 {
+            print("❌ [Likes] 用户已无剩余点赞数")
+            return false
+        }
+        
+        // Decrement likes
+        let newLikesRemaining = likesRemaining - 1
+        try await decrementLikesDirectly(userId: userId, newCount: newLikesRemaining)
+        
+        // If depleted to 0, record the time
+        if newLikesRemaining == 0 {
+            let formatter = ISO8601DateFormatter()
+            struct LikesDepleted: Encodable {
+                let likes_depleted_at: String
+            }
+            
+            let depleted = LikesDepleted(likes_depleted_at: formatter.string(from: Date()))
+            try await client
+                .from("users")
+                .update(depleted)
+                .eq("id", value: userId)
+                .execute()
+            
+            print("⚠️ [Likes] 用户点赞数已用完，记录时间")
+        }
+        
+        print("✅ [Likes] 点赞数已扣减: \(likesRemaining) -> \(newLikesRemaining)")
+        return true
+    }
+    
+    /// Helper to directly update likes count
+    private func decrementLikesDirectly(userId: String, newCount: Int) async throws {
+        struct LikesUpdate: Encodable {
+            let likes_remaining: Int
+        }
+        
+        let update = LikesUpdate(likes_remaining: newCount)
+        try await client
+            .from("users")
+            .update(update)
+            .eq("id", value: userId)
+            .execute()
+    }
+    
+    /// Get user's current likes remaining
+    func getUserLikesRemaining(userId: String) async throws -> Int {
+        let response = try await client
+            .from("users")
+            .select("likes_remaining")
+            .eq("id", value: userId)
+            .single()
+            .execute()
+        
+        let data = response.data
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let likesRemaining = json["likes_remaining"] as? Int else {
+            return 0
+        }
+        
+        return likesRemaining
+    }
+    
+    /// Check if user can send temporary chat (Pro users only)
+    func canSendTemporaryChat(userId: String) async throws -> Bool {
+        let response = try await client
+            .from("users")
+            .select("is_pro, pro_end")
+            .eq("id", value: userId)
+            .single()
+            .execute()
+        
+        let data = response.data
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        
+        let isPro = json["is_pro"] as? Bool ?? false
+        
+        // Check if Pro is still active
+        if isPro, let proEndStr = json["pro_end"] as? String {
+            let formatter = ISO8601DateFormatter()
+            if let proEnd = formatter.date(from: proEndStr) {
+                return proEnd > Date()
+            }
+        }
+        
+        return false
+    }
+    
+    /// Get Pro user IDs from a list of user IDs (for recommendation boost)
+    func getProUserIds(from userIds: [String]) async throws -> Set<String> {
+        guard !userIds.isEmpty else { return Set() }
+        
+        print("🔍 [Pro] Checking Pro status for \(userIds.count) users...")
+        
+        // Supabase 对 IN 查询有长度限制，分批查询
+        let formatter = ISO8601DateFormatter()
+        let now = Date()
+        var proUserIds = Set<String>()
+
+        let chunkSize = 100
+        let chunks = stride(from: 0, to: userIds.count, by: chunkSize).map { index -> [String] in
+            let end = min(index + chunkSize, userIds.count)
+            return Array(userIds[index..<end])
+        }
+
+        for chunk in chunks {
+            let response = try await client
+                .from("users")
+                .select("id, is_pro, pro_end")
+                .in("id", values: chunk)
+                .eq("is_pro", value: true)
+                .execute()
+            
+            let data = response.data
+            guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                continue
+            }
+            
+            for json in jsonArray {
+                guard let userId = json["id"] as? String else { continue }
+                
+                // 如果 pro_end 为空，视为无限期 Pro
+                if let proEndStr = json["pro_end"] as? String,
+                   let proEnd = formatter.date(from: proEndStr) {
+                    if proEnd > now {
+                        proUserIds.insert(userId)
+                    }
+                } else {
+                    // 没有 pro_end (例如无限期 Pro)，仍算作 Pro
+                    proUserIds.insert(userId)
+                }
+            }
+        }
+        
+        print("✅ [Pro] Found \(proUserIds.count) active Pro users")
+        return proUserIds
     }
 }
 

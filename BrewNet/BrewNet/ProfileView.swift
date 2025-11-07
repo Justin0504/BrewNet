@@ -14,6 +14,8 @@ struct ProfileView: View {
     @State private var userProfile: BrewNetProfile?
     @State private var isLoadingProfile = true
     @State private var showingEditProfile = false
+    @State private var showSubscriptionPayment = false
+    @State private var showProExpiredPopup = false
     
     var body: some View {
         Group {
@@ -33,7 +35,7 @@ struct ProfileView: View {
             } else if let profile = userProfile {
                 // Show profile display
                 // 使用 userProfile 作为 binding 的 source of truth，确保更新时自动刷新
-                ProfileDisplayView(profile: profile, onEditProfile: {
+                ProfileDisplayView(profile: profile, showSubscriptionPayment: $showSubscriptionPayment, onEditProfile: {
                     showingEditProfile = true
                 }, onProfileUpdated: { updatedProfile in
                     // 当 profile 更新时，同步更新父视图的 userProfile
@@ -154,6 +156,22 @@ struct ProfileView: View {
         .sheet(isPresented: $showingEditProfile) {
             ProfileSetupView()
         }
+        .sheet(isPresented: $showSubscriptionPayment) {
+            if let userId = authManager.currentUser?.id {
+                SubscriptionPaymentView(currentUserId: userId) {
+                    // Reload user data after subscription
+                    Task {
+                        await authManager.refreshUser()
+                    }
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showProExpiredPopup) {
+            ProExpiryPopup(onStayPro: {
+                showProExpiredPopup = false
+                showSubscriptionPayment = true
+            })
+        }
     }
     
     // MARK: - User Header View
@@ -194,6 +212,10 @@ struct ProfileView: View {
                                 .font(.title2)
                                 .fontWeight(.bold)
                                 .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            
+                            if user.isProActive {
+                                ProBadge(size: .medium)
+                            }
                             
                             if user.isGuest {
                                 Text("Guest")
@@ -247,6 +269,86 @@ struct ProfileView: View {
                     )
                 }
                 .padding(.horizontal, 20)
+            }
+            
+            // BrewNet Pro card (shown for all users)
+            if let user = authManager.currentUser {
+                VStack(spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 6) {
+                                ProBadge(size: .medium)
+                                Text(user.isProActive ? "Thank you for being Pro" : "Upgrade")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.gray)
+                            }
+                            
+                            Text("Match faster\nConnect smarter\nGrow further")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(.primary)
+                                .lineLimit(3)
+                        }
+                        
+                        Spacer()
+                        
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(Color(red: 1.0, green: 0.75, blue: 0.3))
+                    }
+                    
+                    Button(action: {
+                        showSubscriptionPayment = true
+                    }) {
+                        Text(user.isProActive ? "Manage BrewNet Pro" : "Get BrewNet Pro")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(red: 1.0, green: 0.84, blue: 0.0),
+                                        Color(red: 1.0, green: 0.65, blue: 0.0)
+                                    ]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .cornerRadius(12)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .padding(20)
+                .background(
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            Color(red: 0.95, green: 0.85, blue: 0.7).opacity(0.35),
+                            Color(red: 0.85, green: 0.75, blue: 0.6).opacity(0.35)
+                        ]),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .cornerRadius(20)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color(red: 1.0, green: 0.84, blue: 0.0).opacity(0.5),
+                                    Color(red: 1.0, green: 0.65, blue: 0.0).opacity(0.5)
+                                ]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 2
+                        )
+                )
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .onTapGesture {
+                    showSubscriptionPayment = true
+                }
             }
         }
         .padding(.vertical, 16)

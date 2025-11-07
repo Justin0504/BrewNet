@@ -35,6 +35,9 @@ struct BrewNetMatchesView: View {
     @State private var showingMatchFilter = false
     @State private var showingIncreaseExposure = false
     @State private var currentFilter: MatchFilter? = nil
+    @State private var showSubscriptionPayment = false
+    @State private var proUsers: Set<String> = []
+    @State private var isProcessingLike = false
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -114,7 +117,8 @@ struct BrewNetMatchesView: View {
                                 dragOffset: .constant(.zero),
                                 rotationAngle: .constant(0),
                                 onSwipe: { _ in },
-                                isConnection: isConnection
+                                isConnection: isConnection,
+                                isPro: proUsers.contains(profiles[currentIndex + 1].userId)
                             )
                             .scaleEffect(0.95)
                             .offset(y: 10)
@@ -126,7 +130,8 @@ struct BrewNetMatchesView: View {
                             dragOffset: $dragOffset,
                             rotationAngle: $rotationAngle,
                             onSwipe: handleSwipe,
-                            isConnection: isConnection
+                            isConnection: isConnection,
+                            isPro: proUsers.contains(profiles[currentIndex].userId)
                         )
                     }
                     .frame(height: screenHeight * 0.8)
@@ -203,6 +208,15 @@ struct BrewNetMatchesView: View {
             IncreaseExposureView()
                 .environmentObject(authManager)
                 .environmentObject(supabaseService)
+        }
+        .sheet(isPresented: $showSubscriptionPayment) {
+            if let userId = authManager.currentUser?.id {
+                SubscriptionPaymentView(currentUserId: userId) {
+                    Task {
+                        await authManager.refreshUser()
+                    }
+                }
+            }
         }
         .onAppear {
             // 加载保存的filter
@@ -439,7 +453,9 @@ struct BrewNetMatchesView: View {
             
             // Like button
             Button(action: {
-                swipeRight()
+                Task {
+                    await likeProfile(triggeredByButton: true)
+                }
             }) {
                 ZStack {
                     Circle()
@@ -452,15 +468,33 @@ struct BrewNetMatchesView: View {
                         .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 }
             }
-            .disabled(currentIndex >= profiles.count)
+            .disabled(currentIndex >= profiles.count || isProcessingLike)
         }
     }
     
     private func openTemporaryChat() {
         guard currentIndex < profiles.count else { return }
-        let profile = profiles[currentIndex]
-        selectedProfileForChat = profile
-        showingTemporaryChat = true
+        guard let currentUser = authManager.currentUser else { return }
+        
+        // Check if user is Pro to send temporary chat
+        Task {
+            do {
+                let canChat = try await supabaseService.canSendTemporaryChat(userId: currentUser.id)
+                await MainActor.run {
+                    if !canChat {
+                        // Show subscription payment for non-Pro users
+                        showSubscriptionPayment = true
+                    } else {
+                        // Allow temporary chat for Pro users
+                        let profile = profiles[currentIndex]
+                        selectedProfileForChat = profile
+                        showingTemporaryChat = true
+                    }
+                }
+            } catch {
+                print("❌ Failed to check Pro status: \(error.localizedDescription)")
+            }
+        }
     }
     
     private func handleTemporaryChatSend(message: String, profile: BrewNetProfile) {
@@ -527,12 +561,14 @@ struct BrewNetMatchesView: View {
         case .left:
             passProfile()
         case .right:
-            likeProfile()
+            Task {
+                await likeProfile(triggeredByButton: false)
+            }
         case .none:
             break
         }
     }
-    
+
     private func swipeLeft() {
         withAnimation(.spring()) {
             dragOffset = CGSize(width: -screenWidth, height: 0)
@@ -541,17 +577,6 @@ struct BrewNetMatchesView: View {
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             passProfile()
-        }
-    }
-    
-    private func swipeRight() {
-        withAnimation(.spring()) {
-            dragOffset = CGSize(width: screenWidth, height: 0)
-            rotationAngle = 15
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            likeProfile()
         }
     }
     
@@ -599,58 +624,76 @@ struct BrewNetMatchesView: View {
             print("❌ Passed profile: \(profile.coreIdentity.name)")
     }
     
-    private func likeProfile() {
+    private func likeProfile(triggeredByButton: Bool) async {
+        guard !isProcessingLike else { return }
         guard currentIndex < profiles.count else { return }
         guard let currentUser = authManager.currentUser else {
             print("❌ No current user found")
             return
         }
-        
+
+        isProcessingLike = true
+        defer { isProcessingLike = false }
+
         let profile = profiles[currentIndex]
-        likedProfiles.append(profile)
-        
-        // 记录 Like 交互
-        Task {
+
+        do {
+            let canLike = try await supabaseService.decrementUserLikes(userId: currentUser.id)
+            if !canLike {
+                await MainActor.run {
+                    print("⚠️ No likes remaining, showing payment page")
+                    showSubscriptionPayment = true
+                    withAnimation(.spring()) {
+                        dragOffset = .zero
+                        rotationAngle = 0
+                    }
+                }
+                return
+            }
+
+            if triggeredByButton {
+                await MainActor.run {
+                    withAnimation(.spring()) {
+                        dragOffset = CGSize(width: screenWidth, height: 0)
+                        rotationAngle = 15
+                    }
+                }
+                // Allow animation to complete
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+
+            await MainActor.run {
+                likedProfiles.append(profile)
+            }
+
             await recommendationService.recordLike(
                 userId: currentUser.id,
                 targetUserId: profile.userId
             )
-        }
-        
-        // 发送邀请到 Supabase
-        Task {
-            do {
-                // 获取当前用户的 profile 信息用于 senderProfile
-                var senderProfile: InvitationProfile? = nil
-                if let currentUserProfile = try await supabaseService.getProfile(userId: currentUser.id) {
-                    let brewNetProfile = currentUserProfile.toBrewNetProfile()
-                    senderProfile = brewNetProfile.toInvitationProfile()
-                }
-                
-                // 发送邀请
-                let invitation = try await supabaseService.sendInvitation(
-                    senderId: currentUser.id,
-                    receiverId: profile.userId,
-                    reasonForInterest: nil, // 可以后续添加理由
-                    senderProfile: senderProfile
-                )
-                
-                print("✅ Invitation sent successfully: \(invitation.id)")
-                
-                // 清除推荐缓存，确保已发送邀请的用户不再出现在推荐列表中
-                await MainActor.run {
-                    // 1. 立即从当前显示列表中移除（如果还在显示）
-                    profiles.removeAll { $0.userId == profile.userId }
-                    
-                    // 2. 从缓存中移除（如果还在缓存中）
-                    cachedProfiles.removeAll { $0.userId == profile.userId }
-                    
-                    // 3. 更新持久化缓存（保存移除后的缓存）
-                    if !cachedProfiles.isEmpty {
-                        saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
-                        print("✅ Updated cache after sending invitation (removed \(profile.coreIdentity.name))")
-                    } else {
-                        // 如果缓存为空，清除持久化缓存
+
+            var senderProfile: InvitationProfile? = nil
+            if let currentUserProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                let brewNetProfile = currentUserProfile.toBrewNetProfile()
+                senderProfile = brewNetProfile.toInvitationProfile()
+            }
+
+            let invitation = try await supabaseService.sendInvitation(
+                senderId: currentUser.id,
+                receiverId: profile.userId,
+                reasonForInterest: nil,
+                senderProfile: senderProfile
+            )
+            print("✅ Invitation sent successfully: \(invitation.id)")
+
+            await MainActor.run {
+                profiles.removeAll { $0.userId == profile.userId }
+                cachedProfiles.removeAll { $0.userId == profile.userId }
+                proUsers.remove(profile.userId)
+
+                if !cachedProfiles.isEmpty {
+                    saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
+                    print("✅ Updated cache after sending invitation (removed \(profile.coreIdentity.name))")
+                } else {
                     if let currentUser = authManager.currentUser {
                         let cacheKey = "matches_cache_\(currentUser.id)"
                         let timeKey = "matches_cache_time_\(currentUser.id)"
@@ -658,107 +701,85 @@ struct BrewNetMatchesView: View {
                         UserDefaults.standard.removeObject(forKey: cacheKey)
                         UserDefaults.standard.removeObject(forKey: timeKey)
                         UserDefaults.standard.removeObject(forKey: sourceKey)
-                        isCacheFromRecommendation = false
-                            print("🗑️ Cleared local cache (empty after removing invited user)")
-                        }
                     }
-                    
-                    // 4. 调整索引（如果当前索引超出范围）
-                    if currentIndex >= profiles.count && !profiles.isEmpty {
-                        currentIndex = 0
-                    } else if profiles.isEmpty {
-                        currentIndex = 0
-                    }
-                    
-                    // 5. 清除服务器端的推荐缓存（异步）
-                    Task {
-                        do {
-                            try await supabaseService.clearRecommendationCache(userId: currentUser.id)
-                            print("🗑️ Cleared server-side recommendation cache")
-                        } catch {
-                            print("⚠️ Failed to clear server-side cache: \(error.localizedDescription)")
-                        }
-                    }
+                    isCacheFromRecommendation = false
+                    print("🗑️ Cleared local cache (empty after removing invited user)")
                 }
-                
-                // 检查对方是否也给我发了邀请（双向邀请）
-                let receivedInvitations = try? await supabaseService.getPendingInvitations(userId: currentUser.id)
-                let existingInvitationFromThem = receivedInvitations?.first { $0.senderId == profile.userId }
-                
-                if let theirInvitation = existingInvitationFromThem {
-                    // 双方互相发送了邀请，自动创建匹配
-                    print("💚 Mutual invitation detected! Auto-creating match...")
-                    
-                    // 先接受对方发给我的邀请（这会触发数据库触发器创建匹配）
-                    do {
-                        _ = try await supabaseService.acceptInvitation(
-                            invitationId: theirInvitation.id,
-                            userId: currentUser.id
-                        )
-                        print("✅ Accepted their invitation - match created via trigger")
-                    } catch {
-                        print("⚠️ Failed to accept their invitation: \(error.localizedDescription)")
-                    }
-                    
-                    // 然后接受我刚发送的邀请（确保数据库记录一致）
-                    do {
-                        _ = try await supabaseService.acceptInvitation(
-                            invitationId: invitation.id,
-                            userId: currentUser.id
-                        )
-                        print("✅ Accepted my invitation")
-                    } catch {
-                        // 如果失败，可能匹配已经通过触发器创建了，不影响
-                        print("⚠️ Failed to accept my invitation (match may already exist): \(error.localizedDescription)")
-                    }
-                    
-                    // 记录 Match 交互
-                    await recommendationService.recordMatch(
-                        userId: currentUser.id,
-                        targetUserId: profile.userId
+
+                if currentIndex >= profiles.count && !profiles.isEmpty {
+                    currentIndex = 0
+                } else if profiles.isEmpty {
+                    currentIndex = 0
+                }
+            }
+
+            Task {
+                do {
+                    try await supabaseService.clearRecommendationCache(userId: currentUser.id)
+                    print("🗑️ Cleared server-side recommendation cache")
+                } catch {
+                    print("⚠️ Failed to clear server-side cache: \(error.localizedDescription)")
+                }
+            }
+
+            let receivedInvitations = try? await supabaseService.getPendingInvitations(userId: currentUser.id)
+            let existingInvitationFromThem = receivedInvitations?.first { $0.senderId == profile.userId }
+
+            if let theirInvitation = existingInvitationFromThem {
+                print("💚 Mutual invitation detected! Auto-creating match...")
+                do {
+                    _ = try await supabaseService.acceptInvitation(
+                        invitationId: theirInvitation.id,
+                        userId: currentUser.id
                     )
-                    
-                    // 显示匹配成功提示
-                    await MainActor.run {
-                        matchedProfile = profile
-                        showingMatchAlert = true
-                        
-                        NotificationCenter.default.post(
-                            name: NSNotification.Name("UserMatched"),
-                            object: nil,
-                            userInfo: ["profile": profile]
-                        )
-                    }
+                    print("✅ Accepted their invitation - match created via trigger")
+                } catch {
+                    print("⚠️ Failed to accept their invitation: \(error.localizedDescription)")
                 }
-                
-                await MainActor.run {
-                    moveToNextProfile()
+
+                do {
+                    _ = try await supabaseService.acceptInvitation(
+                        invitationId: invitation.id,
+                        userId: currentUser.id
+                    )
+                    print("✅ Accepted my invitation")
+                } catch {
+                    print("⚠️ Failed to accept my invitation (match may already exist): \(error.localizedDescription)")
                 }
-                
-            } catch {
-                print("❌ Failed to send invitation: \(error.localizedDescription)")
+
+                await recommendationService.recordMatch(
+                    userId: currentUser.id,
+                    targetUserId: profile.userId
+                )
+
                 await MainActor.run {
-                    // 检查是否是已存在的邀请错误
-                    if let invitationError = error as? InvitationError,
-                       case .alreadyExists = invitationError {
-                        // 如果是重复邀请，静默处理，不显示错误
-                        print("ℹ️ Invitation already exists, continuing...")
-                        moveToNextProfile()
-                    } else if error.localizedDescription.contains("already exists") ||
-                              error.localizedDescription.contains("duplicate") {
-                        // 捕获其他形式的重复错误
-                        print("ℹ️ Invitation already exists, continuing...")
-                        moveToNextProfile()
-                    } else {
-                        // 其他错误才显示错误信息
-                        errorMessage = "Failed to send invitation: \(error.localizedDescription)"
-                        // 延迟清除错误信息
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                            errorMessage = nil
-                        }
-                    }
-                    // 即使出错也继续下一个profile
-                    moveToNextProfile()
+                    matchedProfile = profile
+                    showingMatchAlert = true
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("UserMatched"),
+                        object: nil,
+                        userInfo: ["profile": profile]
+                    )
+                }
+            }
+
+            await MainActor.run {
+                moveToNextProfile()
+            }
+
+            Task {
+                await authManager.refreshUser()
+            }
+        } catch {
+            print("❌ Failed to process like: \(error.localizedDescription)")
+            await MainActor.run {
+                errorMessage = "Failed to send invitation: \(error.localizedDescription)"
+                withAnimation(.spring()) {
+                    dragOffset = .zero
+                    rotationAngle = 0
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    errorMessage = nil
                 }
             }
         }
@@ -1396,6 +1417,9 @@ struct BrewNetMatchesView: View {
                 }
             }
             
+            // Load Pro status from users table for all loaded profiles
+            await loadProStatusForProfiles()
+            
         } catch {
             print("❌ Failed to load profiles: \(error.localizedDescription)")
             
@@ -1428,6 +1452,27 @@ struct BrewNetMatchesView: View {
                     isLoadingMore = false
                 }
             }
+        }
+    }
+    
+    // MARK: - Load Pro Status from Users Table
+    private func loadProStatusForProfiles() async {
+        guard !profiles.isEmpty else { return }
+        
+        let userIds = profiles.map { $0.userId }
+        print("🔍 [Pro] Loading Pro status from users table for \(userIds.count) profiles...")
+        
+        do {
+            // Batch fetch Pro status from users table
+            let proUserIds = try await supabaseService.getProUserIds(from: userIds)
+            
+            await MainActor.run {
+                self.proUsers = proUserIds
+                print("✅ [Pro] Loaded Pro status: \(proUserIds.count) Pro users among \(userIds.count) profiles")
+            }
+        } catch {
+            print("⚠️ [Pro] Failed to load Pro status: \(error.localizedDescription)")
+            // Don't fail the whole load if Pro status fails
         }
     }
     
@@ -2027,7 +2072,6 @@ struct MatchFilter: Codable, Equatable {
         return experienceLevel != nil ||
                careerStage != nil ||
                preferredChatFormat != nil ||
-               !preferredMeetingVibes.isEmpty ||
                verifiedStatus != nil ||
                !selectedSkills.isEmpty ||
                !selectedHobbies.isEmpty ||
@@ -2054,13 +2098,6 @@ struct MatchFilter: Codable, Equatable {
         if let format = preferredChatFormat,
            profile.networkingPreferences.preferredChatFormat != format {
             return false
-        }
-        
-        if !preferredMeetingVibes.isEmpty {
-            let profileVibes = Set(profile.personalitySocial.preferredMeetingVibes.isEmpty ? [profile.personalitySocial.preferredMeetingVibe] : profile.personalitySocial.preferredMeetingVibes)
-            if profileVibes.isDisjoint(with: preferredMeetingVibes) {
-                return false
-            }
         }
         
         if let verified = verifiedStatus,
@@ -2117,6 +2154,7 @@ struct MatchFilterView: View {
     
     @State private var filter: MatchFilter = .default
     @State private var showingResetConfirmation = false
+    @State private var showSubscriptionPayment = false
     
     var body: some View {
         NavigationView {
@@ -2165,10 +2203,23 @@ struct MatchFilterView: View {
                                 )
                             }
                             
-                            // 3. Years of Experience Range - 关联Experience Level
-                            FilterSection(title: "Years of Experience") {
+                            // 3. Years of Experience Range - 关联Experience Level [PRO ONLY]
+                            FilterSection(title: "Years of Experience", isProOnly: !(authManager.currentUser?.isProActive ?? false)) {
                                 ExperienceRangeFilter(
                                     minYears: $filter.minYearsOfExperience
+                                )
+                                .disabled(!(authManager.currentUser?.isProActive ?? false))
+                                .opacity((authManager.currentUser?.isProActive ?? false) ? 1.0 : 0.5)
+                                .overlay(
+                                    Group {
+                                        if !(authManager.currentUser?.isProActive ?? false) {
+                                            Color.clear
+                                                .contentShape(Rectangle())
+                                                .onTapGesture {
+                                                    showSubscriptionPayment = true
+                                                }
+                                        }
+                                    }
                                 )
                             }
                             
@@ -2181,13 +2232,26 @@ struct MatchFilterView: View {
                                 )
                             }
                             
-                            // 5. Skills (多选) - 高优先级，Professional相关
+                            // 5. Skills (多选) - 高优先级，Professional相关 [PRO ONLY]
                             // 使用FeatureVocabularies，与推荐系统对齐
-                            FilterSection(title: "Skills") {
+                            FilterSection(title: "Skills", isProOnly: !(authManager.currentUser?.isProActive ?? false)) {
                                 MultiSelectFilter(
                                     options: FeatureVocabularies.allSkills,
                                     selected: $filter.selectedSkills,
                                     maxSelections: 10
+                                )
+                                .disabled(!(authManager.currentUser?.isProActive ?? false))
+                                .opacity((authManager.currentUser?.isProActive ?? false) ? 1.0 : 0.5)
+                                .overlay(
+                                    Group {
+                                        if !(authManager.currentUser?.isProActive ?? false) {
+                                            Color.clear
+                                                .contentShape(Rectangle())
+                                                .onTapGesture {
+                                                    showSubscriptionPayment = true
+                                                }
+                                        }
+                                    }
                                 )
                             }
                             
@@ -2201,25 +2265,8 @@ struct MatchFilterView: View {
                                 )
                             }
                             
-                            // 7. Meeting Vibes (多选)
-                            FilterSection(title: "Meeting Vibes") {
-                                MultiSelectFilter(
-                                    options: MeetingVibe.allCases.map { $0.displayName },
-                                    selected: Binding(
-                                        get: {
-                                            Set(filter.preferredMeetingVibes.map { $0.displayName })
-                                        },
-                                        set: { newValue in
-                                            let mapped = newValue.compactMap { MeetingVibe(rawValue: $0) }
-                                            filter.preferredMeetingVibes = Set(mapped)
-                                        }
-                                    ),
-                                    maxSelections: MeetingVibe.allCases.count
-                                )
-                            }
-                            
                             // ========== Personal Preferences Section (低优先级) ==========
-                            // 8. Hobbies (多选) - 使用ProfileOptions，与profile设置对齐
+                            // 7. Hobbies (多选) - 使用ProfileOptions，与profile设置对齐
                             FilterSection(title: "Hobbies") {
                                 MultiSelectFilter(
                                     options: HobbiesOptions.allHobbies,
@@ -2228,7 +2275,7 @@ struct MatchFilterView: View {
                                 )
                             }
                             
-                            // 9. Values (多选) - 使用ProfileOptions，与profile设置对齐
+                            // 8. Values (多选) - 使用ProfileOptions，与profile设置对齐
                             FilterSection(title: "Values") {
                                 MultiSelectFilter(
                                     options: ValuesOptions.allValues,
@@ -2238,18 +2285,31 @@ struct MatchFilterView: View {
                             }
                             
                             // ========== Location Section (中优先级) ==========
-                            // 10. Maximum Distance (范围)
+                            // 9. Maximum Distance (范围)
                             FilterSection(title: "Maximum Distance") {
                                 DistanceFilter(maxDistance: $filter.maxDistance)
                             }
                             
                             // ========== Verification Section (低优先级) ==========
-                            // 11. Verified Status (单选)
-                            FilterSection(title: "Verified Status") {
+                            // 10. Verified Status (单选) [PRO ONLY]
+                            FilterSection(title: "Verified Status", isProOnly: !(authManager.currentUser?.isProActive ?? false)) {
                                 SingleSelectFilter(
                                     options: VerifiedStatus.allCases,
                                     selected: $filter.verifiedStatus,
                                     displayName: { $0.displayName }
+                                )
+                                .disabled(!(authManager.currentUser?.isProActive ?? false))
+                                .opacity((authManager.currentUser?.isProActive ?? false) ? 1.0 : 0.5)
+                                .overlay(
+                                    Group {
+                                        if !(authManager.currentUser?.isProActive ?? false) {
+                                            Color.clear
+                                                .contentShape(Rectangle())
+                                                .onTapGesture {
+                                                    showSubscriptionPayment = true
+                                                }
+                                        }
+                                    }
                                 )
                             }
                         }
@@ -2328,6 +2388,16 @@ struct MatchFilterView: View {
         .onAppear {
             loadSavedFilter()
         }
+        .sheet(isPresented: $showSubscriptionPayment) {
+            if let userId = authManager.currentUser?.id {
+                SubscriptionPaymentView(currentUserId: userId) {
+                    // Reload user data after subscription
+                    Task {
+                        await authManager.refreshUser()
+                    }
+                }
+            }
+        }
     }
     
     private func applyFilter() {
@@ -2364,17 +2434,31 @@ struct MatchFilterView: View {
 struct FilterSection<Content: View>: View {
     let title: String
     let content: Content
+    let isProOnly: Bool
     
-    init(title: String, @ViewBuilder content: () -> Content) {
+    init(title: String, isProOnly: Bool = false, @ViewBuilder content: () -> Content) {
         self.title = title
+        self.isProOnly = isProOnly
         self.content = content()
     }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            HStack {
+                Text(title)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                
+                if isProOnly {
+                    ProBadge(size: .small)
+                }
+            }
+            
+            if isProOnly {
+                Text("Become Pro to unlock this filter")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(Color(red: 1.0, green: 0.65, blue: 0.0))
+            }
             
             content
         }
