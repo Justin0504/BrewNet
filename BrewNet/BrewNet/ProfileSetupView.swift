@@ -1824,46 +1824,64 @@ struct NetworkingIntentionStep: View {
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                     
-                    let availableSubIntentions = orderedSubIntentions()
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 1), spacing: 8) {
-                        ForEach(availableSubIntentions, id: \.self) { subIntention in
-                            Button(action: {
-                                if let index = selectedSubIntentions.firstIndex(of: subIntention) {
-                                    selectedSubIntentions.remove(at: index)
-                                    updateProfileData()
-                                } else if selectedSubIntentions.count < 8 {
-                                    selectedSubIntentions.append(subIntention)
-                                    updateProfileData()
+                    VStack(alignment: .leading, spacing: 20) {
+                        ForEach(Array(groupedSubIntentionsData().enumerated()), id: \.element.0) { index, group in
+                            let (intention, subIntentions) = group
+
+                            VStack(alignment: .leading, spacing: 12) {
+                                if index > 0 {
+                                    Divider()
+                                        .padding(.vertical, 4)
                                 }
-                            }) {
-                                // 使用 computed property 来确保实时更新
-                                let isSelected = selectedSubIntentions.contains(subIntention)
-                                
-                                HStack {
-                                    Text(subIntention.displayName)
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundColor(isSelected ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
-                                    
-                                    Spacer()
-                                    
-                                    if isSelected {
-                                        Image(systemName: "checkmark")
-                                            .font(.system(size: 12))
-                                            .foregroundColor(.white)
+
+                                Text(getIntentionDescription(intention))
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.12))
+                                    .cornerRadius(10)
+
+                                VStack(spacing: 8) {
+                                    ForEach(subIntentions, id: \.self) { subIntention in
+                                        Button(action: {
+                                            if let index = selectedSubIntentions.firstIndex(of: subIntention) {
+                                                selectedSubIntentions.remove(at: index)
+                                                updateProfileData()
+                                            } else if selectedSubIntentions.count < 8 {
+                                                selectedSubIntentions.append(subIntention)
+                                                updateProfileData()
+                                            }
+                                        }) {
+                                            let isSelected = selectedSubIntentions.contains(subIntention)
+
+                                            HStack {
+                                                Text(subIntention.displayName)
+                                                    .font(.system(size: 16, weight: .semibold))
+                                                    .foregroundColor(isSelected ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+
+                                                Spacer()
+
+                                                if isSelected {
+                                                    Image(systemName: "checkmark")
+                                                        .font(.system(size: 12))
+                                                        .foregroundColor(.white)
+                                                }
+                                            }
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 12)
+                                            .background(isSelected ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
+                                            .cornerRadius(8)
+                                        }
+                                        .id("\(subIntention.rawValue)-\(refreshID)") // 使用 refreshID 强制刷新
+                                        .onAppear {
+                                            let isSelected = selectedSubIntentions.contains(subIntention)
+                                            print("🔍 Button '\(subIntention.displayName)' appeared - isSelected: \(isSelected)")
+                                            print("   selectedSubIntentions Set: \(selectedSubIntentions.map { $0.rawValue })")
+                                            print("   subIntention rawValue: '\(subIntention.rawValue)'")
+                                        }
                                     }
                                 }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
-                                .background(isSelected ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
-                                .cornerRadius(8)
-                            }
-                            .id("\(subIntention.rawValue)-\(refreshID)") // 使用 refreshID 强制刷新
-                            .onAppear {
-                                // 调试：检查每个按钮的选中状态
-                                let isSelected = selectedSubIntentions.contains(subIntention)
-                                print("🔍 Button '\(subIntention.displayName)' appeared - isSelected: \(isSelected)")
-                                print("   selectedSubIntentions Set: \(selectedSubIntentions.map { $0.rawValue })")
-                                print("   subIntention rawValue: '\(subIntention.rawValue)'")
                             }
                         }
                     }
@@ -2145,6 +2163,20 @@ struct NetworkingIntentionStep: View {
         orderedSubIntentions().filter { selectedSubIntentions.contains($0) }
     }
     
+    private func groupedSubIntentionsData() -> [(NetworkingIntentionType, [SubIntentionType])] {
+        let availableSubIntentions = orderedSubIntentions()
+        var result: [(NetworkingIntentionType, [SubIntentionType])] = []
+
+        for intention in orderedSelectedIntentions() {
+            let subIntentions = availableSubIntentions.filter { intention.subIntentions.contains($0) }
+            if !subIntentions.isEmpty {
+                result.append((intention, subIntentions))
+            }
+        }
+
+        return result
+    }
+
     private func updateProfileData() {
         // 如果正在从数据加载，不要更新 profileData（避免循环）
         guard !isLoadingFromData else {
