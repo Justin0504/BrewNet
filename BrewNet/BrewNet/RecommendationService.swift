@@ -114,12 +114,24 @@ class RecommendationService: ObservableObject {
         // 5. 批量计算相似度（使用新的综合匹配算法）
         var scoredCandidates: [(userId: String, features: UserTowerFeatures, score: Double)] = []
         
+        // Fetch Pro status for all candidates in batch for efficiency
+        let candidateUserIds = candidates.map { $0.userId }
+        let proUserIds = try await supabaseService.getProUserIds(from: candidateUserIds)
+        print("✨ [Pro Boost] Found \(proUserIds.count) Pro users among \(candidateUserIds.count) candidates")
+        
         for (candidateUserId, candidateFeatures) in candidates {
             // 使用新的综合匹配算法（包含互补匹配和相似匹配）
-            let score = encoder.calculateSimilarity(
+            var score = encoder.calculateSimilarity(
                 userFeatures: userFeatures,
                 candidateFeatures: candidateFeatures
             )
+            
+            // BrewNet Pro boost: Pro users get 1.5x score boost to appear higher in recommendations
+            if proUserIds.contains(candidateUserId) {
+                score *= 1.5
+                print("✨ [Pro Boost] User \(candidateUserId) boosted: \(String(format: "%.3f", score / 1.5)) -> \(String(format: "%.3f", score))")
+            }
+            
             scoredCandidates.append((candidateUserId, candidateFeatures, score))
         }
         

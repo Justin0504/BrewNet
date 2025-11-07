@@ -23,6 +23,8 @@ struct CategoryRecommendationsView: View {
     @State private var isConnection: Bool = false
     @State private var showingTemporaryChat = false
     @State private var selectedProfileForChat: BrewNetProfile?
+    @State private var proUsers: Set<String> = []
+    @State private var showSubscriptionPayment = false
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -59,7 +61,8 @@ struct CategoryRecommendationsView: View {
                                 dragOffset: .constant(.zero),
                                 rotationAngle: .constant(0),
                                 onSwipe: { _ in },
-                                isConnection: isConnection
+                                isConnection: isConnection,
+                                isPro: proUsers.contains(profiles[currentIndex + 1].userId)
                             )
                             .scaleEffect(0.95)
                             .offset(y: 10)
@@ -71,7 +74,8 @@ struct CategoryRecommendationsView: View {
                             dragOffset: $dragOffset,
                             rotationAngle: $rotationAngle,
                             onSwipe: handleSwipe,
-                            isConnection: isConnection
+                            isConnection: isConnection,
+                            isPro: proUsers.contains(profiles[currentIndex].userId)
                         )
                     }
                     .frame(height: screenHeight * 0.8)
@@ -640,6 +644,9 @@ struct CategoryRecommendationsView: View {
                 }
             }
             
+            // Load Pro status from users table for all loaded profiles
+            await loadProStatusForProfiles()
+            
         } catch {
             print("❌ CategoryRecommendationsView: Failed to load recommendations: \(error.localizedDescription)")
             await MainActor.run {
@@ -649,6 +656,27 @@ struct CategoryRecommendationsView: View {
                     isLoadingMore = false
                 }
             }
+        }
+    }
+    
+    // MARK: - Load Pro Status from Users Table
+    private func loadProStatusForProfiles() async {
+        guard !profiles.isEmpty else { return }
+        
+        let userIds = profiles.map { $0.userId }
+        print("🔍 [Pro] Loading Pro status from users table for \(userIds.count) profiles...")
+        
+        do {
+            // Batch fetch Pro status from users table
+            let proUserIds = try await supabaseService.getProUserIds(from: userIds)
+            
+            await MainActor.run {
+                self.proUsers = proUserIds
+                print("✅ [Pro] Loaded Pro status: \(proUserIds.count) Pro users among \(userIds.count) profiles")
+            }
+        } catch {
+            print("⚠️ [Pro] Failed to load Pro status: \(error.localizedDescription)")
+            // Don't fail the whole load if Pro status fails
         }
     }
     

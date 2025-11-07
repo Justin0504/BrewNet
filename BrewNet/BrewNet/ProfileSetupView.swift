@@ -2740,8 +2740,6 @@ struct IndustryRow: View {
 // MARK: - Step 5: Personality & Social
 struct PersonalitySocialStep: View {
     @Binding var profileData: ProfileCreationData
-    @State private var preferredMeetingVibe = MeetingVibe.casual
-    @State private var selectedMeetingVibes: Set<MeetingVibe> = [.casual]
     @State private var selfIntroduction = ""
     @StateObject private var selectionHelper = SelectionHelper()
     @State private var scrollOffset: CGFloat = 0
@@ -2867,88 +2865,28 @@ struct PersonalitySocialStep: View {
                 }
             }
             
-            // Preferred Meeting Vibe
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Preferred Meeting Vibes")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                
-                Text("Select one or more meeting vibes that fit you")
-                    .font(.system(size: 12))
-                    .foregroundColor(.gray)
-                
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
-                    ForEach(MeetingVibe.allCases, id: \.self) { vibe in
-                        Button(action: {
-                            if selectedMeetingVibes.contains(vibe) {
-                                selectedMeetingVibes.remove(vibe)
-                            } else {
-                                selectedMeetingVibes.insert(vibe)
-                            }
-                            if selectedMeetingVibes.isEmpty {
-                                preferredMeetingVibe = .casual
-                                selectedMeetingVibes = [.casual]
-                            } else if !selectedMeetingVibes.contains(preferredMeetingVibe) {
-                                preferredMeetingVibe = selectedMeetingVibes.first ?? .casual
-                            }
-                            updateProfileData()
-                        }) {
-                            HStack {
-                                Text(vibe.displayName)
-                                    .font(.system(size: 14))
-                                    .foregroundColor(selectedMeetingVibes.contains(vibe) ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
-                                if selectedMeetingVibes.contains(vibe) {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.white)
-                                }
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(selectedMeetingVibes.contains(vibe) ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
-                            .cornerRadius(16)
-                        }
-                    }
-                }
-            }
         }
         .onAppear {
             // Load existing data if available
             if let personalitySocial = profileData.personalitySocial {
                 selectionHelper.selectedValues = Set(personalitySocial.valuesTags)
                 selectionHelper.selectedHobbies = Set(personalitySocial.hobbies)
-                preferredMeetingVibe = personalitySocial.preferredMeetingVibe
-                let vibes = personalitySocial.preferredMeetingVibes
-                if vibes.isEmpty {
-                    selectedMeetingVibes = [personalitySocial.preferredMeetingVibe]
-                } else {
-                    selectedMeetingVibes = Set(vibes)
-                }
                 selfIntroduction = personalitySocial.selfIntroduction ?? ""
             }
         }
         .onChange(of: selectionHelper.selectedValues) { _ in updateProfileData() }
         .onChange(of: selectionHelper.selectedHobbies) { _ in updateProfileData() }
-        .onChange(of: preferredMeetingVibe) { _ in updateProfileData() }
-        .onChange(of: selectedMeetingVibes) { newValue in
-            if newValue.isEmpty {
-                selectedMeetingVibes = [.casual]
-                preferredMeetingVibe = .casual
-            } else if !newValue.contains(preferredMeetingVibe) {
-                preferredMeetingVibe = newValue.first ?? .casual
-            }
-            updateProfileData()
-        }
         .onChange(of: selfIntroduction) { _ in updateProfileData() }
     }
     
     private func updateProfileData() {
+        let existingPersonality = profileData.personalitySocial
         let personalitySocial = PersonalitySocial(
             icebreakerPrompts: [],
             valuesTags: Array(selectionHelper.selectedValues),
             hobbies: Array(selectionHelper.selectedHobbies),
-            preferredMeetingVibe: preferredMeetingVibe,
-            preferredMeetingVibes: Array(selectedMeetingVibes),
+            preferredMeetingVibe: existingPersonality?.preferredMeetingVibe ?? .casual,
+            preferredMeetingVibes: existingPersonality?.preferredMeetingVibes ?? [],
             selfIntroduction: selfIntroduction.isEmpty ? nil : selfIntroduction
         )
         profileData.personalitySocial = personalitySocial
@@ -3074,25 +3012,29 @@ struct PrivacyToggleRow: View {
     @Binding var visibility: VisibilityLevel
     
     var body: some View {
-        HStack {
+        HStack(spacing: 8) {
             Text(title)
-                .font(.system(size: 16))
+                .font(.system(size: 15))
                 .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                .lineLimit(1)
             
-            Spacer()
+            Spacer(minLength: 8)
             
             Picker("Visibility", selection: $visibility) {
                 ForEach(VisibilityLevel.allCases, id: \.self) { level in
-                    Text(level.displayName).tag(level)
+                    Text(level.displayName)
+                        .font(.system(size: 14))
+                        .tag(level)
                 }
             }
             .pickerStyle(MenuPickerStyle())
-            .frame(width: 120)
+            .frame(minWidth: 140)
+            .fixedSize()
             .onTapGesture {
                 // Prevent any unwanted scroll behavior when picker is tapped
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
         .padding(.vertical, 12)
         .background(Color.gray.opacity(0.1))
         .cornerRadius(8)

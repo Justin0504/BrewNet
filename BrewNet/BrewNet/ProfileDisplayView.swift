@@ -179,6 +179,7 @@ struct RedeemCacheData: Codable {
 
 struct ProfileDisplayView: View {
     @State var profile: BrewNetProfile
+    @Binding var showSubscriptionPayment: Bool
     var onEditProfile: (() -> Void)?
     var onProfileUpdated: ((BrewNetProfile) -> Void)?
     
@@ -222,6 +223,14 @@ struct ProfileDisplayView: View {
                 )
                 .padding(.horizontal, 16)
                 .padding(.top, 20)
+                
+                if let currentUser = authManager.currentUser {
+                    ProUpgradeCard(isProActive: currentUser.isProActive) {
+                        showSubscriptionPayment = true
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                }
                 
                 // Coffee Chat Schedule, Points System and Redemption System Buttons
                 HStack(spacing: 12) {
@@ -284,16 +293,6 @@ struct ProfileDisplayView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
-                
-                // Networking Preferences Section
-                ProfileSectionView(
-                    title: "Network Preferences",
-                    icon: "clock.fill"
-                ) {
-                    NetworkingPreferencesDisplayView(preferences: profile.networkingPreferences)
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 24)
             }
             .padding(.bottom, 20)
         }
@@ -661,6 +660,11 @@ struct ProfileHeaderView: View {
                                 .font(.system(size: 22, weight: .bold))
                                 .foregroundColor(.black)
                             
+                            // Pro badge
+                            if let user = authManager.currentUser, user.isProActive {
+                                ProBadge(size: .medium)
+                            }
+                            
                             // Age would need to be calculated from birthdate if available
                             // For now, we'll skip it if not available
                         }
@@ -933,6 +937,87 @@ struct ProfileSectionView<Content: View>: View {
     }
 }
 
+// MARK: - Pro Upgrade Card
+struct ProUpgradeCard: View {
+    let isProActive: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        ProBadge(size: .medium)
+                        Text(isProActive ? "Thank you for being Pro" : "Upgrade")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.gray)
+                    }
+                    
+                    Text("Match faster\nConnect smarter\nGrow further")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.primary)
+                        .lineSpacing(2)
+                }
+                
+                Spacer()
+                
+                Image(systemName: "sparkles")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(Color(red: 1.0, green: 0.75, blue: 0.3))
+            }
+            
+            Button(action: action) {
+                Text(isProActive ? "Manage BrewNet Pro" : "Get BrewNet Pro")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color(red: 1.0, green: 0.84, blue: 0.0),
+                                Color(red: 1.0, green: 0.65, blue: 0.0)
+                            ]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .cornerRadius(12)
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(20)
+        .background(
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(red: 0.95, green: 0.85, blue: 0.7).opacity(0.35),
+                    Color(red: 0.85, green: 0.75, blue: 0.6).opacity(0.35)
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .cornerRadius(20)
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            Color(red: 1.0, green: 0.84, blue: 0.0).opacity(0.5),
+                            Color(red: 1.0, green: 0.65, blue: 0.0).opacity(0.5)
+                        ]),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 2
+                )
+        )
+        .onTapGesture {
+            action()
+        }
+    }
+}
+
 // MARK: - Core Identity Display
 struct CoreIdentityDisplayView: View {
     let identity: CoreIdentity
@@ -1010,24 +1095,6 @@ struct NetworkingIntentionDisplayView: View {
             if let industryTransition = intention.industryTransition {
                 IndustryTransitionDisplayView(data: industryTransition)
             }
-        }
-    }
-}
-
-// MARK: - Networking Preferences Display
-struct NetworkingPreferencesDisplayView: View {
-    let preferences: NetworkingPreferences
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            InfoRow(label: "Preferred Format", value: preferences.preferredChatFormat.displayName)
-            
-            if let duration = preferences.preferredChatDuration {
-                InfoRow(label: "Preferred Duration", value: duration)
-            }
-            
-            // Timeslot moved to the bottom
-            AvailableTimeslotDisplayView(timeslot: preferences.availableTimeslot)
         }
     }
 }
@@ -1151,80 +1218,6 @@ struct IndustryTransitionDisplayView: View {
     }
 }
 
-// MARK: - Available Timeslot Display
-struct AvailableTimeslotDisplayView: View {
-    let timeslot: AvailableTimeslot
-    
-    private let days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
-    private let timeSlots = ["Morning", "Noon", "Afternoon", "Evening", "Night"]
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Available Times")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.gray)
-            
-            VStack(spacing: 4) {
-                // Header row
-                HStack(spacing: 0) {
-                    Text("")
-                        .frame(width: 60)
-                    
-                    ForEach(days, id: \.self) { day in
-                        Text(day)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.gray)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                
-                // Time slot rows
-                ForEach(Array(timeSlots.enumerated()), id: \.offset) { timeIndex, timeSlot in
-                    HStack(spacing: 0) {
-                        Text(timeSlot)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.gray)
-                            .frame(width: 60, alignment: .leading)
-                        
-                        ForEach(Array(days.enumerated()), id: \.offset) { dayIndex, _ in
-                            Rectangle()
-                                .fill(getTimeslotValue(dayIndex: dayIndex, timeIndex: timeIndex) ? Color.blue : Color.gray.opacity(0.1))
-                                .frame(width: 20, height: 20)
-                                .cornerRadius(3)
-                                .frame(maxWidth: .infinity)
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    private func getTimeslotValue(dayIndex: Int, timeIndex: Int) -> Bool {
-        let dayTimeslots = getDayTimeslots(dayIndex: dayIndex)
-        switch timeIndex {
-        case 0: return dayTimeslots.morning
-        case 1: return dayTimeslots.noon
-        case 2: return dayTimeslots.afternoon
-        case 3: return dayTimeslots.evening
-        case 4: return dayTimeslots.night
-        default: return false
-        }
-    }
-    
-    private func getDayTimeslots(dayIndex: Int) -> DayTimeslots {
-        switch dayIndex {
-        case 0: return timeslot.sunday
-        case 1: return timeslot.monday
-        case 2: return timeslot.tuesday
-        case 3: return timeslot.wednesday
-        case 4: return timeslot.thursday
-        case 5: return timeslot.friday
-        case 6: return timeslot.saturday
-        default: return DayTimeslots(morning: false, noon: false, afternoon: false, evening: false, night: false)
-        }
-    }
-}
-
 // MARK: - Personality & Social Display
 struct PersonalitySocialDisplayView: View {
     let personality: PersonalitySocial
@@ -1245,7 +1238,6 @@ struct PersonalitySocialDisplayView: View {
                 )
             }
             
-            InfoRow(label: "Meeting Vibe", value: personality.preferredMeetingVibe.displayName)
         }
     }
 }
@@ -1987,18 +1979,6 @@ struct UserProfileCardSheetView: View {
                         
                         // Level 3: Deep Understanding
                         level3DeepUnderstandingView
-                        
-                        // Available Timeslot Grid (moved to bottom)
-                        if shouldShowTimeslot {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Divider()
-                                AvailableTimeslotDisplayView(timeslot: profile.networkingPreferences.availableTimeslot)
-                                    .padding(.horizontal, 20)
-                                    .padding(.vertical, 16)
-                                    .padding(.bottom, 30)
-                                    .background(Color.white)
-                            }
-                        }
                     }
                     .frame(maxWidth: screenWidth - 40)
                 }
@@ -2100,20 +2080,6 @@ struct UserProfileCardSheetView: View {
             
             // Networking Intention Badge
             NetworkingIntentionBadgeView(intention: profile.networkingIntention.selectedIntention)
-            
-            // Preferred Chat Format
-            HStack(spacing: 8) {
-                // Chat Format Icon
-                Image(systemName: chatFormatIcon)
-                    .font(.system(size: 16))
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                
-                Text(profile.networkingPreferences.preferredChatFormat.displayName)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                
-                Spacer()
-            }
         }
         .padding(20)
         .background(Color.white)
@@ -2161,17 +2127,6 @@ struct UserProfileCardSheetView: View {
                 .font(.system(size: 40))
                 .foregroundColor(.white)
         )
-    }
-    
-    private var chatFormatIcon: String {
-        switch profile.networkingPreferences.preferredChatFormat {
-        case .virtual:
-            return "video.fill"
-        case .inPerson:
-            return "person.2.fill"
-        case .either:
-            return "repeat"
-        }
     }
     
     // MARK: - Level 2: Matching Clues
@@ -2278,18 +2233,6 @@ struct UserProfileCardSheetView: View {
                             }
                         }
                     }
-                }
-            }
-            
-            // Preferred Meeting Vibe
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Meeting Vibe:")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.gray)
-                    Text(profile.personalitySocial.preferredMeetingVibe.displayName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 }
             }
         }
@@ -2432,15 +2375,6 @@ struct UserProfileCardSheetView: View {
         let visible = settings.location.isVisible(isConnection: isConnection)
         if !visible {
             print("   ⚠️ Location hidden: \(settings.location.rawValue), isConnection: \(isConnection)")
-        }
-        return visible
-    }
-    
-    private var shouldShowTimeslot: Bool {
-        let settings = privacySettings
-        let visible = settings.timeslot.isVisible(isConnection: isConnection)
-        if !visible {
-            print("   ⚠️ Timeslot hidden: \(settings.timeslot.rawValue), isConnection: \(isConnection)")
         }
         return visible
     }
@@ -3479,7 +3413,7 @@ struct StatusBadge: View {
 struct ProfileDisplayView_Previews: PreviewProvider {
     static var previews: some View {
         NavigationView {
-            ProfileDisplayView(profile: BrewNetProfile.createDefault(userId: "preview")) {
+            ProfileDisplayView(profile: BrewNetProfile.createDefault(userId: "preview"), showSubscriptionPayment: .constant(false)) {
                 // Preview doesn't need action
             }
         }

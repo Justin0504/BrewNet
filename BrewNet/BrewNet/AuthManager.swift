@@ -12,8 +12,11 @@ struct AppUser: Codable, Identifiable {
     let lastLoginAt: Date
     let isGuest: Bool // Whether it's a guest user
     let profileSetupCompleted: Bool // Whether profile setup is completed
+    let isPro: Bool // Whether user has active Pro subscription
+    let proEnd: String? // Pro subscription end date
+    let likesRemaining: Int // Remaining likes for non-Pro users
     
-    init(id: String = UUID().uuidString, email: String, name: String, isGuest: Bool = false, profileSetupCompleted: Bool = false) {
+    init(id: String = UUID().uuidString, email: String, name: String, isGuest: Bool = false, profileSetupCompleted: Bool = false, isPro: Bool = false, proEnd: String? = nil, likesRemaining: Int = 10) {
         self.id = id
         self.email = email
         self.name = name
@@ -21,6 +24,21 @@ struct AppUser: Codable, Identifiable {
         self.lastLoginAt = Date()
         self.isGuest = isGuest
         self.profileSetupCompleted = profileSetupCompleted
+        self.isPro = isPro
+        self.proEnd = proEnd
+        self.likesRemaining = likesRemaining
+    }
+    
+    // Check if Pro is still active
+    var isProActive: Bool {
+        guard isPro, let proEndStr = proEnd else { return false }
+        let formatter = ISO8601DateFormatter()
+        guard let proEndDate = formatter.date(from: proEndStr) else { return false }
+        return proEndDate > Date()
+    }
+    
+    var canLike: Bool {
+        return isProActive || likesRemaining > 0
     }
 }
 
@@ -135,7 +153,10 @@ class AuthManager: ObservableObject {
             email: existingUser.email ?? "",
             name: existingUser.name ?? "",
             isGuest: existingUser.isGuest,
-            profileSetupCompleted: existingUser.profileSetupCompleted
+            profileSetupCompleted: existingUser.profileSetupCompleted,
+            isPro: false,
+            proEnd: nil,
+            likesRemaining: 10
         )
         
         await MainActor.run {
@@ -237,7 +258,10 @@ class AuthManager: ObservableObject {
                     email: appUser.email,
                     name: appUser.name,
                     isGuest: appUser.isGuest,
-                    profileSetupCompleted: appUser.profileSetupCompleted || hasProfile
+                    profileSetupCompleted: appUser.profileSetupCompleted || hasProfile,
+                    isPro: appUser.isPro,
+                    proEnd: appUser.proEnd,
+                    likesRemaining: appUser.likesRemaining
                 )
                 
                 await MainActor.run {
@@ -300,7 +324,10 @@ class AuthManager: ObservableObject {
             email: "guest@brewnet.com",
             name: randomName,
             isGuest: true,
-            profileSetupCompleted: false
+            profileSetupCompleted: false,
+            isPro: false,
+            proEnd: nil,
+            likesRemaining: 10
         )
         
         print("👤 Created guest user: \(user.name)")
@@ -375,7 +402,10 @@ class AuthManager: ObservableObject {
             email: email,
             name: fullName,
             isGuest: false,
-            profileSetupCompleted: false
+            profileSetupCompleted: false,
+            isPro: false,
+            proEnd: nil,
+            likesRemaining: 10
         )
         
         // Save user information (both to current user and Apple-specific storage)
@@ -460,7 +490,10 @@ class AuthManager: ObservableObject {
             email: userEntity.email ?? email,
             name: userEntity.name ?? name,
             isGuest: false,
-            profileSetupCompleted: false
+            profileSetupCompleted: false,
+            isPro: false,
+            proEnd: nil,
+            likesRemaining: 10
         )
         
         print("✅ 本地注册成功: \(user.name)")
@@ -513,6 +546,15 @@ class AuthManager: ObservableObject {
             do {
                 if let createdUser = try await supabaseService?.createUser(user: supabaseUser) {
                     print("✅ 用户数据已保存到 Supabase")
+                    
+                    // Grant free 1-week Pro trial to new user
+                    do {
+                        try await supabaseService?.grantFreeProTrial(userId: user.id.uuidString)
+                        print("🎁 新用户已获得 1 周免费 Pro 试用")
+                    } catch {
+                        print("⚠️ 赠送 Pro 试用失败，但继续注册流程: \(error.localizedDescription)")
+                        // Don't fail registration if Pro grant fails
+                    }
                     
                     let appUser = createdUser.toAppUser()
                     
@@ -764,6 +806,24 @@ class AuthManager: ObservableObject {
         }
     }
     
+    /// Refresh user data from Supabase (e.g., after subscription update)
+    func refreshUser() async {
+        guard let user = currentUser else { return }
+        
+        print("🔄 [Auth] 刷新用户数据: \(user.id)")
+        
+        do {
+            if let updatedUser = try await supabaseService?.getUser(id: user.id) {
+                print("✅ [Auth] 用户数据已刷新")
+                await MainActor.run {
+                    saveUser(updatedUser.toAppUser())
+                }
+            }
+        } catch {
+            print("❌ [Auth] 刷新用户数据失败: \(error.localizedDescription)")
+        }
+    }
+    
     /// Update profile setup completion status
     func updateProfileSetupCompleted(_ completed: Bool) {
         guard let user = currentUser else { return }
@@ -773,7 +833,10 @@ class AuthManager: ObservableObject {
             email: user.email,
             name: user.name,
             isGuest: user.isGuest,
-            profileSetupCompleted: completed
+            profileSetupCompleted: completed,
+            isPro: user.isPro,
+            proEnd: user.proEnd,
+            likesRemaining: user.likesRemaining
         )
         
         saveUser(updatedUser)

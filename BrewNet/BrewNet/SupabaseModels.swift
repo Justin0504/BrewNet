@@ -20,6 +20,13 @@ struct SupabaseUser: Codable, Identifiable {
     let lastLoginAt: String
     let updatedAt: String
     
+    // BrewNet Pro subscription fields
+    let isPro: Bool
+    let proStart: String?
+    let proEnd: String?
+    let likesRemaining: Int
+    let likesDepletedAt: String?
+    
     enum CodingKeys: String, CodingKey {
         case id
         case email
@@ -37,6 +44,85 @@ struct SupabaseUser: Codable, Identifiable {
         case createdAt = "created_at"
         case lastLoginAt = "last_login_at"
         case updatedAt = "updated_at"
+        case isPro = "is_pro"
+        case proStart = "pro_start"
+        case proEnd = "pro_end"
+        case likesRemaining = "likes_remaining"
+        case likesDepletedAt = "likes_depleted_at"
+    }
+    
+    // Standard initializer for creating new users
+    init(
+        id: String,
+        email: String,
+        name: String,
+        phoneNumber: String? = nil,
+        isGuest: Bool,
+        profileImage: String? = nil,
+        bio: String? = nil,
+        company: String? = nil,
+        jobTitle: String? = nil,
+        location: String? = nil,
+        skills: String? = nil,
+        interests: String? = nil,
+        profileSetupCompleted: Bool,
+        createdAt: String,
+        lastLoginAt: String,
+        updatedAt: String,
+        isPro: Bool = false,
+        proStart: String? = nil,
+        proEnd: String? = nil,
+        likesRemaining: Int = 10,
+        likesDepletedAt: String? = nil
+    ) {
+        self.id = id
+        self.email = email
+        self.name = name
+        self.phoneNumber = phoneNumber
+        self.isGuest = isGuest
+        self.profileImage = profileImage
+        self.bio = bio
+        self.company = company
+        self.jobTitle = jobTitle
+        self.location = location
+        self.skills = skills
+        self.interests = interests
+        self.profileSetupCompleted = profileSetupCompleted
+        self.createdAt = createdAt
+        self.lastLoginAt = lastLoginAt
+        self.updatedAt = updatedAt
+        self.isPro = isPro
+        self.proStart = proStart
+        self.proEnd = proEnd
+        self.likesRemaining = likesRemaining
+        self.likesDepletedAt = likesDepletedAt
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        email = try container.decode(String.self, forKey: .email)
+        name = try container.decode(String.self, forKey: .name)
+        phoneNumber = try container.decodeIfPresent(String.self, forKey: .phoneNumber)
+        isGuest = try container.decode(Bool.self, forKey: .isGuest)
+        profileImage = try container.decodeIfPresent(String.self, forKey: .profileImage)
+        bio = try container.decodeIfPresent(String.self, forKey: .bio)
+        company = try container.decodeIfPresent(String.self, forKey: .company)
+        jobTitle = try container.decodeIfPresent(String.self, forKey: .jobTitle)
+        location = try container.decodeIfPresent(String.self, forKey: .location)
+        skills = try container.decodeIfPresent(String.self, forKey: .skills)
+        interests = try container.decodeIfPresent(String.self, forKey: .interests)
+        profileSetupCompleted = try container.decode(Bool.self, forKey: .profileSetupCompleted)
+        createdAt = try container.decode(String.self, forKey: .createdAt)
+        lastLoginAt = try container.decode(String.self, forKey: .lastLoginAt)
+        updatedAt = try container.decode(String.self, forKey: .updatedAt)
+        
+        // Pro subscription fields with defaults for backward compatibility
+        isPro = try container.decodeIfPresent(Bool.self, forKey: .isPro) ?? false
+        proStart = try container.decodeIfPresent(String.self, forKey: .proStart)
+        proEnd = try container.decodeIfPresent(String.self, forKey: .proEnd)
+        likesRemaining = try container.decodeIfPresent(Int.self, forKey: .likesRemaining) ?? 10
+        likesDepletedAt = try container.decodeIfPresent(String.self, forKey: .likesDepletedAt)
     }
     
     // Convert to AppUser
@@ -46,8 +132,23 @@ struct SupabaseUser: Codable, Identifiable {
             email: email,
             name: name,
             isGuest: isGuest,
-            profileSetupCompleted: profileSetupCompleted
+            profileSetupCompleted: profileSetupCompleted,
+            isPro: isPro,
+            proEnd: proEnd,
+            likesRemaining: likesRemaining
         )
+    }
+    
+    // Helper computed properties
+    var isProActive: Bool {
+        guard isPro, let proEndStr = proEnd else { return false }
+        let formatter = ISO8601DateFormatter()
+        guard let proEndDate = formatter.date(from: proEndStr) else { return false }
+        return proEndDate > Date()
+    }
+    
+    var canLike: Bool {
+        return isProActive || likesRemaining > 0
     }
 }
 
