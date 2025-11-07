@@ -1928,7 +1928,6 @@ struct MatchFilter: Codable, Equatable {
     
     // 范围字段
     var minYearsOfExperience: Double?
-    var maxYearsOfExperience: Double?
     var maxDistance: Double? // 最大距离（公里），nil表示不限
     
     // 是否启用filter
@@ -1947,7 +1946,6 @@ struct MatchFilter: Codable, Equatable {
                !selectedValues.isEmpty ||
                !selectedIndustries.isEmpty ||
                minYearsOfExperience != nil ||
-               maxYearsOfExperience != nil ||
                maxDistance != nil
     }
     
@@ -2016,12 +2014,6 @@ struct MatchFilter: Codable, Equatable {
             return false
         }
         
-        if let maxYears = maxYearsOfExperience,
-           let profileYears = profile.professionalBackground.yearsOfExperience,
-           profileYears > maxYears {
-            return false
-        }
-        
         // 距离过滤在外部单独处理
         return true
     }
@@ -2086,8 +2078,7 @@ struct MatchFilterView: View {
                             // 3. Years of Experience Range - 关联Experience Level
                             FilterSection(title: "Years of Experience") {
                                 ExperienceRangeFilter(
-                                    minYears: $filter.minYearsOfExperience,
-                                    maxYears: $filter.maxYearsOfExperience
+                                    minYears: $filter.minYearsOfExperience
                                 )
                             }
                             
@@ -2483,64 +2474,39 @@ struct DistanceFilter: View {
 // MARK: - Experience Range Filter
 struct ExperienceRangeFilter: View {
     @Binding var minYears: Double?
-    @Binding var maxYears: Double?
     
-    @State private var lowerValue: Double = 0
-    @State private var upperValue: Double = 20
+    @State private var sliderValue: Double = 0
     
     private let range: ClosedRange<Double> = 0...30
     private let step: Double = 1
     
-    private var lowerLabel: String {
-        if lowerValue <= range.lowerBound { return "Any" }
-        return String(format: "%.0f", lowerValue)
-    }
-    
-    private var upperLabel: String {
-        if upperValue >= range.upperBound { return "20+" }
-        return String(format: "%.0f", upperValue)
+    private var displayLabel: String {
+        if sliderValue <= range.lowerBound { return "Any" }
+        if sliderValue >= 20 { return "20+ yrs" }
+        return "\(Int(sliderValue)) yrs"
     }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Min: \(lowerLabel) yrs")
+                Text("Minimum Experience")
                     .font(.system(size: 13))
                     .foregroundColor(.gray)
                 Spacer()
-                Text("Max: \(upperLabel) yrs")
-                    .font(.system(size: 13))
-                    .foregroundColor(.gray)
+                Text(displayLabel)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
             }
             
             Slider(
                 value: Binding(
-                    get: { lowerValue },
+                    get: { sliderValue },
                     set: { newValue in
-                        let adjusted = min(newValue, upperValue)
-                        lowerValue = adjusted
-                        if adjusted <= range.lowerBound {
+                        sliderValue = newValue
+                        if newValue <= range.lowerBound {
                             minYears = nil
                         } else {
-                            minYears = adjusted
-                        }
-                    }
-                ),
-                in: range,
-                step: step
-            )
-            .accentColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-            
-            Slider(
-                value: Binding(
-                    get: { upperValue },
-                    set: { newValue in
-                        let adjusted = max(newValue, lowerValue)
-                        upperValue = adjusted
-                        if adjusted >= range.upperBound {
-                            maxYears = nil
-                        } else {
-                            maxYears = adjusted
+                            minYears = newValue
                         }
                     }
                 ),
@@ -2550,7 +2516,7 @@ struct ExperienceRangeFilter: View {
             .accentColor(Color(red: 0.6, green: 0.4, blue: 0.2))
             
             HStack {
-                Text("\(Int(range.lowerBound)) yrs")
+                Text("Any")
                     .font(.system(size: 12))
                     .foregroundColor(.gray)
                 Spacer()
@@ -2560,18 +2526,12 @@ struct ExperienceRangeFilter: View {
             }
         }
         .onAppear {
-            let minValue = minYears ?? range.lowerBound
-            let maxValue = maxYears ?? range.upperBound
-            lowerValue = max(range.lowerBound, min(minValue, range.upperBound))
-            upperValue = max(lowerValue, min(maxValue, range.upperBound))
+            let initialValue = minYears ?? range.lowerBound
+            sliderValue = max(range.lowerBound, min(initialValue, range.upperBound))
         }
         .onChange(of: minYears) { newValue in
-            let newLower = newValue ?? range.lowerBound
-            lowerValue = max(range.lowerBound, min(newLower, upperValue))
-        }
-        .onChange(of: maxYears) { newValue in
-            let newUpper = newValue ?? range.upperBound
-            upperValue = max(lowerValue, min(newUpper, range.upperBound))
+            let updated = newValue ?? range.lowerBound
+            sliderValue = max(range.lowerBound, min(updated, range.upperBound))
         }
     }
 }
