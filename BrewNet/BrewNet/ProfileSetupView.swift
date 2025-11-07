@@ -95,7 +95,7 @@ struct ProfileSetupView: View {
     
     private var navigationButtonsView: some View {
         VStack(spacing: 16) {
-            HStack(spacing: 16) {
+            HStack(spacing: 12) {
                 if currentStep > 1 {
                     Button(action: {
                         guard !isNavigating else { return }
@@ -123,6 +123,32 @@ struct ProfileSetupView: View {
                     .disabled(isNavigating)
                 }
                 
+                // Save Button
+                Button(action: {
+                    guard !isNavigating && !isLoading else { return }
+                    saveCurrentStep()
+                }) {
+                    Text("Save")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                }
+                .background(
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            Color(red: 0.6, green: 0.4, blue: 0.2),
+                            Color(red: 0.4, green: 0.2, blue: 0.1)
+                        ]),
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .cornerRadius(25)
+                .disabled(isNavigating || isLoading)
+                .opacity((isNavigating || isLoading) ? 0.4 : 1.0)
+                
+                // Next Button
                 Button(action: {
                     guard !isNavigating && !isLoading else {
                         print("⚠️ Button clicked but isNavigating=\(isNavigating) or isLoading=\(isLoading)")
@@ -367,6 +393,94 @@ struct ProfileSetupView: View {
     }
     
     // MARK: - Profile Completion
+    // MARK: - Save Current Step
+    private func saveCurrentStep() {
+        print("💾 saveCurrentStep() called for step \(currentStep)")
+        
+        guard let currentUser = authManager.currentUser else {
+            print("❌ No current user found")
+            showAlert(message: "User not found. Please log in again.")
+            return
+        }
+        
+        isLoading = true
+        
+        Task {
+            do {
+                // First, try to ensure the profiles table exists
+                do {
+                    try await supabaseService.createProfilesTable()
+                } catch {
+                    print("⚠️ 无法自动创建 profiles 表，请手动创建")
+                }
+                
+                // Check if profile already exists
+                let existingProfile = try await supabaseService.getProfile(userId: currentUser.id)
+                
+                let supabaseProfile: SupabaseProfile
+                
+                if let existing = existingProfile {
+                    // Update existing profile with current step data
+                    print("🔄 Saving current step data to existing profile...")
+                    
+                    let updatedProfile = SupabaseProfile(
+                        id: existing.id,
+                        userId: existing.userId,
+                        coreIdentity: profileData.coreIdentity ?? existing.coreIdentity,
+                        professionalBackground: profileData.professionalBackground ?? existing.professionalBackground,
+                        networkingIntention: profileData.networkingIntention ?? existing.networkingIntention,
+                        networkingPreferences: profileData.networkingPreferences ?? existing.networkingPreferences,
+                        personalitySocial: profileData.personalitySocial ?? existing.personalitySocial,
+                        privacyTrust: profileData.privacyTrust ?? existing.privacyTrust,
+                        createdAt: existing.createdAt,
+                        updatedAt: ISO8601DateFormatter().string(from: Date())
+                    )
+                    
+                    supabaseProfile = try await supabaseService.updateProfile(profileId: existing.id, profile: updatedProfile)
+                } else {
+                    // Create new profile with current step data
+                    print("🆕 Creating new profile with current step data...")
+                    
+                    let profile = BrewNetProfile.createDefault(userId: currentUser.id)
+                    let updatedProfile = updateProfileWithCollectedData(profile)
+                    
+                    supabaseProfile = SupabaseProfile(
+                        id: updatedProfile.id,
+                        userId: updatedProfile.userId,
+                        coreIdentity: updatedProfile.coreIdentity,
+                        professionalBackground: updatedProfile.professionalBackground,
+                        networkingIntention: updatedProfile.networkingIntention,
+                        networkingPreferences: updatedProfile.networkingPreferences,
+                        personalitySocial: updatedProfile.personalitySocial,
+                        privacyTrust: updatedProfile.privacyTrust,
+                        createdAt: updatedProfile.createdAt,
+                        updatedAt: updatedProfile.updatedAt
+                    )
+                    
+                    let _ = try await supabaseService.createProfile(profile: supabaseProfile)
+                }
+                
+                await MainActor.run {
+                    isLoading = false
+                    showAlert(message: "Progress saved successfully!")
+                    
+                    // 发送通知刷新 profile 数据
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        NotificationCenter.default.post(name: NSNotification.Name("ProfileUpdated"), object: nil)
+                    }
+                }
+                
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    let errorMessage = error.localizedDescription
+                    print("❌ Save error: \(errorMessage)")
+                    showAlert(message: "Failed to save: \(errorMessage)")
+                }
+            }
+        }
+    }
+    
     private func completeProfileSetup() {
         print("🚀 completeProfileSetup() called")
         
