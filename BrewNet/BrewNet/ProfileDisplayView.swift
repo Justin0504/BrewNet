@@ -657,6 +657,10 @@ struct ProfileHeaderView: View {
                 Text(profile.coreIdentity.name)
                     .font(.system(size: 22, weight: .bold))
                     .foregroundColor(.black)
+                
+                if authManager.currentUser?.isPro == true {
+                    ProBadge(size: .medium)
+                }
             }
             
             // Icons row

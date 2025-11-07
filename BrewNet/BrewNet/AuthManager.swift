@@ -13,7 +13,7 @@ struct AppUser: Codable, Identifiable {
     let isGuest: Bool // Whether it's a guest user
     let profileSetupCompleted: Bool // Whether profile setup is completed
     let isPro: Bool // Whether user has active Pro subscription
-    let proEnd: String? // Pro subscription end date
+    let proEnd: String? // Pro subscription end date (ISO8601 string from Supabase)
     let likesRemaining: Int // Remaining likes for non-Pro users
     
     init(id: String = UUID().uuidString, email: String, name: String, isGuest: Bool = false, profileSetupCompleted: Bool = false, isPro: Bool = false, proEnd: String? = nil, likesRemaining: Int = 10) {
@@ -29,11 +29,116 @@ struct AppUser: Codable, Identifiable {
         self.likesRemaining = likesRemaining
     }
     
-    // Check if Pro is still active
-    var isProActive: Bool {
-        guard isPro, let proEndStr = proEnd else { return false }
+    // MARK: - Pro Subscription Helpers
+    private static let iso8601WithFractionalSecondsFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
-        guard let proEndDate = formatter.date(from: proEndStr) else { return false }
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    
+    private static let iso8601Formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+    
+    private static let iso8601WithSpaceFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate, .withFullTime, .withSpaceBetweenDateAndTime]
+        return formatter
+    }()
+    
+    private static let fallbackProDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ssXXXXX"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+    
+    private static let fallbackProDateFormatterNoColonTZ: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ssZ"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+    
+    private static let fallbackProDateFormatterNoTZ: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+    
+    private static func normalizedCandidates(from value: String) -> [String] {
+        var candidates: Set<String> = []
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        candidates.insert(trimmed)
+        
+        // Replace space between date and time with "T"
+        if trimmed.contains(" "), !trimmed.contains("T") {
+            candidates.insert(trimmed.replacingOccurrences(of: " ", with: "T"))
+        }
+        
+        // Ensure timezone has colon separator (+0000 -> +00:00)
+        for candidate in candidates {
+            if let range = candidate.range(of: "([+-]\\d{2})(\\d{2})$", options: .regularExpression) {
+                let tz = candidate[range]
+                let hours = tz.prefix(3)
+                let minutes = tz.suffix(tz.count - 3)
+                let replaced = candidate.replacingCharacters(in: range, with: "\(hours):\(minutes)")
+                candidates.insert(replaced)
+            }
+            if let range = candidate.range(of: "([+-]\\d{2})$", options: .regularExpression) {
+                let tz = candidate[range]
+                let replaced = candidate.replacingCharacters(in: range, with: "\(tz):00")
+                candidates.insert(replaced)
+            }
+        }
+        
+        return Array(candidates)
+    }
+    
+    private static func parseProEndDate(from value: String) -> Date? {
+        let candidates = normalizedCandidates(from: value)
+        
+        for candidate in candidates {
+            if let date = iso8601WithFractionalSecondsFormatter.date(from: candidate) {
+                return date
+            }
+            if let date = iso8601Formatter.date(from: candidate) {
+                return date
+            }
+            if let date = iso8601WithSpaceFormatter.date(from: candidate) {
+                return date
+            }
+        }
+        
+        for candidate in candidates {
+            if let date = fallbackProDateFormatter.date(from: candidate) {
+                return date
+            }
+            if let date = fallbackProDateFormatterNoColonTZ.date(from: candidate) {
+                return date
+            }
+            if let date = fallbackProDateFormatterNoTZ.date(from: candidate) {
+                return date
+            }
+        }
+        
+        return nil
+    }
+    
+    var proEndDate: Date? {
+        guard let proEndStr = proEnd else { return nil }
+        return AppUser.parseProEndDate(from: proEndStr)
+    }
+    
+    // Check if Pro is still active based on user table fields
+    var isProActive: Bool {
+        guard isPro, let proEndDate = proEndDate else { return false }
         return proEndDate > Date()
     }
     
@@ -813,6 +918,17 @@ class AuthManager: ObservableObject {
         print("🔄 [Auth] 刷新用户数据: \(user.id)")
         
         do {
+            if let supabaseService = supabaseService {
+                do {
+                    let proExpired = try await supabaseService.checkAndUpdateProExpiration(userId: user.id)
+                    if proExpired {
+                        print("⚠️ [Auth] 检测到 Pro 已过期，已更新 Supabase 状态")
+                    }
+                } catch {
+                    print("❌ [Auth] 检查 Pro 过期失败: \(error.localizedDescription)")
+                }
+            }
+            
             if let updatedUser = try await supabaseService?.getUser(id: user.id) {
                 print("✅ [Auth] 用户数据已刷新")
                 await MainActor.run {

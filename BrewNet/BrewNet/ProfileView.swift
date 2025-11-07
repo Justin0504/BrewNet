@@ -213,11 +213,11 @@ struct ProfileView: View {
                                 .fontWeight(.bold)
                                 .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                             
-                            if user.isProActive {
+                            if 1==1 { //user.isPro {
                                 ProBadge(size: .medium)
                             }
                             
-                            if user.isGuest {
+                            if 1==1 { //user.isGuest {
                                 Text("Guest")
                                     .font(.caption)
                                     .padding(.horizontal, 6)
