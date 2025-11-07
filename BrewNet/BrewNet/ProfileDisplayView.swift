@@ -6,6 +6,7 @@ import UIKit
 class LocalCacheManager {
     static let shared = LocalCacheManager()
     private let userDefaults = UserDefaults.standard
+    static let redeemCacheVersion = 3
     
     private init() {}
     
@@ -47,11 +48,11 @@ class LocalCacheManager {
             coffeeRewards: coffeeRewards,
             membershipRewards: membershipRewards,
             timestamp: Date(),
-            version: 2 // 缓存版本号
+            version: LocalCacheManager.redeemCacheVersion // 缓存版本号
         )
         if let encoded = try? JSONEncoder().encode(data) {
             userDefaults.set(encoded, forKey: key)
-            print("💾 [Cache] 已保存 Redeem 数据到本地缓存 (版本 2)")
+            print("💾 [Cache] 已保存 Redeem 数据到本地缓存 (版本 3)")
         }
     }
     
@@ -65,6 +66,10 @@ class LocalCacheManager {
         // 检查缓存版本，旧版本需要重新加载
         if decoded.version < 2 {
             print("⚠️ [Cache] Redeem 缓存版本过旧，需要更新")
+            return nil
+        }
+        if decoded.version < LocalCacheManager.redeemCacheVersion {
+            print("⚠️ [Cache] Redeem 缓存版本 \(decoded.version) 已过期，最新版本为 \(LocalCacheManager.redeemCacheVersion)")
             return nil
         }
         
@@ -98,7 +103,7 @@ class LocalCacheManager {
             coffeeRewards: decoded.coffeeRewards,
             membershipRewards: decoded.membershipRewards,
             timestamp: decoded.timestamp, // 保持原时间戳
-            version: decoded.version
+            version: LocalCacheManager.redeemCacheVersion
         )
         
         if let encoded = try? JSONEncoder().encode(updatedData) {
@@ -167,7 +172,7 @@ struct RedeemCacheData: Codable {
     let version: Int // 缓存版本号
     
     // 为了兼容旧版本缓存
-    init(credits: Int, rewards: [Reward], redemptions: [RedemptionRecord], coffeeRewards: [Reward]? = nil, membershipRewards: [Reward]? = nil, timestamp: Date?, version: Int = 1) {
+    init(credits: Int, rewards: [Reward], redemptions: [RedemptionRecord], coffeeRewards: [Reward]? = nil, membershipRewards: [Reward]? = nil, timestamp: Date?, version: Int = LocalCacheManager.redeemCacheVersion) {
         self.credits = credits
         self.rewards = rewards
         self.redemptions = redemptions
@@ -2806,7 +2811,7 @@ struct RedemptionSystemView: View {
         let currentHash = availableRewards.map { $0.id }.joined().hashValue
         
         // 如果奖励数组没变化，跳过更新
-        if currentHash == lastRewardsHash && !cachedCoffeeRewards.isEmpty {
+        if currentHash == lastRewardsHash && !cachedCoffeeRewards.isEmpty && !cachedMembershipRewards.isEmpty {
             return
         }
         
@@ -2814,7 +2819,7 @@ struct RedemptionSystemView: View {
         
         print("🔍 [Redeem] 开始过滤奖励，总数: \(availableRewards.count)")
         for reward in availableRewards {
-            print("   - \(reward.name) (category: \(reward.category), id: \(reward.id))")
+            print("   - \(reward.name) (category: \(reward.category.rawValue), id: \(reward.id))")
         }
         
         // 使用并行过滤提高性能
@@ -2835,7 +2840,8 @@ struct RedemptionSystemView: View {
         
         let membershipFilter: (Reward) -> Bool = { reward in
             let nameLower = reward.name.lowercased()
-            return nameLower.contains("premium") || 
+            return reward.category == .membership || 
+                   nameLower.contains("premium") || 
                    nameLower.contains("ultimate") ||
                    nameLower.contains("membership") ||
                    nameLower.contains("brewnet")
@@ -2941,6 +2947,55 @@ struct RedemptionSystemView: View {
             sectionLabel(icon: "crown.fill", title: "BrewNet membership")
         }
         .id("membership-section-\(cachedMembershipRewards.count)")
+    }
+    
+    @ViewBuilder
+    private var membershipSectionLabel: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color(red: 1.0, green: 0.9, blue: 0.5),
+                                Color(red: 1.0, green: 0.75, blue: 0.25)
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 48, height: 48)
+                    .shadow(color: Color(red: 1.0, green: 0.75, blue: 0.25).opacity(0.35), radius: 6, x: 0, y: 3)
+                    .overlay(
+                        Image(systemName: "crown.fill")
+                            .font(.system(size: 42, weight: .semibold))
+                            .foregroundColor(.white)
+                    )
+                    .overlay(alignment: .topLeading) {
+                        Circle()
+                            .fill(Color.white.opacity(0.9))
+                            .frame(width: 20, height: 20)
+                            .shadow(color: Color.black.opacity(0.15), radius: 2, x: 0, y: 1)
+                            .overlay(
+                                Image(systemName: "bolt.fill")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(Color(red: 1.0, green: 0.75, blue: 0.0))
+                            )
+                            .offset(x: -6, y: -6)
+                    }
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("BrewNet Pro")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                Text("Redeem premium perks")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.gray)
+            }
+
+            Spacer()
+        }
     }
     
     private var cashOutSection: some View {
@@ -3504,6 +3559,7 @@ struct Reward: Identifiable, Codable, Equatable {
     enum RewardCategory: String, Codable, Equatable {
         case coffee = "coffee"
         case gift = "gift"
+        case membership = "membership"
         case other = "other"
     }
 }
@@ -3531,30 +3587,56 @@ struct RewardCard: View, Equatable {
             HStack(spacing: 16) {
                 // Reward Icon/Image
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
-                        .frame(width: 100, height: 100)
-                    
-                    // 如果有图片名称，尝试从 Assets 加载
-                    if let imageName = reward.imageUrl, !imageName.isEmpty {
-                        // 尝试加载图片，如果失败则显示默认图标
-                        Group {
-                            if UIImage(named: imageName) != nil {
-                                Image(imageName)
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .frame(width: 100, height: 100)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                            } else {
-                                Image(systemName: rewardIcon)
-                                    .font(.system(size: 40))
-                                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    if reward.category == .membership {
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(red: 1.0, green: 0.9, blue: 0.5),
+                                        Color(red: 1.0, green: 0.75, blue: 0.25)
+                                    ]),
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 100, height: 100)
+                            .shadow(color: Color(red: 1.0, green: 0.75, blue: 0.25).opacity(0.3), radius: 8, x: 0, y: 4)
+                            .overlay(
+                                Image(systemName: "crown.fill")
+                                    .font(.system(size: 42, weight: .semibold))
+                                    .foregroundColor(.white)
+                            )
+                            .overlay(alignment: .topLeading) {
+                                Circle()
+                                    .fill(Color.white)
+                                    .frame(width: 26, height: 26)
+                                    .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
+                                    .overlay(
+                                        Image(systemName: "bolt.fill")
+                                            .font(.system(size: 14, weight: .bold))
+                                            .foregroundColor(Color(red: 1.0, green: 0.75, blue: 0.0))
+                                    )
+                                    .offset(x: -10, y: -10)
                             }
-                        }
                     } else {
-                        Image(systemName: rewardIcon)
-                            .font(.system(size: 40))
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                            .frame(width: 100, height: 100)
+                            .overlay(
+                                Group {
+                                    if let imageName = reward.imageUrl, !imageName.isEmpty, UIImage(named: imageName) != nil {
+                                        Image(imageName)
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .frame(width: 100, height: 100)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    } else {
+                                        Image(systemName: rewardIcon)
+                                            .font(.system(size: 40))
+                                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                    }
+                                }
+                            )
                     }
                 }
                 
@@ -3614,6 +3696,8 @@ struct RewardCard: View, Equatable {
             return "cup.and.saucer.fill"
         case .gift:
             return "gift.fill"
+        case .membership:
+            return "crown.fill"
         case .other:
             return "star.fill"
         }

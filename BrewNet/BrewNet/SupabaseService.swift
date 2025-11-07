@@ -3394,42 +3394,34 @@ extension SupabaseService {
             let description: String
             let points_required: Int
             let category: String
-            let image_url: String
+            let image_url: String?
             let is_active: Bool
             let created_at: String
             let updated_at: String
         }
         
         for voucher in coffeeVouchers {
-            // 检查是否已存在
-            let checkResponse = try? await client
-                .from("rewards")
-                .select("id")
-                .eq("id", value: voucher.id)
-                .single()
-                .execute()
+            let now = ISO8601DateFormatter().string(from: Date())
+            let reward = RewardInsert(
+                id: voucher.id,
+                name: voucher.name,
+                description: voucher.description,
+                points_required: voucher.points,
+                category: "coffee",
+                image_url: voucher.imageName,
+                is_active: true,
+                created_at: now,
+                updated_at: now
+            )
             
-            if checkResponse == nil {
-                // 不存在，创建新的
-                let now = ISO8601DateFormatter().string(from: Date())
-                let reward = RewardInsert(
-                    id: voucher.id,
-                    name: voucher.name,
-                    description: voucher.description,
-                    points_required: voucher.points,
-                    category: "coffee",
-                    image_url: voucher.imageName,
-                    is_active: true,
-                    created_at: now,
-                    updated_at: now
-                )
-                
+            do {
                 try await client
                     .from("rewards")
-                    .insert(reward)
+                    .upsert(reward, onConflict: "id")
                     .execute()
-                
-                print("✅ [Rewards] Created coffee voucher: \(voucher.name)")
+                print("✅ [Rewards] Ensured coffee voucher exists: \(voucher.name)")
+            } catch {
+                print("⚠️ [Rewards] Failed to upsert coffee voucher \(voucher.name): \(error.localizedDescription)")
             }
         }
         
