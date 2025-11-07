@@ -225,14 +225,6 @@ struct ProfileDisplayView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 20)
                 
-                if let currentUser = authManager.currentUser {
-                    ProUpgradeCard(isProActive: currentUser.isProActive) {
-                        showSubscriptionPayment = true
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 16)
-                }
-                
                 // Coffee Chat Schedule, Points System and Redemption System Buttons
                 HStack(spacing: 12) {
                     // Coffee Chat Schedule Button
@@ -294,6 +286,14 @@ struct ProfileDisplayView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
+                
+                if let currentUser = authManager.currentUser {
+                    ProUpgradeCard(isProActive: currentUser.isProActive) {
+                        showSubscriptionPayment = true
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                }
             }
             .padding(.bottom, 20)
         }
