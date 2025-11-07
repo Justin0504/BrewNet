@@ -603,6 +603,7 @@ struct ProfileSetupView: View {
             }
         }
     }
+
 }
 
 // MARK: - Step 1: Core Identity
@@ -1746,7 +1747,8 @@ struct TimeslotCell: View {
 // MARK: - Step 3: Networking Intention
 struct NetworkingIntentionStep: View {
     @Binding var profileData: ProfileCreationData
-    @State private var selectedIntention: NetworkingIntentionType = .learnGrow
+    @State private var selectedIntentions: Set<NetworkingIntentionType> = [.learnGrow]
+    @State private var primaryIntention: NetworkingIntentionType = .learnGrow
     @State private var selectedSubIntentions: Set<SubIntentionType> = []
     @State private var refreshID = UUID()
     @State private var isLoadingFromData = false // 防止循环更新
@@ -1773,25 +1775,38 @@ struct NetworkingIntentionStep: View {
         VStack(spacing: 24) {
             // Main Intention Selection
             VStack(alignment: .leading, spacing: 16) {
-                Text("What's your main networking intention? *")
+                Text("Select your networking intentions")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 12) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 12) {
                     ForEach(NetworkingIntentionType.allCases, id: \.self) { intention in
                         Button(action: {
-                            selectedIntention = intention
-                            selectedSubIntentions.removeAll()
+                        if selectedIntentions.contains(intention) {
+                                selectedIntentions.remove(intention)
+                            selectedSubIntentions = selectedSubIntentions.filter { sub in
+                                selectedIntentions.flatMap { $0.subIntentions }.contains(sub)
+                            }
+                            if primaryIntention == intention {
+                                primaryIntention = selectedIntentions.first ?? .learnGrow
+                            }
+                            } else {
+                                selectedIntentions.insert(intention)
+                            if selectedIntentions.count == 1 {
+                                primaryIntention = intention
+                            }
+                            }
+                        updateProfileData()
                         }) {
                             VStack(spacing: 8) {
                                 Text(getIntentionDescription(intention))
                                     .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(selectedIntention == intention ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    .foregroundColor(selectedIntentions.contains(intention) ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
                                     .multilineTextAlignment(.center)
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
-                            .background(selectedIntention == intention ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
+                            .background(selectedIntentions.contains(intention) ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
                             .cornerRadius(12)
                         }
                     }
@@ -1799,19 +1814,22 @@ struct NetworkingIntentionStep: View {
             }
             
             // Sub-intention Selection
-            if !selectedIntention.subIntentions.isEmpty {
+            if !selectedIntentions.isEmpty {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Select your sub-intentions:")
+                    Text("Select sub-intentions (up to 8):")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                     
+                    let availableSubIntentions = Array(Set(selectedIntentions.flatMap { $0.subIntentions }))
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 1), spacing: 8) {
-                        ForEach(selectedIntention.subIntentions, id: \.self) { subIntention in
+                        ForEach(availableSubIntentions, id: \.self) { subIntention in
                             Button(action: {
                                 if selectedSubIntentions.contains(subIntention) {
                                     selectedSubIntentions.remove(subIntention)
-                                } else {
+                                    updateProfileData()
+                                } else if selectedSubIntentions.count < 8 {
                                     selectedSubIntentions.insert(subIntention)
+                                    updateProfileData()
                                 }
                             }) {
                                 // 使用 computed property 来确保实时更新
@@ -1917,31 +1935,9 @@ struct NetworkingIntentionStep: View {
                 print("   → Skipping reload (empty array but Set already has data)")
             }
         }
-        .onChange(of: profileData.networkingIntention?.selectedIntention) { newValue in
-            // 也监听 selectedIntention 的变化
-            if let newValue = newValue {
-                print("🔄 ProfileData networking intention changed to: \(newValue)")
-                loadExistingData()
-            }
-        }
         .onChange(of: selectedSubIntentions) { newValue in
             // 当 selectedSubIntentions 更新时，打印当前状态用于调试
             print("📊 selectedSubIntentions Set updated: \(newValue.map { $0.rawValue })")
-        }
-        .onChange(of: selectedIntention) { newIntention in
-            // 只有当用户手动更改 intention 时才清空 sub-intentions
-            // 如果新 intention 与 profileData 中的不同，说明是用户手动更改
-            if let dataIntention = profileData.networkingIntention?.selectedIntention,
-               newIntention != dataIntention {
-                // 用户手动更改了 intention，清空 sub-intentions
-                print("🔄 User changed intention from \(dataIntention) to \(newIntention), clearing sub-intentions")
-                selectedSubIntentions.removeAll()
-                updateProfileData()
-            } else {
-                // 可能是数据加载触发的，不需要清空
-                print("🔄 Intention changed (likely from data load), keeping sub-intentions")
-                updateProfileData()
-            }
         }
         .onChange(of: selectedSubIntentions) { _ in updateProfileData() }
         .onChange(of: marketingFunctions) { _ in updateCareerDirectionData() }
@@ -1987,12 +1983,17 @@ struct NetworkingIntentionStep: View {
         print("   Selected sub-intentions count: \(networkingIntention.selectedSubIntentions.count)")
         print("   Sub-intentions: \(networkingIntention.selectedSubIntentions.map { $0.rawValue })")
         
-        // 先更新 selectedIntention，这会触发 UI 更新
-        selectedIntention = networkingIntention.selectedIntention
+        // 更新意图集合
+        let allIntentions = [networkingIntention.selectedIntention] + networkingIntention.additionalIntentions
+        selectedIntentions = allIntentions.isEmpty ? [.learnGrow] : Set(allIntentions)
+        primaryIntention = allIntentions.first ?? .learnGrow
         
         // 然后更新 selectedSubIntentions
         // 使用明确的赋值来确保 Set 更新并触发视图刷新
-        let newSubIntentions = Set(networkingIntention.selectedSubIntentions)
+        let validSubIntentions = networkingIntention.selectedSubIntentions.filter { intent in
+            selectedIntentions.flatMap { $0.subIntentions }.contains(intent)
+        }
+        let newSubIntentions = Set(validSubIntentions)
         
         print("   📋 Before update:")
         print("      - Current selectedSubIntentions: \(selectedSubIntentions.map { $0.rawValue })")
@@ -2005,7 +2006,7 @@ struct NetworkingIntentionStep: View {
         refreshID = UUID()
         
         print("   ✅ UI state updated:")
-        print("      - selectedIntention: \(selectedIntention)")
+        print("      - selectedIntentions: \(selectedIntentions.map { $0.displayName })")
         print("      - selectedSubIntentions Set count: \(selectedSubIntentions.count)")
         print("      - selectedSubIntentions Set: \(selectedSubIntentions.map { $0.rawValue })")
         print("      - Checking if cofounderMatch is in Set: \(selectedSubIntentions.contains(.cofounderMatch))")
@@ -2128,11 +2129,16 @@ struct NetworkingIntentionStep: View {
         }
         
         print("📝 Updating profileData with current UI state:")
-        print("   selectedIntention: \(selectedIntention)")
+        print("   selectedIntentions: \(selectedIntentions.map { $0.displayName })")
         print("   selectedSubIntentions: \(selectedSubIntentions.map { $0.rawValue })")
         
+        if !selectedIntentions.contains(primaryIntention) {
+            primaryIntention = selectedIntentions.first ?? .learnGrow
+        }
+        let additional = Array(selectedIntentions.filter { $0 != primaryIntention })
         let networkingIntention = NetworkingIntention(
-            selectedIntention: selectedIntention,
+            selectedIntention: primaryIntention,
+            additionalIntentions: additional,
             selectedSubIntentions: Array(selectedSubIntentions),
             careerDirection: careerDirectionData,
             skillDevelopment: skillDevelopmentData,
@@ -2565,6 +2571,7 @@ struct IndustryRow: View {
 struct PersonalitySocialStep: View {
     @Binding var profileData: ProfileCreationData
     @State private var preferredMeetingVibe = MeetingVibe.casual
+    @State private var selectedMeetingVibes: Set<MeetingVibe> = [.casual]
     @State private var selfIntroduction = ""
     @StateObject private var selectionHelper = SelectionHelper()
     @State private var scrollOffset: CGFloat = 0
@@ -2692,21 +2699,47 @@ struct PersonalitySocialStep: View {
             
             // Preferred Meeting Vibe
             VStack(alignment: .leading, spacing: 8) {
-                Text("Preferred Meeting Vibe")
+                Text("Preferred Meeting Vibes")
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 
-                Picker("Meeting Vibe", selection: $preferredMeetingVibe) {
+                Text("Select one or more meeting vibes that fit you")
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray)
+                
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
                     ForEach(MeetingVibe.allCases, id: \.self) { vibe in
-                        Text(vibe.displayName).tag(vibe)
+                        Button(action: {
+                            if selectedMeetingVibes.contains(vibe) {
+                                selectedMeetingVibes.remove(vibe)
+                            } else {
+                                selectedMeetingVibes.insert(vibe)
+                            }
+                            if selectedMeetingVibes.isEmpty {
+                                preferredMeetingVibe = .casual
+                                selectedMeetingVibes = [.casual]
+                            } else if !selectedMeetingVibes.contains(preferredMeetingVibe) {
+                                preferredMeetingVibe = selectedMeetingVibes.first ?? .casual
+                            }
+                            updateProfileData()
+                        }) {
+                            HStack {
+                                Text(vibe.displayName)
+                                    .font(.system(size: 14))
+                                    .foregroundColor(selectedMeetingVibes.contains(vibe) ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
+                                if selectedMeetingVibes.contains(vibe) {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.white)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(selectedMeetingVibes.contains(vibe) ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
+                            .cornerRadius(16)
+                        }
                     }
                 }
-                .pickerStyle(MenuPickerStyle())
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(8)
             }
         }
         .onAppear {
@@ -2715,12 +2748,27 @@ struct PersonalitySocialStep: View {
                 selectionHelper.selectedValues = Set(personalitySocial.valuesTags)
                 selectionHelper.selectedHobbies = Set(personalitySocial.hobbies)
                 preferredMeetingVibe = personalitySocial.preferredMeetingVibe
+                let vibes = personalitySocial.preferredMeetingVibes
+                if vibes.isEmpty {
+                    selectedMeetingVibes = [personalitySocial.preferredMeetingVibe]
+                } else {
+                    selectedMeetingVibes = Set(vibes)
+                }
                 selfIntroduction = personalitySocial.selfIntroduction ?? ""
             }
         }
         .onChange(of: selectionHelper.selectedValues) { _ in updateProfileData() }
         .onChange(of: selectionHelper.selectedHobbies) { _ in updateProfileData() }
         .onChange(of: preferredMeetingVibe) { _ in updateProfileData() }
+        .onChange(of: selectedMeetingVibes) { newValue in
+            if newValue.isEmpty {
+                selectedMeetingVibes = [.casual]
+                preferredMeetingVibe = .casual
+            } else if !newValue.contains(preferredMeetingVibe) {
+                preferredMeetingVibe = newValue.first ?? .casual
+            }
+            updateProfileData()
+        }
         .onChange(of: selfIntroduction) { _ in updateProfileData() }
     }
     
@@ -2730,6 +2778,7 @@ struct PersonalitySocialStep: View {
             valuesTags: Array(selectionHelper.selectedValues),
             hobbies: Array(selectionHelper.selectedHobbies),
             preferredMeetingVibe: preferredMeetingVibe,
+            preferredMeetingVibes: Array(selectedMeetingVibes),
             selfIntroduction: selfIntroduction.isEmpty ? nil : selfIntroduction
         )
         profileData.personalitySocial = personalitySocial
@@ -3050,6 +3099,9 @@ struct AddWorkExperienceView: View {
     @State private var endYear: Int? = YearOptions.currentYear
     @State private var position = ""
     @State private var isPresent = false
+    @State private var skillInput = ""
+    @State private var addedSkills: [String] = []
+    @State private var responsibilities = ""
     
     var body: some View {
         NavigationView {
@@ -3072,6 +3124,73 @@ struct AddWorkExperienceView: View {
                     
                     TextField("e.g., Software Engineer, Marketing Manager", text: $position)
                         .textFieldStyle(CustomTextFieldStyle())
+                }
+                
+                // Key Skills
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Key Skills")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    
+                    HStack(spacing: 10) {
+                        TextField("Add a skill", text: $skillInput, onCommit: addSkill)
+                            .textFieldStyle(CustomTextFieldStyle())
+                        
+                        Button("Add") {
+                            addSkill()
+                        }
+                        .disabled(skillInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(skillInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.gray.opacity(0.3) : Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .cornerRadius(12)
+                    }
+                    
+                    if !addedSkills.isEmpty {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
+                            ForEach(addedSkills, id: \.self) { skill in
+                                HStack(spacing: 6) {
+                                    Text(skill)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                    Button(action: { removeSkill(skill) }) {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.7))
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                                .cornerRadius(10)
+                            }
+                        }
+                    }
+                }
+                
+                // Role Highlights
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Role Highlights")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $responsibilities)
+                            .frame(minHeight: 100)
+                            .padding(8)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
+                        
+                        if responsibilities.isEmpty {
+                            Text("Summarize key responsibilities or achievements...")
+                                .font(.system(size: 14))
+                                .foregroundColor(.gray.opacity(0.6))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 14)
+                        }
+                    }
                 }
                 
                 // Start Year
@@ -3104,6 +3223,11 @@ struct AddWorkExperienceView: View {
                         
                         Toggle("Currently working", isOn: $isPresent)
                             .font(.system(size: 14))
+                    }
+                    .onChange(of: isPresent) { newValue in
+                        if newValue {
+                            endYear = nil
+                        }
                     }
                     
                     if !isPresent {
@@ -3142,15 +3266,30 @@ struct AddWorkExperienceView: View {
                             companyName: companyName,
                             startYear: startYear,
                             endYear: isPresent ? nil : endYear,
-                            position: position.isEmpty ? nil : position
+                            position: position.isEmpty ? nil : position,
+                            highlightedSkills: addedSkills,
+                            responsibilities: responsibilities.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : responsibilities.trimmingCharacters(in: .whitespacesAndNewlines)
                         )
                         onSave(workExperience)
                         dismiss()
                     }
-                    .disabled(companyName.isEmpty)
+                    .disabled(companyName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
+    }
+    
+    private func addSkill() {
+        let trimmed = skillInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if !addedSkills.contains(trimmed) {
+            addedSkills.append(trimmed)
+        }
+        skillInput = ""
+    }
+    
+    private func removeSkill(_ skill: String) {
+        addedSkills.removeAll { $0 == skill }
     }
 }
 
