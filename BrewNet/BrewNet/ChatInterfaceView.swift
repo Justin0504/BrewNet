@@ -2464,10 +2464,12 @@ struct MessageBubbleView: View {
                     }
                     
                     // 第二行：根据状态显示按钮或状态图案
-                    if let status = invitationStatus {
-                        // 有状态时显示状态图案
+                    // 只有当状态明确为 accepted 或 rejected 时才显示状态图案
+                    // 其他情况（nil 或 pending）都显示按钮
+                    if invitationStatus == .accepted || invitationStatus == .rejected {
+                        // 已处理状态：显示状态图案
                         HStack(spacing: 8) {
-                            if status == .accepted {
+                            if invitationStatus == .accepted {
                                 HStack(spacing: 8) {
                                     Image(systemName: "checkmark.circle.fill")
                                         .font(.system(size: 18))
@@ -2497,7 +2499,7 @@ struct MessageBubbleView: View {
                                             lineWidth: 1.5
                                         )
                                 )
-                            } else if status == .rejected {
+                            } else if invitationStatus == .rejected {
                                 HStack(spacing: 8) {
                                     Image(systemName: "xmark.circle.fill")
                                         .font(.system(size: 18))
@@ -2530,7 +2532,7 @@ struct MessageBubbleView: View {
                             }
                         }
                     } else {
-                        // 无状态时显示两个按钮
+                        // 待处理状态（nil 或 pending）：显示 Accept 和 Decline 按钮
                         HStack(spacing: 10) {
                             Button(action: {
                                 showingAcceptSheet = true
