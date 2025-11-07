@@ -161,6 +161,7 @@ struct UserProfileCardView: View {
     @EnvironmentObject var supabaseService: SupabaseService
     
     @State private var currentUserLocation: String?
+    @State private var selectedWorkExperience: WorkExperience?
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -428,6 +429,19 @@ struct UserProfileCardView: View {
             // Networking Intention Badge with Location and Distance
             VStack(alignment: .leading, spacing: 12) {
                 NetworkingIntentionBadgeView(intention: profile.networkingIntention.selectedIntention)
+                if !profile.networkingIntention.additionalIntentions.isEmpty {
+                    FlowLayout(spacing: 8) {
+                        ForEach(profile.networkingIntention.additionalIntentions, id: \.self) { extra in
+                            Text(extra.displayName)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color(red: 0.4, green: 0.2, blue: 0.1).opacity(0.12))
+                                .cornerRadius(10)
+                        }
+                    }
+                }
                 
                 // Location and Distance (下方显示，字体与 intention 一样大)
                 if shouldShowLocation, let location = profile.coreIdentity.location, !location.isEmpty {
@@ -530,7 +544,86 @@ struct UserProfileCardView: View {
         VStack(alignment: .leading, spacing: 20) {
             Divider()
             
-            // Sub-Intentions
+            // About Me
+            if let selfIntro = profile.personalitySocial.selfIntroduction, !selfIntro.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "hand.wave.fill")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("About Me")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    Text(selfIntro)
+                        .font(.system(size: 16))
+                        .foregroundColor(.gray)
+                        .lineSpacing(4)
+                }
+            }
+            
+            // Education
+            if let education = profile.professionalBackground.education, !education.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "graduationcap.fill")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("Education")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    Text(education)
+                        .font(.system(size: 16))
+                        .foregroundColor(.gray)
+                }
+            }
+            
+            // Work Experience Chips
+            if shouldShowCompany && !profile.professionalBackground.workExperiences.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "briefcase.fill")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("Work Experience")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    
+                    FlowLayout(spacing: 8) {
+                        ForEach(profile.professionalBackground.workExperiences) { workExp in
+                            Button {
+                                selectedWorkExperience = workExp
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(workExp.companyName)
+                                        .font(.system(size: 15, weight: .semibold))
+                                    if let position = workExp.position, !position.isEmpty {
+                                        Text("·")
+                                            .font(.system(size: 15, weight: .bold))
+                                            .foregroundColor(.white.opacity(0.6))
+                                        Text(position)
+                                            .font(.system(size: 15))
+                                    }
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .cornerRadius(12)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                }
+                .sheet(item: $selectedWorkExperience) { workExp in
+                    WorkExperienceDetailSheet(
+                        workExperience: workExp,
+                        allSkills: Array(profile.professionalBackground.skills.prefix(8)),
+                        industry: profile.professionalBackground.industry
+                    )
+                }
+            }
+            
+            // What I'm Looking For
             if !profile.networkingIntention.selectedSubIntentions.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -631,16 +724,28 @@ struct UserProfileCardView: View {
                     }
                 }
             }
-            
-            // Preferred Meeting Vibe
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Meeting Vibe:")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.gray)
-                    Text(profile.personalitySocial.preferredMeetingVibe.displayName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+
+            // Preferred Meeting Vibes
+            if !meetingVibesDisplay.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "person.3.fill")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("Meeting Vibes")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    FlowLayout(spacing: 8) {
+                        ForEach(meetingVibesDisplay, id: \.self) { vibe in
+                            Text(vibe.displayName)
+                                .font(.system(size: 15))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .cornerRadius(12)
+                        }
+                    }
                 }
             }
         }
@@ -653,65 +758,6 @@ struct UserProfileCardView: View {
     private var level3DeepUnderstandingView: some View {
         VStack(alignment: .leading, spacing: 20) {
             Divider()
-            
-            // Self Introduction
-            if let selfIntro = profile.personalitySocial.selfIntroduction, !selfIntro.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "hand.wave.fill")
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("About Me")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                    }
-                    
-                    Text(selfIntro)
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray)
-                        .lineSpacing(4)
-                }
-            }
-            
-            // Education
-            if let education = profile.professionalBackground.education, !education.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "graduationcap.fill")
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("Education")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                    }
-                    
-                    Text(education)
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray)
-                }
-            }
-            
-            // Work Experience (summary)
-            if !profile.professionalBackground.workExperiences.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "briefcase.fill")
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("Experience")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                    }
-                    
-                    ForEach(profile.professionalBackground.workExperiences.prefix(3), id: \.id) { workExp in
-                        WorkExperienceRowView(workExp: workExp)
-                    }
-                    
-                    if let yearsOfExp = profile.professionalBackground.yearsOfExperience {
-                        Text("Total: \(String(format: "%.1f", yearsOfExp)) years of experience")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundColor(.gray)
-                            .italic()
-                    }
-                }
-            }
             
             // Personal Website
             if let website = profile.coreIdentity.personalWebsite, !website.isEmpty,
@@ -783,6 +829,14 @@ struct UserProfileCardView: View {
             print("   ⚠️ Timeslot hidden (not public): \(settings.timeslot.rawValue)")
         }
         return visible
+    }
+    
+    private var meetingVibesDisplay: [MeetingVibe] {
+        let vibes = profile.personalitySocial.preferredMeetingVibes
+        if vibes.isEmpty {
+            return [profile.personalitySocial.preferredMeetingVibe]
+        }
+        return vibes
     }
 }
 
@@ -929,6 +983,7 @@ struct PublicProfileCardView: View {
     @EnvironmentObject var supabaseService: SupabaseService
     
     @State private var currentUserLocation: String?
+    @State private var selectedWorkExperience: WorkExperience?
     
     // For public views, isConnection is always false (only show public fields)
     private let isConnection: Bool = false
@@ -1089,6 +1144,19 @@ struct PublicProfileCardView: View {
             // Networking Intention Badge with Location and Distance
             VStack(alignment: .leading, spacing: 12) {
                 NetworkingIntentionBadgeView(intention: profile.networkingIntention.selectedIntention)
+                if !profile.networkingIntention.additionalIntentions.isEmpty {
+                    FlowLayout(spacing: 8) {
+                        ForEach(profile.networkingIntention.additionalIntentions, id: \.self) { extra in
+                            Text(extra.displayName)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color(red: 0.4, green: 0.2, blue: 0.1).opacity(0.12))
+                                .cornerRadius(10)
+                        }
+                    }
+                }
                 
                 // Location and Distance (下方显示，字体与 intention 一样大)
                 if shouldShowLocation, let location = profile.coreIdentity.location, !location.isEmpty {
@@ -1191,7 +1259,86 @@ struct PublicProfileCardView: View {
         VStack(alignment: .leading, spacing: 20) {
             Divider()
             
-            // Sub-Intentions
+            // About Me
+            if let selfIntro = profile.personalitySocial.selfIntroduction, !selfIntro.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "hand.wave.fill")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("About Me")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    Text(selfIntro)
+                        .font(.system(size: 16))
+                        .foregroundColor(.gray)
+                        .lineSpacing(4)
+                }
+            }
+            
+            // Education
+            if let education = profile.professionalBackground.education, !education.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "graduationcap.fill")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("Education")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    Text(education)
+                        .font(.system(size: 16))
+                        .foregroundColor(.gray)
+                }
+            }
+            
+            // Work Experience Chips
+            if shouldShowCompany && !profile.professionalBackground.workExperiences.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "briefcase.fill")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("Work Experience")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    
+                    FlowLayout(spacing: 8) {
+                        ForEach(profile.professionalBackground.workExperiences) { workExp in
+                            Button {
+                                selectedWorkExperience = workExp
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(workExp.companyName)
+                                        .font(.system(size: 15, weight: .semibold))
+                                    if let position = workExp.position, !position.isEmpty {
+                                        Text("·")
+                                            .font(.system(size: 15, weight: .bold))
+                                            .foregroundColor(.white.opacity(0.6))
+                                        Text(position)
+                                            .font(.system(size: 15))
+                                    }
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .cornerRadius(12)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                }
+                .sheet(item: $selectedWorkExperience) { workExp in
+                    WorkExperienceDetailSheet(
+                        workExperience: workExp,
+                        allSkills: Array(profile.professionalBackground.skills.prefix(8)),
+                        industry: profile.professionalBackground.industry
+                    )
+                }
+            }
+            
+            // What I'm Looking For
             if !profile.networkingIntention.selectedSubIntentions.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -1215,7 +1362,7 @@ struct PublicProfileCardView: View {
                     }
                 }
             }
-            
+
             // Skills (only if public)
             if shouldShowSkills && !profile.professionalBackground.skills.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -1293,15 +1440,27 @@ struct PublicProfileCardView: View {
                 }
             }
             
-            // Preferred Meeting Vibe
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Meeting Vibe:")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.gray)
-                    Text(profile.personalitySocial.preferredMeetingVibe.displayName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            // Preferred Meeting Vibes
+            if !publicMeetingVibesDisplay.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "person.3.fill")
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        Text("Meeting Vibes")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    FlowLayout(spacing: 8) {
+                        ForEach(publicMeetingVibesDisplay, id: \.self) { vibe in
+                            Text(vibe.displayName)
+                                .font(.system(size: 15))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .cornerRadius(12)
+                        }
+                    }
                 }
             }
         }
@@ -1314,65 +1473,6 @@ struct PublicProfileCardView: View {
     private var level3DeepUnderstandingView: some View {
         VStack(alignment: .leading, spacing: 20) {
             Divider()
-            
-            // Self Introduction
-            if let selfIntro = profile.personalitySocial.selfIntroduction, !selfIntro.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "hand.wave.fill")
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("About Me")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                    }
-                    
-                    Text(selfIntro)
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray)
-                        .lineSpacing(4)
-                }
-            }
-            
-            // Education
-            if let education = profile.professionalBackground.education, !education.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "graduationcap.fill")
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("Education")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                    }
-                    
-                    Text(education)
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray)
-                }
-            }
-            
-            // Work Experience (summary)
-            if !profile.professionalBackground.workExperiences.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "briefcase.fill")
-                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("Experience")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                    }
-                    
-                    ForEach(profile.professionalBackground.workExperiences.prefix(3), id: \.id) { workExp in
-                        WorkExperienceRowView(workExp: workExp)
-                    }
-                    
-                    if let yearsOfExp = profile.professionalBackground.yearsOfExperience {
-                        Text("Total: \(String(format: "%.1f", yearsOfExp)) years of experience")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundColor(.gray)
-                            .italic()
-                    }
-                }
-            }
             
             // Personal Website
             if let website = profile.coreIdentity.personalWebsite, !website.isEmpty,
@@ -1443,6 +1543,119 @@ struct PublicProfileCardView: View {
             print("   ⚠️ Timeslot hidden due to privacy: \(settings.timeslot.rawValue), isConnection: \(isConnection)")
         }
         return visible
+    }
+    
+    private var publicMeetingVibesDisplay: [MeetingVibe] {
+        let vibes = profile.personalitySocial.preferredMeetingVibes
+        if vibes.isEmpty {
+            return [profile.personalitySocial.preferredMeetingVibe]
+        }
+        return vibes
+    }
+}
+
+struct WorkExperienceDetailSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let workExperience: WorkExperience
+    let allSkills: [String]
+    let industry: String?
+    
+    private var durationText: String {
+        if let end = workExperience.endYear {
+            return "\(workExperience.startYear) - \(end)"
+        } else {
+            return "\(workExperience.startYear) - Present"
+        }
+    }
+    
+    private var displaySkills: [String] {
+        if !workExperience.highlightedSkills.isEmpty {
+            return workExperience.highlightedSkills
+        }
+        return allSkills
+    }
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(workExperience.companyName)
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        if let position = workExperience.position, !position.isEmpty {
+                            Text(position)
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label(durationText, systemImage: "calendar.badge.clock")
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray)
+                        if let industry = industry, !industry.isEmpty {
+                            Label(industry, systemImage: "building.2.fill")
+                                .font(.system(size: 16))
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    
+                    if !displaySkills.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Key Skills")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            FlowLayout(spacing: 8) {
+                                ForEach(displaySkills, id: \.self) { skill in
+                                    Text(skill)
+                                        .font(.system(size: 15))
+                                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 8)
+                                        .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                                        .cornerRadius(12)
+                                }
+                            }
+                        }
+                    }
+                    
+                    if let responsibilities = workExperience.responsibilities, !responsibilities.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Role Highlights")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            Text(responsibilities)
+                                .font(.system(size: 15))
+                                .foregroundColor(.gray)
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Role Highlights")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            Text("Reach out to learn more about this role and the projects they led during this time.")
+                                .font(.system(size: 15))
+                                .foregroundColor(.gray)
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+            .navigationTitle("Experience")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 

@@ -136,18 +136,58 @@ struct ProfessionalBackground: Codable {
 
 // MARK: - 3. Networking Intention
 struct NetworkingIntention: Codable, Equatable {
-    let selectedIntention: NetworkingIntentionType
-    let selectedSubIntentions: [SubIntentionType]
-    let careerDirection: CareerDirectionData?
-    let skillDevelopment: SkillDevelopmentData?
-    let industryTransition: IndustryTransitionData?
+    var selectedIntention: NetworkingIntentionType
+    var additionalIntentions: [NetworkingIntentionType]
+    var selectedSubIntentions: [SubIntentionType]
+    var careerDirection: CareerDirectionData?
+    var skillDevelopment: SkillDevelopmentData?
+    var industryTransition: IndustryTransitionData?
     
     enum CodingKeys: String, CodingKey {
         case selectedIntention = "selected_intention"
+        case additionalIntentions = "additional_intentions"
         case selectedSubIntentions = "selected_sub_intentions"
         case careerDirection = "career_direction"
         case skillDevelopment = "skill_development"
         case industryTransition = "industry_transition"
+    }
+    
+    init(
+        selectedIntention: NetworkingIntentionType,
+        additionalIntentions: [NetworkingIntentionType] = [],
+        selectedSubIntentions: [SubIntentionType],
+        careerDirection: CareerDirectionData?,
+        skillDevelopment: SkillDevelopmentData?,
+        industryTransition: IndustryTransitionData?
+    ) {
+        self.selectedIntention = selectedIntention
+        self.additionalIntentions = additionalIntentions
+        self.selectedSubIntentions = selectedSubIntentions
+        self.careerDirection = careerDirection
+        self.skillDevelopment = skillDevelopment
+        self.industryTransition = industryTransition
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.selectedIntention = try container.decode(NetworkingIntentionType.self, forKey: .selectedIntention)
+        self.additionalIntentions = try container.decodeIfPresent([NetworkingIntentionType].self, forKey: .additionalIntentions) ?? []
+        self.selectedSubIntentions = try container.decode([SubIntentionType].self, forKey: .selectedSubIntentions)
+        self.careerDirection = try container.decodeIfPresent(CareerDirectionData.self, forKey: .careerDirection)
+        self.skillDevelopment = try container.decodeIfPresent(SkillDevelopmentData.self, forKey: .skillDevelopment)
+        self.industryTransition = try container.decodeIfPresent(IndustryTransitionData.self, forKey: .industryTransition)
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(selectedIntention, forKey: .selectedIntention)
+        if !additionalIntentions.isEmpty {
+            try container.encode(additionalIntentions, forKey: .additionalIntentions)
+        }
+        try container.encode(selectedSubIntentions, forKey: .selectedSubIntentions)
+        try container.encodeIfPresent(careerDirection, forKey: .careerDirection)
+        try container.encodeIfPresent(skillDevelopment, forKey: .skillDevelopment)
+        try container.encodeIfPresent(industryTransition, forKey: .industryTransition)
     }
 }
 
@@ -189,18 +229,72 @@ struct NetworkingIntent: Codable {
 
 // MARK: - 4. Personality & Social Layer
 struct PersonalitySocial: Codable {
-    let icebreakerPrompts: [IcebreakerPrompt]
-    let valuesTags: [String]
-    let hobbies: [String]
-    let preferredMeetingVibe: MeetingVibe
-    let selfIntroduction: String?
+    var icebreakerPrompts: [IcebreakerPrompt]
+    var valuesTags: [String]
+    var hobbies: [String]
+    var preferredMeetingVibe: MeetingVibe
+    var preferredMeetingVibes: [MeetingVibe]
+    var selfIntroduction: String?
     
     enum CodingKeys: String, CodingKey {
         case icebreakerPrompts = "icebreaker_prompts"
         case valuesTags = "values_tags"
         case hobbies
         case preferredMeetingVibe = "preferred_meeting_vibe"
+        case preferredMeetingVibes = "preferred_meeting_vibes"
         case selfIntroduction = "self_introduction"
+    }
+    
+    init(
+        icebreakerPrompts: [IcebreakerPrompt],
+        valuesTags: [String],
+        hobbies: [String],
+        preferredMeetingVibe: MeetingVibe,
+        preferredMeetingVibes: [MeetingVibe] = [],
+        selfIntroduction: String?
+    ) {
+        self.icebreakerPrompts = icebreakerPrompts
+        self.valuesTags = valuesTags
+        self.hobbies = hobbies
+        self.preferredMeetingVibe = preferredMeetingVibe
+        if preferredMeetingVibes.isEmpty {
+            self.preferredMeetingVibes = [preferredMeetingVibe]
+        } else {
+            self.preferredMeetingVibes = preferredMeetingVibes
+        }
+        self.selfIntroduction = selfIntroduction
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.icebreakerPrompts = try container.decode([IcebreakerPrompt].self, forKey: .icebreakerPrompts)
+        self.valuesTags = try container.decode([String].self, forKey: .valuesTags)
+        self.hobbies = try container.decode([String].self, forKey: .hobbies)
+        let primaryVibe = try container.decodeIfPresent(MeetingVibe.self, forKey: .preferredMeetingVibe)
+        let vibes = try container.decodeIfPresent([MeetingVibe].self, forKey: .preferredMeetingVibes) ?? []
+        if let primaryVibe = primaryVibe {
+            self.preferredMeetingVibe = primaryVibe
+            self.preferredMeetingVibes = vibes.isEmpty ? [primaryVibe] : vibes
+        } else if let firstVibe = vibes.first {
+            self.preferredMeetingVibe = firstVibe
+            self.preferredMeetingVibes = vibes
+        } else {
+            self.preferredMeetingVibe = .casual
+            self.preferredMeetingVibes = [.casual]
+        }
+        self.selfIntroduction = try container.decodeIfPresent(String.self, forKey: .selfIntroduction)
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(icebreakerPrompts, forKey: .icebreakerPrompts)
+        try container.encode(valuesTags, forKey: .valuesTags)
+        try container.encode(hobbies, forKey: .hobbies)
+        try container.encode(preferredMeetingVibe, forKey: .preferredMeetingVibe)
+        if !preferredMeetingVibes.isEmpty {
+            try container.encode(preferredMeetingVibes, forKey: .preferredMeetingVibes)
+        }
+        try container.encodeIfPresent(selfIntroduction, forKey: .selfIntroduction)
     }
 }
 
@@ -698,6 +792,7 @@ extension BrewNetProfile {
             ),
             networkingIntention: NetworkingIntention(
                 selectedIntention: .learnGrow,
+                additionalIntentions: [],
                 selectedSubIntentions: [],
                 careerDirection: nil,
                 skillDevelopment: nil,
@@ -713,6 +808,7 @@ extension BrewNetProfile {
                 valuesTags: [],
                 hobbies: [],
                 preferredMeetingVibe: .casual,
+                preferredMeetingVibes: [.casual],
                 selfIntroduction: nil
             ),
             privacyTrust: PrivacyTrust(

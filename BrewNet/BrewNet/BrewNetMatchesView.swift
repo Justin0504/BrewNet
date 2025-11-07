@@ -1554,6 +1554,7 @@ struct BrewNetMatchesView: View {
                 valuesTags: ["Curious", "Empathetic", "Collaborative"],
                 hobbies: ["Coffee Culture", "Photography", "Hiking"],
                 preferredMeetingVibe: .reflective,
+                preferredMeetingVibes: [.reflective],
                 selfIntroduction: "I love bridging design and data to solve real-world problems. When I'm not designing products, you'll find me exploring coffee shops or capturing moments with my camera."
             ),
             privacyTrust: PrivacyTrust(
@@ -1634,6 +1635,7 @@ struct BrewNetMatchesView: View {
                 valuesTags: ["Innovative", "Passionate"],
                 hobbies: ["Guitar", "Coding Side Projects"],
                 preferredMeetingVibe: .casual,
+                preferredMeetingVibes: [.casual],
                 selfIntroduction: "Passionate about mobile apps and building great user experiences."
             ),
             privacyTrust: PrivacyTrust(
@@ -1914,23 +1916,20 @@ struct GroupMeetView: View {
 // MARK: - Match Filter Model
 struct MatchFilter: Codable, Equatable {
     // 单选字段（唯一选项）
-    var networkingIntention: NetworkingIntentionType?
     var experienceLevel: ExperienceLevel?
     var careerStage: CareerStage?
     var preferredChatFormat: ChatFormat?
-    var preferredMeetingVibe: MeetingVibe?
     var verifiedStatus: VerifiedStatus?
     
     // 多选字段
     var selectedSkills: Set<String> = []
     var selectedHobbies: Set<String> = []
     var selectedValues: Set<String> = []
-    var selectedSubIntentions: Set<SubIntentionType> = []
     var selectedIndustries: Set<String> = []
+    var preferredMeetingVibes: Set<MeetingVibe> = []
     
     // 范围字段
     var minYearsOfExperience: Double?
-    var maxYearsOfExperience: Double?
     var maxDistance: Double? // 最大距离（公里），nil表示不限
     
     // 是否启用filter
@@ -1938,32 +1937,109 @@ struct MatchFilter: Codable, Equatable {
     
     static let `default` = MatchFilter()
     
+    enum CodingKeys: String, CodingKey {
+        case experienceLevel
+        case careerStage
+        case preferredChatFormat
+        case preferredMeetingVibes
+        case legacyPreferredMeetingVibe
+        case verifiedStatus
+        case selectedSkills
+        case selectedHobbies
+        case selectedValues
+        case selectedIndustries
+        case minYearsOfExperience
+        case maxDistance
+        case isActive
+    }
+    
+    init() {}
+    
+    init(
+        experienceLevel: ExperienceLevel? = nil,
+        careerStage: CareerStage? = nil,
+        preferredChatFormat: ChatFormat? = nil,
+        preferredMeetingVibes: Set<MeetingVibe> = [],
+        verifiedStatus: VerifiedStatus? = nil,
+        selectedSkills: Set<String> = [],
+        selectedHobbies: Set<String> = [],
+        selectedValues: Set<String> = [],
+        selectedIndustries: Set<String> = [],
+        minYearsOfExperience: Double? = nil,
+        maxDistance: Double? = nil,
+        isActive: Bool = false
+    ) {
+        self.experienceLevel = experienceLevel
+        self.careerStage = careerStage
+        self.preferredChatFormat = preferredChatFormat
+        self.preferredMeetingVibes = preferredMeetingVibes
+        self.verifiedStatus = verifiedStatus
+        self.selectedSkills = selectedSkills
+        self.selectedHobbies = selectedHobbies
+        self.selectedValues = selectedValues
+        self.selectedIndustries = selectedIndustries
+        self.minYearsOfExperience = minYearsOfExperience
+        self.maxDistance = maxDistance
+        self.isActive = isActive
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        experienceLevel = try container.decodeIfPresent(ExperienceLevel.self, forKey: .experienceLevel)
+        careerStage = try container.decodeIfPresent(CareerStage.self, forKey: .careerStage)
+        preferredChatFormat = try container.decodeIfPresent(ChatFormat.self, forKey: .preferredChatFormat)
+        let decodedVibes = try container.decodeIfPresent([MeetingVibe].self, forKey: .preferredMeetingVibes) ?? []
+        preferredMeetingVibes = Set(decodedVibes)
+        if preferredMeetingVibes.isEmpty, let legacy = try container.decodeIfPresent(MeetingVibe.self, forKey: .legacyPreferredMeetingVibe) {
+            preferredMeetingVibes = [legacy]
+        }
+        verifiedStatus = try container.decodeIfPresent(VerifiedStatus.self, forKey: .verifiedStatus)
+        selectedSkills = try container.decodeIfPresent(Set<String>.self, forKey: .selectedSkills) ?? []
+        selectedHobbies = try container.decodeIfPresent(Set<String>.self, forKey: .selectedHobbies) ?? []
+        selectedValues = try container.decodeIfPresent(Set<String>.self, forKey: .selectedValues) ?? []
+        selectedIndustries = try container.decodeIfPresent(Set<String>.self, forKey: .selectedIndustries) ?? []
+        minYearsOfExperience = try container.decodeIfPresent(Double.self, forKey: .minYearsOfExperience)
+        maxDistance = try container.decodeIfPresent(Double.self, forKey: .maxDistance)
+        isActive = try container.decodeIfPresent(Bool.self, forKey: .isActive) ?? false
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(experienceLevel, forKey: .experienceLevel)
+        try container.encodeIfPresent(careerStage, forKey: .careerStage)
+        try container.encodeIfPresent(preferredChatFormat, forKey: .preferredChatFormat)
+        let vibesArray = Array(preferredMeetingVibes)
+        if !vibesArray.isEmpty {
+            try container.encode(vibesArray, forKey: .preferredMeetingVibes)
+            try container.encode(vibesArray.first, forKey: .legacyPreferredMeetingVibe)
+        }
+        try container.encodeIfPresent(verifiedStatus, forKey: .verifiedStatus)
+        try container.encode(selectedSkills, forKey: .selectedSkills)
+        try container.encode(selectedHobbies, forKey: .selectedHobbies)
+        try container.encode(selectedValues, forKey: .selectedValues)
+        try container.encode(selectedIndustries, forKey: .selectedIndustries)
+        try container.encodeIfPresent(minYearsOfExperience, forKey: .minYearsOfExperience)
+        try container.encodeIfPresent(maxDistance, forKey: .maxDistance)
+        try container.encode(isActive, forKey: .isActive)
+    }
+    
     func hasActiveFilters() -> Bool {
-        return networkingIntention != nil ||
-               experienceLevel != nil ||
+        return experienceLevel != nil ||
                careerStage != nil ||
                preferredChatFormat != nil ||
-               preferredMeetingVibe != nil ||
+               !preferredMeetingVibes.isEmpty ||
                verifiedStatus != nil ||
                !selectedSkills.isEmpty ||
                !selectedHobbies.isEmpty ||
                !selectedValues.isEmpty ||
-               !selectedSubIntentions.isEmpty ||
                !selectedIndustries.isEmpty ||
                minYearsOfExperience != nil ||
-               maxYearsOfExperience != nil ||
                maxDistance != nil
     }
     
     func matches(_ profile: BrewNetProfile) -> Bool {
         // 如果没有任何filter，返回true
         guard hasActiveFilters() else { return true }
-        
-        // 单选字段匹配
-        if let intention = networkingIntention, 
-           profile.networkingIntention.selectedIntention != intention {
-            return false
-        }
         
         if let level = experienceLevel,
            profile.professionalBackground.experienceLevel != level {
@@ -1980,9 +2056,11 @@ struct MatchFilter: Codable, Equatable {
             return false
         }
         
-        if let vibe = preferredMeetingVibe,
-           profile.personalitySocial.preferredMeetingVibe != vibe {
-            return false
+        if !preferredMeetingVibes.isEmpty {
+            let profileVibes = Set(profile.personalitySocial.preferredMeetingVibes.isEmpty ? [profile.personalitySocial.preferredMeetingVibe] : profile.personalitySocial.preferredMeetingVibes)
+            if profileVibes.isDisjoint(with: preferredMeetingVibes) {
+                return false
+            }
         }
         
         if let verified = verifiedStatus,
@@ -1990,7 +2068,6 @@ struct MatchFilter: Codable, Equatable {
             return false
         }
         
-        // 多选字段匹配（至少匹配一个）
         if !selectedSkills.isEmpty {
             let profileSkills = Set(profile.professionalBackground.skills)
             if profileSkills.isDisjoint(with: selectedSkills) {
@@ -2012,13 +2089,6 @@ struct MatchFilter: Codable, Equatable {
             }
         }
         
-        if !selectedSubIntentions.isEmpty {
-            let profileSubIntentions = Set(profile.networkingIntention.selectedSubIntentions)
-            if profileSubIntentions.isDisjoint(with: selectedSubIntentions) {
-                return false
-            }
-        }
-        
         if !selectedIndustries.isEmpty {
             if let industry = profile.professionalBackground.industry,
                !selectedIndustries.contains(industry) {
@@ -2028,28 +2098,13 @@ struct MatchFilter: Codable, Equatable {
             }
         }
         
-        // 范围字段匹配
         if let minYears = minYearsOfExperience,
            let profileYears = profile.professionalBackground.yearsOfExperience,
            profileYears < minYears {
             return false
         }
         
-        if let maxYears = maxYearsOfExperience,
-           let profileYears = profile.professionalBackground.yearsOfExperience,
-           profileYears > maxYears {
-            return false
-        }
-        
-        // 距离过滤（需要在实际应用中计算，这里只检查是否有location）
-        // 注意：距离计算是异步的，这里只做基本检查
-        // 实际的距离过滤应该在加载profiles时进行
-        if maxDistance != nil {
-            // 如果设置了距离限制，但profile没有location，可以考虑过滤掉
-            // 或者保留，让实际距离计算来决定
-            // 这里暂时保留，在应用filter时会进行实际距离计算
-        }
-        
+        // 距离过滤在外部单独处理
         return true
     }
 }
@@ -2091,56 +2146,8 @@ struct MatchFilterView: View {
                         // Filter Sections
                         // 重新组织：优先级高的和关联性大的放在一起
                         VStack(spacing: 20) {
-                            // ========== Networking Section (高优先级) ==========
-                            // 1. Networking Intention (单选)
-                            FilterSection(title: "Networking Intention") {
-                                SingleSelectFilter(
-                                    options: NetworkingIntentionType.allCases,
-                                    selected: $filter.networkingIntention,
-                                    displayName: { $0.displayName }
-                                )
-                            }
-                            
-                            // 2. Sub Intentions (多选) - 根据选中的Intention动态变化
-                            if let selectedIntention = filter.networkingIntention {
-                                FilterSection(title: "Sub Intentions") {
-                                    MultiSelectFilter(
-                                        options: selectedIntention.subIntentions.map { $0.rawValue },
-                                        selected: Binding(
-                                            get: { 
-                                                Set(filter.selectedSubIntentions
-                                                    .filter { subIntention in
-                                                        selectedIntention.subIntentions.contains(subIntention)
-                                                    }
-                                                    .map { $0.rawValue })
-                                            },
-                                            set: { newValues in
-                                                // 移除不在当前intention下的sub-intentions
-                                                filter.selectedSubIntentions = filter.selectedSubIntentions
-                                                    .filter { !selectedIntention.subIntentions.contains($0) }
-                                                // 添加新选择的
-                                                filter.selectedSubIntentions.formUnion(
-                                                    newValues.compactMap { SubIntentionType(rawValue: $0) }
-                                                        .filter { selectedIntention.subIntentions.contains($0) }
-                                                )
-                                            }
-                                        ),
-                                        maxSelections: 10
-                                    )
-                                }
-                            } else {
-                                // 如果没有选择Intention，显示提示
-                                FilterSection(title: "Sub Intentions") {
-                                    Text("Please select a Networking Intention first")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.gray)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.vertical, 8)
-                                }
-                            }
-                            
                             // ========== Professional Background Section (高优先级) ==========
-                            // 3. Experience Level (单选)
+                            // 1. Experience Level (单选)
                             FilterSection(title: "Experience Level") {
                                 SingleSelectFilter(
                                     options: ExperienceLevel.allCases,
@@ -2149,7 +2156,7 @@ struct MatchFilterView: View {
                                 )
                             }
                             
-                            // 4. Career Stage (单选) - 关联Experience Level
+                            // 2. Career Stage (单选) - 关联Experience Level
                             FilterSection(title: "Career Stage") {
                                 SingleSelectFilter(
                                     options: CareerStage.allCases,
@@ -2158,15 +2165,14 @@ struct MatchFilterView: View {
                                 )
                             }
                             
-                            // 5. Years of Experience Range - 关联Experience Level
+                            // 3. Years of Experience Range - 关联Experience Level
                             FilterSection(title: "Years of Experience") {
                                 ExperienceRangeFilter(
-                                    minYears: $filter.minYearsOfExperience,
-                                    maxYears: $filter.maxYearsOfExperience
+                                    minYears: $filter.minYearsOfExperience
                                 )
                             }
                             
-                            // 6. Industry (多选) - Professional相关，使用IndustryOption与Profile对齐
+                            // 4. Industry (多选) - Professional相关，使用IndustryOption与Profile对齐
                             FilterSection(title: "Industry") {
                                 MultiSelectFilter(
                                     options: IndustryOption.allCases.map { $0.rawValue },
@@ -2175,7 +2181,7 @@ struct MatchFilterView: View {
                                 )
                             }
                             
-                            // 7. Skills (多选) - 高优先级，Professional相关
+                            // 5. Skills (多选) - 高优先级，Professional相关
                             // 使用FeatureVocabularies，与推荐系统对齐
                             FilterSection(title: "Skills") {
                                 MultiSelectFilter(
@@ -2186,7 +2192,7 @@ struct MatchFilterView: View {
                             }
                             
                             // ========== Networking Preferences Section (中优先级) ==========
-                            // 8. Preferred Chat Format (单选) - Networking相关
+                            // 6. Preferred Chat Format (单选) - Networking相关
                             FilterSection(title: "Chat Format") {
                                 SingleSelectFilter(
                                     options: ChatFormat.allCases,
@@ -2195,17 +2201,25 @@ struct MatchFilterView: View {
                                 )
                             }
                             
-                            // 9. Preferred Meeting Vibe (单选) - Networking相关
-                            FilterSection(title: "Meeting Vibe") {
-                                SingleSelectFilter(
-                                    options: MeetingVibe.allCases,
-                                    selected: $filter.preferredMeetingVibe,
-                                    displayName: { $0.displayName }
+                            // 7. Meeting Vibes (多选)
+                            FilterSection(title: "Meeting Vibes") {
+                                MultiSelectFilter(
+                                    options: MeetingVibe.allCases.map { $0.displayName },
+                                    selected: Binding(
+                                        get: {
+                                            Set(filter.preferredMeetingVibes.map { $0.displayName })
+                                        },
+                                        set: { newValue in
+                                            let mapped = newValue.compactMap { MeetingVibe(rawValue: $0) }
+                                            filter.preferredMeetingVibes = Set(mapped)
+                                        }
+                                    ),
+                                    maxSelections: MeetingVibe.allCases.count
                                 )
                             }
                             
                             // ========== Personal Preferences Section (低优先级) ==========
-                            // 10. Hobbies (多选) - 使用ProfileOptions，与profile设置对齐
+                            // 8. Hobbies (多选) - 使用ProfileOptions，与profile设置对齐
                             FilterSection(title: "Hobbies") {
                                 MultiSelectFilter(
                                     options: HobbiesOptions.allHobbies,
@@ -2214,7 +2228,7 @@ struct MatchFilterView: View {
                                 )
                             }
                             
-                            // 11. Values (多选) - 使用ProfileOptions，与profile设置对齐
+                            // 9. Values (多选) - 使用ProfileOptions，与profile设置对齐
                             FilterSection(title: "Values") {
                                 MultiSelectFilter(
                                     options: ValuesOptions.allValues,
@@ -2224,13 +2238,13 @@ struct MatchFilterView: View {
                             }
                             
                             // ========== Location Section (中优先级) ==========
-                            // 12. Maximum Distance (范围)
+                            // 10. Maximum Distance (范围)
                             FilterSection(title: "Maximum Distance") {
                                 DistanceFilter(maxDistance: $filter.maxDistance)
                             }
                             
                             // ========== Verification Section (低优先级) ==========
-                            // 13. Verified Status (单选)
+                            // 11. Verified Status (单选)
                             FilterSection(title: "Verified Status") {
                                 SingleSelectFilter(
                                     options: VerifiedStatus.allCases,
@@ -2313,17 +2327,6 @@ struct MatchFilterView: View {
         }
         .onAppear {
             loadSavedFilter()
-        }
-        .onChange(of: filter.networkingIntention) { newIntention in
-            // 当改变Intention时，清除不在新Intention下的Sub Intentions
-            if let newIntention = newIntention {
-                filter.selectedSubIntentions = filter.selectedSubIntentions.filter { subIntention in
-                    newIntention.subIntentions.contains(subIntention)
-                }
-            } else {
-                // 如果清空了Intention，也清空所有Sub Intentions
-                filter.selectedSubIntentions.removeAll()
-            }
         }
     }
     
@@ -2485,96 +2488,82 @@ struct MultiSelectFilter: View {
 // MARK: - Distance Filter
 struct DistanceFilter: View {
     @Binding var maxDistance: Double?
-    @State private var distanceValue: String = ""
-    @State private var selectedPreset: DistancePreset? = nil
+    @State private var sliderValue: Double = 50
+    @State private var allowUnlimited: Bool = false
     
-    enum DistancePreset: String, CaseIterable {
-        case km5 = "5 km"
-        case km10 = "10 km"
-        case km25 = "25 km"
-        case km50 = "50 km"
-        case km100 = "100 km"
-        case unlimited = "Unlimited"
-        
-        var kilometers: Double? {
-            switch self {
-            case .km5: return 5
-            case .km10: return 10
-            case .km25: return 25
-            case .km50: return 50
-            case .km100: return 100
-            case .unlimited: return nil
-            }
-        }
-        
-        var displayName: String {
-            return self.rawValue
-        }
-    }
+    private let distanceRange: ClosedRange<Double> = 5...200
+    private let step: Double = 5
     
     var body: some View {
-        VStack(spacing: 12) {
-            // 预设选项
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                ForEach(DistancePreset.allCases, id: \.self) { preset in
-                    Button(action: {
-                        if selectedPreset == preset {
-                            selectedPreset = nil
-                            maxDistance = nil
-                            distanceValue = ""
-                        } else {
-                            selectedPreset = preset
-                            maxDistance = preset.kilometers
-                            distanceValue = preset.kilometers != nil ? String(format: "%.0f", preset.kilometers!) : ""
-                        }
-                    }) {
-                        HStack {
-                            Text(preset.displayName)
-                                .font(.system(size: 14))
-                                .foregroundColor(selectedPreset == preset ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
-                            
-                            Spacer()
-                            
-                            if selectedPreset == preset {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.white)
-                            }
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(
-                            selectedPreset == preset ?
-                            Color(red: 0.4, green: 0.2, blue: 0.1) :
-                            Color(red: 0.98, green: 0.97, blue: 0.95)
-                        )
-                        .cornerRadius(8)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                }
-            }
-            
-            // 自定义输入
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Custom Distance (km)")
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Maximum Distance")
                     .font(.system(size: 13))
                     .foregroundColor(.gray)
-                
-                TextField("Enter distance in km", text: $distanceValue)
-                    .keyboardType(.decimalPad)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(Color(red: 0.98, green: 0.97, blue: 0.95))
-                    .cornerRadius(8)
-                    .onChange(of: distanceValue) { newValue in
-                        if let distance = Double(newValue), distance > 0 {
-                            maxDistance = distance
-                            selectedPreset = nil // 清除预设选择
-                        } else if newValue.isEmpty {
-                            maxDistance = nil
-                            selectedPreset = nil
+                Spacer()
+                Text(allowUnlimited ? "Unlimited" : "\(Int(sliderValue)) km")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            }
+            
+            Slider(
+                value: Binding(
+                    get: { sliderValue },
+                    set: { newValue in
+                        sliderValue = newValue
+                        if !allowUnlimited {
+                            maxDistance = newValue
                         }
                     }
+                ),
+                in: distanceRange,
+                step: step
+            )
+            .disabled(allowUnlimited)
+            .accentColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+            .opacity(allowUnlimited ? 0.4 : 1.0)
+            
+            HStack {
+                Text("\(Int(distanceRange.lowerBound)) km")
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray)
+                Spacer()
+                Text("\(Int(distanceRange.upperBound)) km")
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray)
+            }
+            
+            Toggle(isOn: $allowUnlimited) {
+                Text("Show beyond this range if needed")
+                    .font(.system(size: 13))
+                    .foregroundColor(.gray)
+            }
+            .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
+            .onChange(of: allowUnlimited) { isOn in
+                if isOn {
+                    maxDistance = nil
+                } else {
+                    maxDistance = sliderValue
+                }
+            }
+        }
+        .onAppear {
+            if let maxDistance = maxDistance {
+                sliderValue = max(distanceRange.lowerBound, min(maxDistance, distanceRange.upperBound))
+                allowUnlimited = false
+            } else {
+                sliderValue = 50
+                allowUnlimited = true
+            }
+        }
+        .onChange(of: maxDistance) { newValue in
+            if let newValue = newValue {
+                sliderValue = max(distanceRange.lowerBound, min(newValue, distanceRange.upperBound))
+                if allowUnlimited {
+                    allowUnlimited = false
+                }
+            } else {
+                allowUnlimited = true
             }
         }
     }
@@ -2583,63 +2572,64 @@ struct DistanceFilter: View {
 // MARK: - Experience Range Filter
 struct ExperienceRangeFilter: View {
     @Binding var minYears: Double?
-    @Binding var maxYears: Double?
     
-    @State private var minValue: String = ""
-    @State private var maxValue: String = ""
+    @State private var sliderValue: Double = 0
+    
+    private let range: ClosedRange<Double> = 0...30
+    private let step: Double = 1
+    
+    private var displayLabel: String {
+        if sliderValue <= range.lowerBound { return "Any" }
+        if sliderValue >= 20 { return "20+ yrs" }
+        return "\(Int(sliderValue)) yrs"
+    }
     
     var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Min")
-                        .font(.system(size: 13))
-                        .foregroundColor(.gray)
-                    
-                    TextField("0", text: $minValue)
-                        .keyboardType(.decimalPad)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
-                        .cornerRadius(8)
-                        .onChange(of: minValue) { newValue in
-                            minYears = Double(newValue)
-                            if newValue.isEmpty {
-                                minYears = nil
-                            }
-                        }
-                }
-                
-                Text("-")
-                    .font(.system(size: 16, weight: .semibold))
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Minimum Experience")
+                    .font(.system(size: 13))
                     .foregroundColor(.gray)
-                    .padding(.top, 20)
-                
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Max")
-                        .font(.system(size: 13))
-                        .foregroundColor(.gray)
-                    
-                    TextField("20+", text: $maxValue)
-                        .keyboardType(.decimalPad)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
-                        .cornerRadius(8)
-                        .onChange(of: maxValue) { newValue in
-                            maxYears = Double(newValue)
-                            if newValue.isEmpty {
-                                maxYears = nil
-                            }
-                        }
-                }
+                Spacer()
+                Text(displayLabel)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
             }
             
-            if let min = minYears, let max = maxYears, min > max {
-                Text("Min must be less than max")
+            Slider(
+                value: Binding(
+                    get: { sliderValue },
+                    set: { newValue in
+                        sliderValue = newValue
+                        if newValue <= range.lowerBound {
+                            minYears = nil
+                        } else {
+                            minYears = newValue
+                        }
+                    }
+                ),
+                in: range,
+                step: step
+            )
+            .accentColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+            
+            HStack {
+                Text("Any")
                     .font(.system(size: 12))
-                    .foregroundColor(.red)
+                    .foregroundColor(.gray)
+                Spacer()
+                Text("20+ yrs")
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray)
             }
+        }
+        .onAppear {
+            let initialValue = minYears ?? range.lowerBound
+            sliderValue = max(range.lowerBound, min(initialValue, range.upperBound))
+        }
+        .onChange(of: minYears) { newValue in
+            let updated = newValue ?? range.lowerBound
+            sliderValue = max(range.lowerBound, min(updated, range.upperBound))
         }
     }
 }

@@ -60,6 +60,8 @@ struct WorkExperience: Identifiable, Codable, Equatable {
     var startYear: Int
     var endYear: Int? // nil if currently working
     var position: String?
+    var highlightedSkills: [String] = []
+    var responsibilities: String?
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -67,14 +69,26 @@ struct WorkExperience: Identifiable, Codable, Equatable {
         case startYear = "start_year"
         case endYear = "end_year"
         case position
+        case highlightedSkills = "highlighted_skills"
+        case responsibilities
     }
     
-    init(id: UUID = UUID(), companyName: String, startYear: Int, endYear: Int?, position: String?) {
+    init(
+        id: UUID = UUID(),
+        companyName: String,
+        startYear: Int,
+        endYear: Int?,
+        position: String?,
+        highlightedSkills: [String] = [],
+        responsibilities: String? = nil
+    ) {
         self.id = id
         self.companyName = companyName
         self.startYear = startYear
         self.endYear = endYear
         self.position = position
+        self.highlightedSkills = highlightedSkills
+        self.responsibilities = responsibilities
     }
 }
 
