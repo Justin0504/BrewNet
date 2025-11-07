@@ -1747,9 +1747,9 @@ struct TimeslotCell: View {
 // MARK: - Step 3: Networking Intention
 struct NetworkingIntentionStep: View {
     @Binding var profileData: ProfileCreationData
-    @State private var selectedIntentions: Set<NetworkingIntentionType> = [.learnGrow]
+    @State private var selectedIntentions: [NetworkingIntentionType] = [.learnGrow]
     @State private var primaryIntention: NetworkingIntentionType = .learnGrow
-    @State private var selectedSubIntentions: Set<SubIntentionType> = []
+    @State private var selectedSubIntentions: [SubIntentionType] = []
     @State private var refreshID = UUID()
     @State private var isLoadingFromData = false // 防止循环更新
     @State private var careerDirectionData: CareerDirectionData? = nil
@@ -1781,28 +1781,27 @@ struct NetworkingIntentionStep: View {
                 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 12) {
                     ForEach(NetworkingIntentionType.allCases, id: \.self) { intention in
-                        Button(action: {
-                        if selectedIntentions.contains(intention) {
-                                selectedIntentions.remove(intention)
-                            selectedSubIntentions = selectedSubIntentions.filter { sub in
-                                selectedIntentions.flatMap { $0.subIntentions }.contains(sub)
-                            }
-                            if primaryIntention == intention {
-                                primaryIntention = selectedIntentions.first ?? .learnGrow
-                            }
-                            if selectedIntentions.isEmpty {
-                                primaryIntention = .learnGrow
-                                selectedIntentions.insert(.learnGrow)
-                                selectedSubIntentions.removeAll()
-                            }
-                            } else {
-                                selectedIntentions.insert(intention)
-                            if selectedIntentions.count == 1 {
-                                primaryIntention = intention
-                            }
-                            }
-                        updateProfileData()
-                        }) {
+                Button(action: {
+                    if let index = selectedIntentions.firstIndex(of: intention) {
+                        selectedIntentions.remove(at: index)
+                        let availableSubs = Set(orderedSubIntentions())
+                        selectedSubIntentions = selectedSubIntentions.filter { availableSubs.contains($0) }
+                        if primaryIntention == intention {
+                            primaryIntention = orderedSelectedIntentions().first ?? .learnGrow
+                        }
+                        if selectedIntentions.isEmpty {
+                            primaryIntention = .learnGrow
+                            selectedIntentions = [.learnGrow]
+                            selectedSubIntentions.removeAll()
+                        }
+                    } else {
+                        selectedIntentions.append(intention)
+                        if orderedSelectedIntentions().count == 1 {
+                            primaryIntention = intention
+                        }
+                    }
+                    updateProfileData()
+                }) {
                             VStack(spacing: 8) {
                                 Text(getIntentionDescription(intention))
                                     .font(.system(size: 16, weight: .medium))
@@ -1825,15 +1824,15 @@ struct NetworkingIntentionStep: View {
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                     
-                    let availableSubIntentions = Array(Set(selectedIntentions.flatMap { $0.subIntentions }))
+                    let availableSubIntentions = orderedSubIntentions()
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 1), spacing: 8) {
                         ForEach(availableSubIntentions, id: \.self) { subIntention in
                             Button(action: {
-                                if selectedSubIntentions.contains(subIntention) {
-                                    selectedSubIntentions.remove(subIntention)
+                                if let index = selectedSubIntentions.firstIndex(of: subIntention) {
+                                    selectedSubIntentions.remove(at: index)
                                     updateProfileData()
                                 } else if selectedSubIntentions.count < 8 {
-                                    selectedSubIntentions.insert(subIntention)
+                                    selectedSubIntentions.append(subIntention)
                                     updateProfileData()
                                 }
                             }) {
@@ -1874,7 +1873,7 @@ struct NetworkingIntentionStep: View {
             // Detailed Forms based on selected sub-intentions
             if !selectedSubIntentions.isEmpty {
                 VStack(spacing: 16) {
-                    ForEach(Array(selectedSubIntentions), id: \.self) { subIntention in
+                    ForEach(orderedSelectedSubIntentions(), id: \.self) { subIntention in
                         switch subIntention {
                         case .careerDirection:
                             CareerDirectionForm(
@@ -1990,16 +1989,16 @@ struct NetworkingIntentionStep: View {
         print("   Sub-intentions: \(networkingIntention.selectedSubIntentions.map { $0.rawValue })")
         
         // 更新意图集合
-        let allIntentions = [networkingIntention.selectedIntention] + networkingIntention.additionalIntentions
-        selectedIntentions = allIntentions.isEmpty ? [.learnGrow] : Set(allIntentions)
-        primaryIntention = allIntentions.first ?? .learnGrow
+        let additionalOrdered = NetworkingIntentionType.allCases.filter { networkingIntention.additionalIntentions.contains($0) }
+        let allIntentions = [networkingIntention.selectedIntention] + additionalOrdered.filter { $0 != networkingIntention.selectedIntention }
+        selectedIntentions = allIntentions.isEmpty ? [.learnGrow] : allIntentions
+        primaryIntention = networkingIntention.selectedIntention
         
         // 然后更新 selectedSubIntentions
-        // 使用明确的赋值来确保 Set 更新并触发视图刷新
         let validSubIntentions = networkingIntention.selectedSubIntentions.filter { intent in
-            selectedIntentions.flatMap { $0.subIntentions }.contains(intent)
+            orderedSelectedIntentions().flatMap { $0.subIntentions }.contains(intent)
         }
-        let newSubIntentions = Set(validSubIntentions)
+        let newSubIntentions = orderedSubIntentions().filter { validSubIntentions.contains($0) }
         
         print("   📋 Before update:")
         print("      - Current selectedSubIntentions: \(selectedSubIntentions.map { $0.rawValue })")
@@ -2013,9 +2012,9 @@ struct NetworkingIntentionStep: View {
         
         print("   ✅ UI state updated:")
         print("      - selectedIntentions: \(selectedIntentions.map { $0.displayName })")
-        print("      - selectedSubIntentions Set count: \(selectedSubIntentions.count)")
-        print("      - selectedSubIntentions Set: \(selectedSubIntentions.map { $0.rawValue })")
-        print("      - Checking if cofounderMatch is in Set: \(selectedSubIntentions.contains(.cofounderMatch))")
+        print("      - selectedSubIntentions count: \(selectedSubIntentions.count)")
+        print("      - selectedSubIntentions: \(selectedSubIntentions.map { $0.rawValue })")
+        print("      - Checking if cofounderMatch is selected: \(selectedSubIntentions.contains(.cofounderMatch))")
         
         // 验证每个 sub-intention 是否正确加载
         for subIntention in networkingIntention.selectedSubIntentions {
@@ -2127,6 +2126,25 @@ struct NetworkingIntentionStep: View {
         updateProfileData()
     }
     
+    private func orderedSelectedIntentions() -> [NetworkingIntentionType] {
+        NetworkingIntentionType.allCases.filter { selectedIntentions.contains($0) }
+    }
+    
+    private func orderedSubIntentions() -> [SubIntentionType] {
+        var seen: Set<SubIntentionType> = []
+        return orderedSelectedIntentions().flatMap { intention in
+            intention.subIntentions.compactMap { sub in
+                guard !seen.contains(sub) else { return nil }
+                seen.insert(sub)
+                return sub
+            }
+        }
+    }
+    
+    private func orderedSelectedSubIntentions() -> [SubIntentionType] {
+        orderedSubIntentions().filter { selectedSubIntentions.contains($0) }
+    }
+    
     private func updateProfileData() {
         // 如果正在从数据加载，不要更新 profileData（避免循环）
         guard !isLoadingFromData else {
@@ -2135,17 +2153,17 @@ struct NetworkingIntentionStep: View {
         }
         
         print("📝 Updating profileData with current UI state:")
-        print("   selectedIntentions: \(selectedIntentions.map { $0.displayName })")
-        print("   selectedSubIntentions: \(selectedSubIntentions.map { $0.rawValue })")
+        print("   selectedIntentions: \(orderedSelectedIntentions().map { $0.displayName })")
+        print("   selectedSubIntentions: \(orderedSelectedSubIntentions().map { $0.rawValue })")
         
         if !selectedIntentions.contains(primaryIntention) {
-            primaryIntention = selectedIntentions.first ?? .learnGrow
+            primaryIntention = orderedSelectedIntentions().first ?? .learnGrow
         }
-        let additional = Array(selectedIntentions.filter { $0 != primaryIntention })
+        let additional = orderedSelectedIntentions().filter { $0 != primaryIntention }
         let networkingIntention = NetworkingIntention(
             selectedIntention: primaryIntention,
             additionalIntentions: additional,
-            selectedSubIntentions: Array(selectedSubIntentions),
+            selectedSubIntentions: orderedSelectedSubIntentions(),
             careerDirection: careerDirectionData,
             skillDevelopment: skillDevelopmentData,
             industryTransition: industryTransitionData

@@ -1809,6 +1809,7 @@ struct ChatInterfaceView: View {
             ),
             networkingIntention: NetworkingIntention(
                 selectedIntention: .connectShare,
+                additionalIntentions: [],
                 selectedSubIntentions: [],
                 careerDirection: nil,
                 skillDevelopment: nil,
@@ -1824,6 +1825,7 @@ struct ChatInterfaceView: View {
                 valuesTags: ["Innovation", "Collaboration"],
                 hobbies: user.interests,
                 preferredMeetingVibe: .casual,
+                preferredMeetingVibes: [.casual],
                 selfIntroduction: user.bio.isEmpty ? "Hi! I'm \(user.name). Let's connect!" : user.bio
             ),
             privacyTrust: PrivacyTrust(
