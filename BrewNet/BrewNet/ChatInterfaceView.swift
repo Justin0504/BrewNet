@@ -597,6 +597,7 @@ struct ChatInterfaceView: View {
                         } : nil
                     )
                     .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
                 }
             }
         } header: {
@@ -2225,7 +2226,10 @@ struct ChatSessionRowView: View {
     
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 12) {
+            let unreadCount = session.unreadCount
+            let shouldShowUnreadBadge = unreadCount > 0 && !session.isHidden
+            
+            HStack(alignment: .top, spacing: 12) {
                 // Avatar - 使用时间戳确保刷新
                 let timestamp = Date().timeIntervalSince1970
                 AvatarView(avatarString: session.user.avatar, size: 50)
@@ -2250,34 +2254,32 @@ struct ChatSessionRowView: View {
                     // 显示未读的最新消息（如果有），否则显示最后一条消息
                     let unreadMessages = session.messages.filter { !$0.isFromUser && !$0.isRead }
                     let displayMessage = unreadMessages.last ?? session.messages.last
-                    Text(displayMessage?.content ?? "Start chatting...")
-                        .font(.system(size: 16))
-                        .foregroundColor(unreadMessages.isEmpty ? .gray : Color(red: 0.4, green: 0.2, blue: 0.1))
-                        .fontWeight(unreadMessages.isEmpty ? .regular : .semibold)
-                        .lineLimit(1)
                     
-                    HStack(spacing: 4) {
-                        // 在线状态功能已移除
+                    HStack(alignment: .center, spacing: 8) {
+                        Text(displayMessage?.content ?? "Start chatting...")
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray)
+                            .lineLimit(1)
                         
                         Spacer()
                         
-                        // 显示未读消息数（Hidden 的会话不显示未读消息数）
-                        if !session.isHidden {
-                            let unreadCount = session.unreadCount
-                            if unreadCount > 0 {
-                                Text("\(unreadCount)")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 2)
-                                    .background(session.user.isMatched ? session.user.matchType.color : Color(red: 0.4, green: 0.2, blue: 0.1))
-                                    .cornerRadius(10)
-                            }
+                        if shouldShowUnreadBadge {
+                            Text("\(unreadCount)")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(session.user.isMatched ? session.user.matchType.color : Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .cornerRadius(10)
                         }
                     }
                 }
+                
+                Spacer(minLength: 0)
             }
             .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -3840,6 +3842,8 @@ struct AvatarView: View {
             Image(systemName: avatarString)
                 .font(.system(size: size))
                 .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                .frame(width: size, height: size)
+                .clipShape(Circle())
         }
     }
     

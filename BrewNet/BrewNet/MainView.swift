@@ -11,6 +11,10 @@ struct MainView: View {
     @State private var pendingRequestCount = 0 // 待处理的请求总数
     @State private var requestRefreshTimer: Timer? // 用于刷新请求数
     
+    init() {
+        configureTabBarBadgeAppearance()
+    }
+    
     var body: some View {
         TabView(selection: $selectedTab) {
             // Matches
@@ -230,6 +234,30 @@ struct MainView: View {
     private func stopRequestCountRefresh() {
         requestRefreshTimer?.invalidate()
         requestRefreshTimer = nil
+    }
+    
+    private func configureTabBarBadgeAppearance() {
+        let appearance = UITabBarAppearance()
+        appearance.configureWithDefaultBackground()
+        
+        let badgeColor = UIColor(red: 0.95, green: 0.26, blue: 0.29, alpha: 1.0)
+        let badgeFont = UIFont.systemFont(ofSize: 10, weight: .semibold)
+        
+        [appearance.stackedLayoutAppearance,
+         appearance.inlineLayoutAppearance,
+         appearance.compactInlineLayoutAppearance].forEach { itemAppearance in
+            itemAppearance.normal.badgeBackgroundColor = badgeColor
+            itemAppearance.selected.badgeBackgroundColor = badgeColor
+            itemAppearance.normal.badgeTextAttributes = [.font: badgeFont]
+            itemAppearance.selected.badgeTextAttributes = [.font: badgeFont]
+            itemAppearance.normal.badgePositionAdjustment = UIOffset(horizontal: 0, vertical: 5)
+            itemAppearance.selected.badgePositionAdjustment = UIOffset(horizontal: 0, vertical: 5)
+        }
+        
+        UITabBar.appearance().standardAppearance = appearance
+        if #available(iOS 15.0, *) {
+            UITabBar.appearance().scrollEdgeAppearance = appearance
+        }
     }
     
     @MainActor
