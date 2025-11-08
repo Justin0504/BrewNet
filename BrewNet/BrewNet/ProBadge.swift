@@ -18,9 +18,9 @@ struct ProBadge: View {
         
         var padding: EdgeInsets {
             switch self {
-            case .small: return EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4)
-            case .medium: return EdgeInsets(top: 3, leading: 6, bottom: 3, trailing: 6)
-            case .large: return EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
+            case .small: return EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8)
+            case .medium: return EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12)
+            case .large: return EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)
             }
         }
     }
@@ -40,12 +40,13 @@ struct ProBadge: View {
                     endPoint: .bottomTrailing
                 )
             )
-            .cornerRadius(4)
+            .cornerRadius(6)
             .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
             .overlay(
-                RoundedRectangle(cornerRadius: 4)
+                RoundedRectangle(cornerRadius: 6)
                     .stroke(Color.white.opacity(0.3), lineWidth: 1)
             )
+            .padding(.leading, 4)
     }
 }
 

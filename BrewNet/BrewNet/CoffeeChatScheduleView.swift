@@ -119,7 +119,7 @@ struct CoffeeChatScheduleView: View {
         
         // 如果没有缓存，显示 loading
         if cachedSchedules.isEmpty {
-            isLoading = true
+        isLoading = true
         }
         
         Task {

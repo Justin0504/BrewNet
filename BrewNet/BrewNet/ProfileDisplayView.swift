@@ -2828,6 +2828,10 @@ struct RedemptionSystemView: View {
         
         // 使用并行过滤提高性能
         let coffeeFilter: (Reward) -> Bool = { reward in
+            // 排除会员奖励，避免名称包含 brew 等关键词时被识别为咖啡券
+            if reward.category == .membership {
+                return false
+            }
             // 匹配 category 为 coffee 的奖励
             // 或者名称中包含 coffee、starbucks、dunkin、tim hortons、frappuccino、latte、brew 等关键词
             let nameLower = reward.name.lowercased()
