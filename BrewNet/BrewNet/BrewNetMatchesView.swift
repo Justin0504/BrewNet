@@ -38,6 +38,8 @@ struct BrewNetMatchesView: View {
     @State private var showSubscriptionPayment = false
     @State private var proUsers: Set<String> = []
     @State private var isProcessingLike = false
+    @State private var isTransitioning = false // 标记是否正在过渡
+    @State private var nextProfileOffset: CGFloat = 0 // 下一个 profile 的偏移量
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -110,7 +112,7 @@ struct BrewNetMatchesView: View {
                 // Cards Stack（确保 profiles 不为空且当前索引有效）
                 else if !profiles.isEmpty && currentIndex < profiles.count {
                     ZStack {
-                        // Next card (background)
+                        // Next card (background) - 平滑过渡
                         if currentIndex + 1 < profiles.count {
                             UserProfileCardView(
                                 profile: profiles[currentIndex + 1],
@@ -120,19 +122,26 @@ struct BrewNetMatchesView: View {
                                 isConnection: isConnection,
                                 isPro: proUsers.contains(profiles[currentIndex + 1].userId)
                             )
-                            .scaleEffect(0.95)
-                            .offset(y: 10)
+                            .scaleEffect(isTransitioning ? 1.0 : 0.95)
+                            .offset(y: isTransitioning ? 0 : 10)
+                            .offset(x: nextProfileOffset)
+                            .opacity(isTransitioning ? 1.0 : 0.8)
+                            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isTransitioning)
+                            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: nextProfileOffset)
                         }
                         
                         // Current card (foreground)
-                        UserProfileCardView(
-                            profile: profiles[currentIndex],
-                            dragOffset: $dragOffset,
-                            rotationAngle: $rotationAngle,
-                            onSwipe: handleSwipe,
-                            isConnection: isConnection,
-                            isPro: proUsers.contains(profiles[currentIndex].userId)
-                        )
+                        if !isTransitioning {
+                            UserProfileCardView(
+                                profile: profiles[currentIndex],
+                                dragOffset: $dragOffset,
+                                rotationAngle: $rotationAngle,
+                                onSwipe: handleSwipe,
+                                isConnection: isConnection,
+                                isPro: proUsers.contains(profiles[currentIndex].userId)
+                            )
+                            .opacity(1.0)
+                        }
                     }
                     .frame(height: screenHeight * 0.8)
                 } else {
@@ -587,41 +596,56 @@ struct BrewNetMatchesView: View {
             return
         }
         
-            let profile = profiles[currentIndex]
-            passedProfiles.append(profile)
-            
-        // 立即从列表中移除已拒绝的 profile，避免连续闪过
-        profiles.remove(at: currentIndex)
+        let profile = profiles[currentIndex]
+        passedProfiles.append(profile)
         
-        // 同时从缓存中移除，确保切换 tab 后不会再次显示
-        cachedProfiles.removeAll { $0.userId == profile.userId }
-        
-        // 如果移除后当前索引超出范围，调整索引
-        if currentIndex >= profiles.count && !profiles.isEmpty {
-            currentIndex = 0
-        } else if profiles.isEmpty {
-            // 如果列表为空，尝试加载更多
-            if hasMoreProfiles {
-                loadMoreProfiles()
-            }
+        // 开始平滑过渡
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            isTransitioning = true
+            nextProfileOffset = 0
         }
         
-        // 重置动画状态
-        dragOffset = .zero
-        rotationAngle = 0
-        
-        // 立即更新持久化缓存，确保切换 tab 后不会显示已拒绝的用户
-        saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
-        
-        // 记录 Pass 交互（异步，不阻塞UI）
-                Task {
-                    await recommendationService.recordPass(
-                        userId: currentUser.id,
-                        targetUserId: profile.userId
-                    )
+        // 等待过渡动画完成后再更新索引和移除 profile
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            // 从列表中移除已拒绝的 profile
+            // 注意：移除后，后面的元素会自动前移，所以当前索引会指向下一个 profile
+            profiles.remove(at: currentIndex)
+            
+            // 同时从缓存中移除，确保切换 tab 后不会再次显示
+            cachedProfiles.removeAll { $0.userId == profile.userId }
+            
+            // 如果移除后当前索引超出范围，调整索引
+            // 如果索引超出范围，应该保持在最后一个有效索引，而不是重置为 0
+            if currentIndex >= profiles.count && !profiles.isEmpty {
+                currentIndex = profiles.count - 1
+            } else if profiles.isEmpty {
+                // 如果列表为空，尝试加载更多
+                if hasMoreProfiles {
+                    loadMoreProfiles()
+                }
+            }
+            // 如果 currentIndex < profiles.count，说明索引仍然有效，不需要改变
+            // 因为移除后，原来索引 currentIndex+1 的 profile 现在在索引 currentIndex 的位置
+            
+            // 重置动画状态
+            dragOffset = .zero
+            rotationAngle = 0
+            isTransitioning = false
+            nextProfileOffset = 0
+            
+            // 立即更新持久化缓存，确保切换 tab 后不会显示已拒绝的用户
+            saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
+            
+            // 记录 Pass 交互（异步，不阻塞UI）
+            Task {
+                await recommendationService.recordPass(
+                    userId: currentUser.id,
+                    targetUserId: profile.userId
+                )
             }
             
-            print("❌ Passed profile: \(profile.coreIdentity.name)")
+            print("❌ Passed profile: \(profile.coreIdentity.name), new index: \(currentIndex), profiles count: \(profiles.count)")
+        }
     }
     
     private func likeProfile(triggeredByButton: Bool) async {
@@ -686,30 +710,70 @@ struct BrewNetMatchesView: View {
             print("✅ Invitation sent successfully: \(invitation.id)")
 
             await MainActor.run {
-                profiles.removeAll { $0.userId == profile.userId }
-                cachedProfiles.removeAll { $0.userId == profile.userId }
-                proUsers.remove(profile.userId)
-
-                if !cachedProfiles.isEmpty {
-                    saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
-                    print("✅ Updated cache after sending invitation (removed \(profile.coreIdentity.name))")
-                } else {
-                    if let currentUser = authManager.currentUser {
-                        let cacheKey = "matches_cache_\(currentUser.id)"
-                        let timeKey = "matches_cache_time_\(currentUser.id)"
-                        let sourceKey = "matches_cache_source_\(currentUser.id)"
-                        UserDefaults.standard.removeObject(forKey: cacheKey)
-                        UserDefaults.standard.removeObject(forKey: timeKey)
-                        UserDefaults.standard.removeObject(forKey: sourceKey)
-                    }
-                    isCacheFromRecommendation = false
-                    print("🗑️ Cleared local cache (empty after removing invited user)")
+                // 开始平滑过渡
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    isTransitioning = true
+                    nextProfileOffset = 0
                 }
+                
+                // 等待过渡动画完成后再更新数据
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    // 从列表中移除已邀请的 profile
+                    // 注意：移除后，后面的元素会自动前移，所以当前索引会指向下一个 profile
+                    let removedIndex = profiles.firstIndex { $0.userId == profile.userId }
+                    if let index = removedIndex {
+                        profiles.remove(at: index)
+                        // 如果移除的索引小于等于当前索引，索引会自动指向下一个（因为数组前移）
+                        // 如果移除的索引大于当前索引，当前索引不变
+                        if index < currentIndex {
+                            // 移除的元素在当前索引之前，当前索引需要减1
+                            currentIndex -= 1
+                        } else if index == currentIndex {
+                            // 移除的就是当前索引的元素，索引保持不变（因为后面的元素会前移）
+                            // currentIndex 不变，因为它现在指向原来索引 currentIndex+1 的元素
+                        }
+                        // 如果 index > currentIndex，当前索引不变
+                    }
+                    
+                    cachedProfiles.removeAll { $0.userId == profile.userId }
+                    proUsers.remove(profile.userId)
 
-                if currentIndex >= profiles.count && !profiles.isEmpty {
-                    currentIndex = 0
-                } else if profiles.isEmpty {
-                    currentIndex = 0
+                    if !cachedProfiles.isEmpty {
+                        saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
+                        print("✅ Updated cache after sending invitation (removed \(profile.coreIdentity.name))")
+                    } else {
+                        if let currentUser = authManager.currentUser {
+                            let cacheKey = "matches_cache_\(currentUser.id)"
+                            let timeKey = "matches_cache_time_\(currentUser.id)"
+                            let sourceKey = "matches_cache_source_\(currentUser.id)"
+                            UserDefaults.standard.removeObject(forKey: cacheKey)
+                            UserDefaults.standard.removeObject(forKey: timeKey)
+                            UserDefaults.standard.removeObject(forKey: sourceKey)
+                        }
+                        isCacheFromRecommendation = false
+                        print("🗑️ Cleared local cache (empty after removing invited user)")
+                    }
+
+                    // 如果移除后当前索引超出范围，调整索引
+                    if currentIndex >= profiles.count && !profiles.isEmpty {
+                        currentIndex = profiles.count - 1
+                    } else if profiles.isEmpty {
+                        currentIndex = 0
+                        if hasMoreProfiles {
+                            loadMoreProfiles()
+                        }
+                    }
+                    
+                    // 重置动画状态
+                    dragOffset = .zero
+                    rotationAngle = 0
+                    isTransitioning = false
+                    nextProfileOffset = 0
+                    
+                    // 每次移动到下一个时保存索引
+                    saveCurrentIndex()
+                    
+                    print("✅ Liked profile: \(profile.coreIdentity.name), new index: \(currentIndex), profiles count: \(profiles.count)")
                 }
             }
 
@@ -763,9 +827,8 @@ struct BrewNetMatchesView: View {
                 }
             }
 
-            await MainActor.run {
-                moveToNextProfile()
-            }
+            // 注意：不需要再调用 moveToNextProfile()，因为上面已经处理了过渡和索引更新
+            // moveToNextProfile() 会增加索引，但我们已经移除了 profile 并调整了索引
 
             Task {
                 await authManager.refreshUser()
@@ -786,16 +849,27 @@ struct BrewNetMatchesView: View {
     }
     
     private func moveToNextProfile() {
-        currentIndex += 1
-        dragOffset = .zero
-        rotationAngle = 0
+        // 开始平滑过渡
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            isTransitioning = true
+            nextProfileOffset = 0
+        }
         
-        // 每次移动到下一个时保存索引
-        saveCurrentIndex()
-        
-        // 如果已经到达最后一个，检查是否需要加载更多
-        if currentIndex >= profiles.count {
-            print("📄 Reached end of profiles, may need to load more")
+        // 等待过渡动画完成后再更新索引
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            currentIndex += 1
+            dragOffset = .zero
+            rotationAngle = 0
+            isTransitioning = false
+            nextProfileOffset = 0
+            
+            // 每次移动到下一个时保存索引
+            saveCurrentIndex()
+            
+            // 如果已经到达最后一个，检查是否需要加载更多
+            if currentIndex >= profiles.count {
+                print("📄 Reached end of profiles, may need to load more")
+            }
         }
     }
     
@@ -865,8 +939,10 @@ struct BrewNetMatchesView: View {
                 saveCachedProfilesToStorage(isFromRecommendation: true) // 标记为来自推荐系统
                 
                 // 如果当前索引超出范围，重置
-                if currentIndex >= profiles.count && !profiles.isEmpty {
-                    currentIndex = 0
+                // 只有在非过渡状态下才调整索引，避免在过渡期间重置索引
+                if !isTransitioning && currentIndex >= profiles.count && !profiles.isEmpty {
+                    currentIndex = profiles.count - 1
+                    print("⚠️ Adjusted index to \(currentIndex) after loading profiles")
                 }
                 
                 print("✅ Silently refreshed recommendations: \(brewNetProfiles.count) profiles (filtered from \(recommendations.count))")
@@ -1412,8 +1488,10 @@ struct BrewNetMatchesView: View {
                 }
                 
                 // 如果当前没有卡片显示，确保从第一条开始
-                if currentIndex >= profiles.count && !profiles.isEmpty {
-                    currentIndex = 0
+                // 只有在非过渡状态下才调整索引，避免在过渡期间重置索引
+                if !isTransitioning && currentIndex >= profiles.count && !profiles.isEmpty {
+                    currentIndex = profiles.count - 1
+                    print("⚠️ Adjusted index to \(currentIndex) after loading profiles")
                 }
             }
             

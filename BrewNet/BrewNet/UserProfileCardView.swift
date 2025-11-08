@@ -201,8 +201,11 @@ struct UserProfileCardView: View {
                     
                     // Level 3: Deep Understanding
                     level3DeepUnderstandingView
+                        // 只在最后一个元素上添加底部 padding，避免创建留白
+                        .padding(.bottom, 110)
                 }
                 .frame(maxWidth: screenWidth - 40)
+                .background(Color.white)
             }
             .frame(height: screenHeight * 0.8)
             .cornerRadius(20)
@@ -512,8 +515,6 @@ struct UserProfileCardView: View {
     // MARK: - Level 2: Matching Clues
     private var level2MatchingCluesView: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Divider()
-            
             // About Me
             if let selfIntro = profile.personalitySocial.selfIntroduction, !selfIntro.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -697,14 +698,11 @@ struct UserProfileCardView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
-        .background(Color.white)
     }
     
     // MARK: - Level 3: Deep Understanding
     private var level3DeepUnderstandingView: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Divider()
-            
             // Personal Website
             if let website = profile.coreIdentity.personalWebsite, !website.isEmpty,
                let websiteUrl = URL(string: website) {
@@ -726,8 +724,6 @@ struct UserProfileCardView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
-        .padding(.bottom, 30)
-        .background(Color.white)
     }
     
     // MARK: - Privacy Visibility Checks (strictly follows database privacy_trust.visibility_settings)
