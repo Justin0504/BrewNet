@@ -149,6 +149,9 @@ enum SuggestionStyle: String, Codable, CaseIterable {
     case playful = "playful"         // 轻松
     case thoughtful = "thoughtful"   // 深思
     case warm = "warm"               // 温暖
+    case insightful = "insightful"   // 洞察
+    case engaging = "engaging"       // 互动
+    case reflective = "reflective"   // 反思
     
     var displayName: String {
         switch self {
@@ -162,6 +165,9 @@ enum SuggestionStyle: String, Codable, CaseIterable {
         case .playful: return "Playful"
         case .thoughtful: return "Thoughtful"
         case .warm: return "Warm"
+        case .insightful: return "Insightful"
+        case .engaging: return "Engaging"
+        case .reflective: return "Reflective"
         }
     }
 }

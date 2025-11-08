@@ -135,23 +135,33 @@ class GeminiAIService: ObservableObject {
     // MARK: - Private Methods
     private func createIceBreakerPrompt(for user: ChatUser, context: String) -> String {
         return """
-        As a professional AI ice breaker assistant, please generate 5 interesting, natural, and non-awkward ice breaker topics for the following user.
-        
+        As a professional AI networking assistant, generate 5 natural, engaging, and non-awkward ice breaker questions or comments for the following user in a professional networking context.
+
         User Information:
+
         - Name: \(user.name)
+
         - Profession: \(user.bio)
+
         - Interests: \(user.interests.joined(separator: ", "))
-        
+
         Context: \(context.isEmpty ? "First time chatting" : context)
-        
+
         Requirements:
-        1. Topics should be natural, interesting, and easy to respond to
-        2. Avoid overly personal or sensitive topics
-        3. Can combine user's profession and interests
-        4. Language should be friendly and relaxed
-        5. Each topic should be expressed in English, 20-50 words long
-        
-        Please return 5 topics directly, one per line, without numbering or other formatting.
+
+        1. Focus on light professional conversation — topics like career paths, work culture, industry trends, recent projects, or professional growth.
+
+        2. Avoid overly personal, casual, or sensitive topics (e.g., family, lifestyle, politics).
+
+        3. Combine the user's profession and interests when relevant.
+
+        4. Keep the tone friendly, curious, and conversational — like a relaxed chat at a networking event or LinkedIn message.
+
+        5. Each ice breaker should be 1–2 short sentences (15–40 words), in natural English.
+
+        6. Return exactly 5 topics directly, one per line, without numbering or additional formatting.
+
+        Goal: Help two professionals start a comfortable, authentic conversation that feels relevant to their careers.
         """
     }
     
@@ -258,59 +268,53 @@ class GeminiAIService: ObservableObject {
         let conversationContext = otherUserMessages.suffix(3).map { $0.content }.joined(separator: " | ")
         
         return """
-        You are an expert conversation assistant. Analyze the conversation history below and generate exactly 10 diverse reply suggestions that are DIRECTLY relevant to the other person's questions and responses.
+        You are an AI networking assistant helping professionals maintain engaging, career-focused conversations. 
+        Analyze the conversation below and generate exactly 10 diverse and contextually relevant replies that move the dialogue forward naturally.
         
         User Information:
+        
         - Name: \(user.name)
+        
         - Profession: \(user.bio)
+        
         - Interests: \(user.interests.joined(separator: ", "))
         
         My Interests: \(userInterests.joined(separator: ", "))
         
         Full Conversation History:
+        
         \(conversationHistory.isEmpty ? "No previous messages" : conversationHistory)
         
         Recent Context (Last 3 messages from \(user.name)):
+        
         \(conversationContext.isEmpty ? "No recent context" : conversationContext)
         
         Last Message from \(user.name): \(lastOtherMessage)
         
         CRITICAL REQUIREMENTS:
-        1. **Strictly target the other person's questions and responses** - Each reply must directly address what they said or asked
-        2. **Generate exactly 10 replies** in different styles:
-           - 2 humorous (witty, light-hearted, with appropriate humor)
-           - 2 serious (professional, thoughtful, in-depth)
-           - 2 caring (empathetic, supportive, considerate)
-           - 1 professional (business-like, formal when appropriate)
-           - 1 friendly (warm, approachable, casual)
-           - 1 curious (asking follow-up questions, showing genuine interest)
-           - 1 supportive (encouraging, validating their perspective)
         
-        3. **Each reply must:**
-           - Directly respond to or build upon what the other person said
-           - Be contextually relevant to the conversation flow
-           - Show you've read and understood their messages
-           - Be appropriate for the conversation stage (early/middle/deep)
-           - Be natural and conversational (15-60 words)
+        1. Focus strictly on what the other person said — every reply must directly respond or build upon their comments or questions.  
+        2. Maintain a friendly yet professional tone — suitable for workplace or networking chat (like a LinkedIn message).  
+        3. Generate exactly 10 replies covering these balanced styles:
+           - 2 insightful (share perspectives or add value)
+           - 2 curious (ask thoughtful follow-ups)
+           - 2 supportive (encouraging, validating, appreciative)
+           - 2 engaging (light and conversational, build rapport)
+           - 1 professional (structured, clear, career-focused)
+           - 1 reflective (thoughtful and empathetic)
+        4. Each reply should:
+           - Fit naturally in ongoing conversation flow
+           - Be specific and grounded in context (not generic)
+           - Invite further discussion when appropriate
+           - Sound human and conversational (15–60 words)
+        5. Output format:
+           Return exactly 10 lines, each line formatted as: [STYLE]: [REPLY TEXT]
+           Example:
+           curious: That's really interesting — what inspired you to take that approach?
+           insightful: It’s fascinating how that trend reflects broader shifts in the industry.
+           supportive: Sounds like you handled that challenge really well. How did it turn out in the end?
         
-        4. **Reply types can include:**
-           - Direct answers to their questions
-           - Follow-up questions about what they mentioned
-           - Shared experiences or opinions related to their topic
-           - Supportive responses to their concerns or achievements
-           - Transitioning to related topics they might find interesting
-        
-        5. **Output format:**
-           Return exactly 10 lines, each line in the format: [STYLE]: [REPLY TEXT]
-           Example format:
-           humorous: That sounds fascinating! I'd love to hear more about your experience with that.
-           serious: Based on what you've shared, I think it's important to consider...
-           caring: I can understand how that must have felt. How are you handling it now?
-        
-        Styles to use: humorous, serious, caring, professional, friendly, curious, supportive, playful, thoughtful, warm
-        Distribute the 10 replies across these styles as specified above.
-        
-        IMPORTANT: Every reply must be directly connected to what the other person said in the conversation. Do not generate generic replies.
+        Goal: Help maintain a professional, natural, and engaging conversation that strengthens networking connections.
         """
     }
     
