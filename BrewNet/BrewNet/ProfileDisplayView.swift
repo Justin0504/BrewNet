@@ -1959,6 +1959,7 @@ struct UserProfileCardSheetView: View {
     let isConnection: Bool // Whether the current user is connected to this profile
     
     @Environment(\.dismiss) var dismiss
+    @State private var selectedWorkExperience: WorkExperience?
     
     // Verify privacy settings are loaded from database
     private var privacySettings: VisibilitySettings {
@@ -2011,6 +2012,13 @@ struct UserProfileCardSheetView: View {
                     }
                 }
             }
+        }
+        .sheet(item: $selectedWorkExperience) { workExp in
+            WorkExperienceDetailSheet(
+                workExperience: workExp,
+                allSkills: Array(profile.professionalBackground.skills.prefix(8)),
+                industry: profile.professionalBackground.industry
+            )
         }
     }
     
@@ -2310,7 +2318,13 @@ struct UserProfileCardSheetView: View {
                     }
                     
                     ForEach(profile.professionalBackground.workExperiences.prefix(3), id: \.id) { workExp in
-                        WorkExperienceRowView(workExp: workExp)
+                        Button {
+                            selectedWorkExperience = workExp
+                        } label: {
+                            WorkExperienceRowView(workExp: workExp)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
                     
                     if let yearsOfExp = profile.professionalBackground.yearsOfExperience {
