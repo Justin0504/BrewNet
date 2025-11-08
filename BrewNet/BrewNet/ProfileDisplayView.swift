@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import UIKit
+import Supabase
 
 // MARK: - Local Cache Manager
 class LocalCacheManager {
@@ -206,6 +207,7 @@ struct ProfileDisplayView: View {
     @State private var showingPointsSystem = false
     @State private var showingRedemptionSystem = false
     @State private var showingCoffeeChatSchedule = false
+    @State private var showingBoostPurchase = false
     
     // 头像同步定时器
     @State private var avatarSyncTimer: Timer?
@@ -246,9 +248,8 @@ struct ProfileDisplayView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(Color.white)
+                        .background(Color.clear)
                         .cornerRadius(12)
-                        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
                     }
                     
                     // Points System Button
@@ -265,9 +266,8 @@ struct ProfileDisplayView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(Color.white)
+                        .background(Color.clear)
                         .cornerRadius(12)
-                        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
                     }
                     
                     // Redemption System Button
@@ -284,9 +284,8 @@ struct ProfileDisplayView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(Color.white)
+                        .background(Color.clear)
                         .cornerRadius(12)
-                        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -298,6 +297,13 @@ struct ProfileDisplayView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
+                    
+                    // Boost Card
+                    BoostCard {
+                        showingBoostPurchase = true
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
                 }
             }
             .padding(.bottom, 20)
@@ -354,6 +360,13 @@ struct ProfileDisplayView: View {
             CoffeeChatScheduleView()
                 .environmentObject(authManager)
                 .environmentObject(supabaseService)
+        }
+        .sheet(isPresented: $showingBoostPurchase) {
+            BoostPurchaseView()
+                .environmentObject(authManager)
+                .environmentObject(supabaseService)
+                .presentationDetents([.height(600)])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingRedemptionSystem) {
             RedemptionSystemView()
@@ -745,12 +758,8 @@ struct ProfileHeaderView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color.white)
+        .background(Color.clear)
         .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-        )
     }
     
     var body: some View {
@@ -1032,6 +1041,359 @@ struct ProUpgradeCard: View {
         .onTapGesture {
             action()
         }
+    }
+}
+
+// MARK: - Boost Card (条状设计)
+struct BoostCard: View {
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                // 左侧圆形图标
+                ZStack {
+                    Circle()
+                        .fill(Color(red: 0.4, green: 0.5, blue: 0.5))
+                        .frame(width: 56, height: 56)
+                    
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundColor(.white)
+                    
+                    // 小圆圈显示数量（可选）
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 20, height: 20)
+                        .overlay(
+                            Text("0")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(Color(red: 0.4, green: 0.5, blue: 0.5))
+                        )
+                        .offset(x: 18, y: -18)
+                }
+                
+                // 中间文本
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Boost")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.primary)
+                    
+                    Text("Get seen by 11X more people")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                }
+                
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color.white)
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// MARK: - Boost Purchase View
+struct BoostPurchaseView: View {
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    @State private var selectedBoostIndex: Int = 0
+    @State private var isProcessing = false
+    @State private var showError = false
+    @State private var errorMessage = ""
+    
+    let boostOptions = [
+        BoostOption(
+            title: "Superboost",
+            duration: "24 hours",
+            price: "$29.99",
+            multiplier: "33x",
+            description: "Get noticed by 33x more people. Maximize your profile's visibility around the clock.",
+            isSuperboost: true
+        ),
+        BoostOption(
+            title: "5 Boosts",
+            duration: "each",
+            price: "$7.99",
+            totalPrice: "$39.99",
+            multiplier: "11x",
+            description: "Elevate your profile 11x more with one-hour boosts. Use each one at any time.",
+            savePercentage: "20%"
+        ),
+        BoostOption(
+            title: "3 Boosts",
+            duration: "each",
+            price: "$8.99",
+            totalPrice: "$26.99",
+            multiplier: "11x",
+            description: "Stand out 11x more with one-hour boosts. Use each one at any time.",
+            savePercentage: "10%"
+        ),
+        BoostOption(
+            title: "1 Boost",
+            duration: nil,
+            price: "$9.99",
+            multiplier: "11x",
+            description: "Show your profile to 11x more people for one hour.",
+            savePercentage: nil
+        )
+    ]
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            Text("Boost your profile for\nmore views")
+                .font(.system(size: 24, weight: .bold))
+                .foregroundColor(.primary)
+                .multilineTextAlignment(.center)
+                .padding(.top, 16)
+                .padding(.bottom, 4)
+            
+            // Boost Options Carousel
+            TabView(selection: $selectedBoostIndex) {
+                ForEach(0..<boostOptions.count, id: \.self) { index in
+                    BoostOptionCard(option: boostOptions[index])
+                        .tag(index)
+                        .padding(.horizontal, 28)
+                        .padding(.top, 12)
+                }
+            }
+            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .always))
+            .frame(height: 320)
+            .indexViewStyle(PageIndexViewStyle(backgroundDisplayMode: .always))
+            
+            Spacer()
+                .frame(height: 8)
+            
+            // Purchase Buttons
+            VStack(spacing: 12) {
+                Button(action: {
+                    handlePurchase(option: boostOptions[selectedBoostIndex])
+                }) {
+                    HStack {
+                        if isProcessing {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        } else {
+                            if let totalPrice = boostOptions[selectedBoostIndex].totalPrice {
+                                Text("Get \(boostOptions[selectedBoostIndex].title.lowercased()) for \(totalPrice)")
+                            } else if boostOptions[selectedBoostIndex].isSuperboost {
+                                Text("Superboost for \(boostOptions[selectedBoostIndex].price)")
+                            } else {
+                                Text("Get \(boostOptions[selectedBoostIndex].title.lowercased()) for \(boostOptions[selectedBoostIndex].price)")
+                            }
+                        }
+                    }
+                }
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 56)
+                .background(
+                    Color(red: 0.4, green: 0.5, blue: 0.5)
+                )
+                .cornerRadius(28)
+                .disabled(isProcessing)
+                
+                Button(action: {
+                    // Handle App Store purchase
+                }) {
+                    Text("Purchase with App Store")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(Color.white)
+                        .cornerRadius(28)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 28)
+                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                        )
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+        .ignoresSafeArea(edges: .bottom)
+        .alert("Purchase Status", isPresented: $showError) {
+            Button("OK", role: .cancel) {
+                if !errorMessage.contains("Failed") {
+                    dismiss()
+                }
+            }
+        } message: {
+            Text(errorMessage)
+        }
+    }
+    
+    private func handlePurchase(option: BoostOption) {
+        guard let userId = authManager.currentUser?.id else {
+            errorMessage = "User not authenticated"
+            showError = true
+            return
+        }
+        
+        isProcessing = true
+        
+        Task {
+            do {
+                // Determine how many boosts to add
+                var boostCount = 0
+                var superboostCount = 0
+                
+                if option.isSuperboost {
+                    superboostCount = 1
+                } else if option.title.contains("5") {
+                    boostCount = 5
+                } else if option.title.contains("3") {
+                    boostCount = 3
+                } else if option.title.contains("1") {
+                    boostCount = 1
+                }
+                
+                // Fetch current counts
+                struct BoostData: Codable {
+                    let boost_count: Int?
+                    let superboost_count: Int?
+                }
+                
+                let currentData: BoostData = try await SupabaseConfig.shared.client
+                    .from("users")
+                    .select("boost_count, superboost_count")
+                    .eq("id", value: userId)
+                    .single()
+                    .execute()
+                    .value
+                
+                let currentBoostCount = currentData.boost_count ?? 0
+                let currentSuperboostCount = currentData.superboost_count ?? 0
+                
+                // Create update struct
+                struct BoostCountUpdate: Encodable {
+                    let boost_count: Int
+                    let superboost_count: Int
+                }
+                
+                let updateData = BoostCountUpdate(
+                    boost_count: currentBoostCount + boostCount,
+                    superboost_count: currentSuperboostCount + superboostCount
+                )
+                
+                // Update counts
+                try await SupabaseConfig.shared.client
+                    .from("users")
+                    .update(updateData)
+                    .eq("id", value: userId)
+                    .execute()
+                
+                await MainActor.run {
+                    isProcessing = false
+                    if option.isSuperboost {
+                        errorMessage = "Successfully purchased 1 Superboost!"
+                    } else {
+                        errorMessage = "Successfully purchased \(option.title)!"
+                    }
+                    showError = true
+                }
+            } catch {
+                await MainActor.run {
+                    isProcessing = false
+                    errorMessage = "Failed to complete purchase: \(error.localizedDescription)"
+                    showError = true
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Boost Option Model
+struct BoostOption {
+    let title: String
+    let duration: String?
+    let price: String
+    var totalPrice: String? = nil
+    let multiplier: String
+    let description: String
+    var savePercentage: String? = nil
+    var isSuperboost: Bool = false
+}
+
+// MARK: - Boost Option Card
+struct BoostOptionCard: View {
+    let option: BoostOption
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Save Badge (if applicable)
+            if let savePercentage = option.savePercentage {
+                Text("Save \(savePercentage)")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .background(Color(red: 0.4, green: 0.5, blue: 0.5))
+                    .cornerRadius(12)
+                    .padding(.top, 2)
+                    .zIndex(1)
+            }
+            
+            VStack(spacing: 8) {
+                // Icon
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 36, weight: .semibold))
+                    .foregroundColor(Color(red: 0.4, green: 0.5, blue: 0.5))
+                    .padding(.top, option.savePercentage != nil ? 2 : 8)
+                
+                // Title
+                Text(option.title)
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundColor(.primary)
+                
+                // Price
+                if let duration = option.duration {
+                    if option.isSuperboost {
+                        Text("\(option.price) for \(duration)")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("\(option.price) \(duration)")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    }
+                } else {
+                    Text(option.price)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+                
+                // Description
+                Text(option.description)
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(nil)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 2)
+            }
+            .padding(.bottom, 16)
+            .padding(.horizontal, 12)
+        }
+        .background(Color.white)
+        .cornerRadius(20)
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(Color(red: 0.4, green: 0.5, blue: 0.5), lineWidth: 2)
+        )
     }
 }
 
@@ -2107,7 +2469,7 @@ struct UserProfileCardSheetView: View {
             NetworkingIntentionBadgeView(intention: profile.networkingIntention.selectedIntention)
         }
         .padding(20)
-        .background(Color.white)
+        .background(Color.clear)
     }
     
     private var profileImageView: some View {
@@ -2263,7 +2625,7 @@ struct UserProfileCardSheetView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
-        .background(Color.white)
+        .background(Color.clear)
     }
     
     // MARK: - Level 3: Deep Understanding
@@ -2369,7 +2731,7 @@ struct UserProfileCardSheetView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
         .padding(.bottom, 30)
-        .background(Color.white)
+        .background(Color.clear)
     }
     
     // MARK: - Privacy Visibility Checks (strictly follows database privacy_trust.visibility_settings)

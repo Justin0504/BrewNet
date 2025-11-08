@@ -115,7 +115,8 @@ struct ProfessionalBackground: Codable {
     let jobTitle: String?
     let industry: String?
     let experienceLevel: ExperienceLevel
-    let education: String?
+    let education: String? // 旧字段，保留以向后兼容
+    let educations: [Education]? // 新字段，存储详细的教育信息
     let yearsOfExperience: Double?
     let careerStage: CareerStage
     let skills: [String]
@@ -129,6 +130,7 @@ struct ProfessionalBackground: Codable {
         case industry
         case experienceLevel = "experience_level"
         case education
+        case educations
         case yearsOfExperience = "years_of_experience"
         case careerStage = "career_stage"
         case skills
@@ -820,6 +822,7 @@ extension BrewNetProfile {
                 industry: nil,
                 experienceLevel: .entry,
                 education: nil,
+                educations: nil,
                 yearsOfExperience: nil,
                 careerStage: .earlyCareer,
                 skills: [],

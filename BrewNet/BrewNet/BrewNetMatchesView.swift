@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreLocation
+import Supabase
 
 // MARK: - BrewNet Matches View (New implementation with BrewNetProfile)
 struct BrewNetMatchesView: View {
@@ -1626,6 +1627,7 @@ struct BrewNetMatchesView: View {
                 industry: "Technology (Software, Data, AI, IT)",
                 experienceLevel: .senior,
                 education: "Stanford University · M.S. in Human-Computer Interaction",
+                educations: nil,
                 yearsOfExperience: 8.5,
                 careerStage: .manager,
                 skills: ["Product Strategy", "User Research", "UX Design", "Data Analysis", "Agile"],
@@ -1714,6 +1716,7 @@ struct BrewNetMatchesView: View {
                 industry: "Technology (Software, Data, AI, IT)",
                 experienceLevel: .mid,
                 education: "MIT · B.S. in Computer Science",
+                educations: nil,
                 yearsOfExperience: 5.0,
                 careerStage: .midLevel,
                 skills: ["iOS Development", "Swift", "React Native", "Backend"],
@@ -2800,40 +2803,300 @@ struct ExperienceRangeFilter: View {
 
 // MARK: - Increase Exposure View
 struct IncreaseExposureView: View {
-    @Environment(\.presentationMode) var presentationMode
+    @Environment(\.dismiss) var dismiss
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var supabaseService: SupabaseService
     
+    @State private var boostCount: Int = 0
+    @State private var superboostCount: Int = 0
+    @State private var isLoading = false
+    @State private var showError = false
+    @State private var errorMessage = ""
+    
     var body: some View {
-        NavigationView {
-            VStack(spacing: 20) {
-                Image(systemName: "star.fill")
-                    .font(.system(size: 60))
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                    .padding(.top, 40)
-                
+        VStack(spacing: 0) {
+            // Header
+            VStack(spacing: 8) {
                 Text("Increase Exposure")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundColor(.primary)
+                    .padding(.top, 20)
                 
                 Text("Boost your profile visibility")
                     .font(.system(size: 16))
-                    .foregroundColor(.gray)
+                    .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
-                
-                Spacer()
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+            .padding(.bottom, 24)
+            
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Superboost Card
+                    ExposureBoostCard(
+                        title: "Superboost",
+                        icon: "star.fill",
+                        iconColor: Color(red: 1.0, green: 0.84, blue: 0.0),
+                        duration: "24 hours",
+                        multiplier: "100x",
+                        description: "Be the top profile in your area for 24 hours",
+                        availableCount: superboostCount,
+                        isLoading: isLoading,
+                        action: {
+                            useSuperboost()
+                        }
+                    )
+                    
+                    // Regular Boost Card
+                    ExposureBoostCard(
+                        title: "Boost",
+                        icon: "bolt.fill",
+                        iconColor: Color(red: 0.4, green: 0.5, blue: 0.5),
+                        duration: "1 hour",
+                        multiplier: "11x",
+                        description: "Show your profile to 11x more people",
+                        availableCount: boostCount,
+                        isLoading: isLoading,
+                        action: {
+                            useBoost()
+                        }
+                    )
+                    
+                    // Info text
+                    Text("Use your boosts anytime to increase visibility")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                        .padding(.top, 8)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+            }
+        }
+        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+        .onAppear {
+            loadBoostCounts()
+        }
+        .alert("Error", isPresented: $showError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage)
+        }
+    }
+    
+    private func loadBoostCounts() {
+        guard let userId = authManager.currentUser?.id else { return }
+        
+        Task {
+            do {
+                struct BoostData: Codable {
+                    let boost_count: Int?
+                    let superboost_count: Int?
+                }
+                
+                let response: BoostData = try await SupabaseConfig.shared.client
+                    .from("users")
+                    .select("boost_count, superboost_count")
+                    .eq("id", value: userId)
+                    .single()
+                    .execute()
+                    .value
+                
+                await MainActor.run {
+                    boostCount = response.boost_count ?? 0
+                    superboostCount = response.superboost_count ?? 0
+                }
+            } catch {
+                print("Error loading boost counts: \(error)")
+            }
+        }
+    }
+    
+    private func useBoost() {
+        guard let userId = authManager.currentUser?.id else { return }
+        guard boostCount > 0 else {
+            errorMessage = "You don't have any boosts available. Purchase more from your profile."
+            showError = true
+            return
+        }
+        
+        isLoading = true
+        
+        Task {
+            do {
+                // Calculate expiry time (1 hour from now)
+                let expiryTime = Date().addingTimeInterval(3600) // 1 hour
+                
+                // Create update struct
+                struct BoostUpdate: Encodable {
+                    let boost_count: Int
+                    let active_boost_expiry: String
+                    let boost_last_used: String
+                }
+                
+                let updateData = BoostUpdate(
+                    boost_count: boostCount - 1,
+                    active_boost_expiry: expiryTime.ISO8601Format(),
+                    boost_last_used: Date().ISO8601Format()
+                )
+                
+                // Update database
+                try await SupabaseConfig.shared.client
+                    .from("users")
+                    .update(updateData)
+                    .eq("id", value: userId)
+                    .execute()
+                
+                await MainActor.run {
+                    isLoading = false
+                    boostCount -= 1
+                    
+                    // Show success message
+                    errorMessage = "Boost activated! Your profile will be shown to 11x more people for 1 hour."
+                    showError = true
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = "Failed to activate boost: \(error.localizedDescription)"
+                    showError = true
                 }
             }
         }
+    }
+    
+    private func useSuperboost() {
+        guard let userId = authManager.currentUser?.id else { return }
+        guard superboostCount > 0 else {
+            errorMessage = "You don't have any superboosts available. Purchase more from your profile."
+            showError = true
+            return
+        }
+        
+        isLoading = true
+        
+        Task {
+            do {
+                // Calculate expiry time (24 hours from now)
+                let expiryTime = Date().addingTimeInterval(86400) // 24 hours
+                
+                // Create update struct
+                struct SuperboostUpdate: Encodable {
+                    let superboost_count: Int
+                    let active_superboost_expiry: String
+                    let superboost_last_used: String
+                }
+                
+                let updateData = SuperboostUpdate(
+                    superboost_count: superboostCount - 1,
+                    active_superboost_expiry: expiryTime.ISO8601Format(),
+                    superboost_last_used: Date().ISO8601Format()
+                )
+                
+                // Update database
+                try await SupabaseConfig.shared.client
+                    .from("users")
+                    .update(updateData)
+                    .eq("id", value: userId)
+                    .execute()
+                
+                await MainActor.run {
+                    isLoading = false
+                    superboostCount -= 1
+                    
+                    // Show success message
+                    errorMessage = "Superboost activated! You'll be the top profile in your area for 24 hours."
+                    showError = true
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = "Failed to activate superboost: \(error.localizedDescription)"
+                    showError = true
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Exposure Boost Card
+struct ExposureBoostCard: View {
+    let title: String
+    let icon: String
+    let iconColor: Color
+    let duration: String
+    let multiplier: String
+    let description: String
+    let availableCount: Int
+    let isLoading: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack(alignment: .top, spacing: 16) {
+                // Icon
+                ZStack {
+                    Circle()
+                        .fill(iconColor.opacity(0.15))
+                        .frame(width: 64, height: 64)
+                    
+                    Image(systemName: icon)
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundColor(iconColor)
+                }
+                
+                // Info
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(title)
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundColor(.primary)
+                        
+                        Spacer()
+                        
+                        // Count badge
+                        Text("\(availableCount)")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(minWidth: 32, minHeight: 32)
+                            .background(iconColor)
+                            .clipShape(Circle())
+                    }
+                    
+                    Text("\(multiplier) visibility for \(duration)")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(iconColor)
+                    
+                    Text(description)
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            
+            // Use button
+            Button(action: action) {
+                HStack {
+                    if isLoading {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    } else {
+                        Text(availableCount > 0 ? "Use \(title)" : "No \(title)s Available")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(availableCount > 0 ? iconColor : Color.gray)
+                .cornerRadius(25)
+            }
+            .disabled(isLoading || availableCount == 0)
+        }
+        .padding(20)
+        .background(Color.white)
+        .cornerRadius(20)
+        .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 2)
     }
 }
 
