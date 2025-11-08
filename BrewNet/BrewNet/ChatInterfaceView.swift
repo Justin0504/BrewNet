@@ -597,6 +597,7 @@ struct ChatInterfaceView: View {
                         } : nil
                     )
                     .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
                 }
             }
         } header: {
@@ -2257,8 +2258,7 @@ struct ChatSessionRowView: View {
                     HStack(alignment: .center, spacing: 8) {
                         Text(displayMessage?.content ?? "Start chatting...")
                             .font(.system(size: 16))
-                            .foregroundColor(unreadMessages.isEmpty ? .gray : Color(red: 0.4, green: 0.2, blue: 0.1))
-                            .fontWeight(unreadMessages.isEmpty ? .regular : .semibold)
+                            .foregroundColor(.gray)
                             .lineLimit(1)
                         
                         Spacer()
@@ -3842,6 +3842,8 @@ struct AvatarView: View {
             Image(systemName: avatarString)
                 .font(.system(size: size))
                 .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                .frame(width: size, height: size)
+                .clipShape(Circle())
         }
     }
     
