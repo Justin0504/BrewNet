@@ -1508,6 +1508,7 @@ struct ProfessionalBackgroundStep: View {
                 skills = professionalBackground.skills
                 certifications = professionalBackground.certifications
                 languages = professionalBackground.languagesSpoken
+                educations = professionalBackground.educations ?? []
                 workExperiences = professionalBackground.workExperiences
             }
         }
@@ -1542,6 +1543,7 @@ struct ProfessionalBackgroundStep: View {
             industry: selectedIndustry?.rawValue,
             experienceLevel: experienceLevel,
             education: education.isEmpty ? nil : education,
+            educations: educations.isEmpty ? nil : educations,
             yearsOfExperience: Double(yearsOfExperience),
             careerStage: careerStage,
             skills: skills,

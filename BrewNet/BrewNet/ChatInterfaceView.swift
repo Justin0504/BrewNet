@@ -37,10 +37,25 @@ struct ChatInterfaceView: View {
     
     var body: some View {
         mainContent
-            .navigationTitle(selectedSession == nil ? "Chat" : "")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if selectedSession == nil {
+                    // Custom logo and title
+                    ToolbarItem(placement: .principal) {
+                        HStack(spacing: 8) {
+                            Image("Logo")
+                                .resizable()
+                                .renderingMode(.original)
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 32, height: 32)
+                            
+                            Text("BrewNet")
+                                .font(.system(size: 20, weight: .heavy, design: .rounded))
+                                .foregroundColor(Color(red: 0.55, green: 0.35, blue: 0.18))
+                        }
+                    }
+                    
                     toolbarContent
                 } else {
                     ToolbarItem(placement: .navigationBarTrailing) {
@@ -521,7 +536,7 @@ struct ChatInterfaceView: View {
     }
     
     private var chatListView: some View {
-        VStack {
+        VStack(spacing: 0) {
             if isLoadingMatches && chatSessions.isEmpty {
                 // 只有在首次加载且没有聊天时才显示加载动画
                 ProgressView()
@@ -565,8 +580,10 @@ struct ChatInterfaceView: View {
                 }
                 .scrollContentBackground(.hidden)
                 .listStyle(.plain)
+                .environment(\.defaultMinListHeaderHeight, 0)
             }
         }
+        .padding(.top, -20)
     }
     
     // MARK: - 分类章节视图
@@ -1800,6 +1817,7 @@ struct ChatInterfaceView: View {
                 industry: user.interests.first ?? "Technology",
                 experienceLevel: .mid,
                 education: nil,
+                educations: nil,
                 yearsOfExperience: 3.0,
                 careerStage: .midLevel,
                 skills: user.interests,
