@@ -25,6 +25,8 @@ struct CategoryRecommendationsView: View {
     @State private var selectedProfileForChat: BrewNetProfile?
     @State private var proUsers: Set<String> = []
     @State private var showSubscriptionPayment = false
+    @State private var isTransitioning = false // 标记是否正在过渡
+    @State private var nextProfileOffset: CGFloat = 0 // 下一个 profile 的偏移量
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -54,7 +56,7 @@ struct CategoryRecommendationsView: View {
                 // Cards Stack
                 else if currentIndex < profiles.count {
                     ZStack {
-                        // Next card (background)
+                        // Next card (background) - 平滑过渡
                         if currentIndex + 1 < profiles.count {
                             UserProfileCardView(
                                 profile: profiles[currentIndex + 1],
@@ -64,19 +66,26 @@ struct CategoryRecommendationsView: View {
                                 isConnection: isConnection,
                                 isPro: proUsers.contains(profiles[currentIndex + 1].userId)
                             )
-                            .scaleEffect(0.95)
-                            .offset(y: 10)
+                            .scaleEffect(isTransitioning ? 1.0 : 0.95)
+                            .offset(y: isTransitioning ? 0 : 10)
+                            .offset(x: nextProfileOffset)
+                            .opacity(isTransitioning ? 1.0 : 0.8)
+                            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isTransitioning)
+                            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: nextProfileOffset)
                         }
                         
                         // Current card (foreground)
-                        UserProfileCardView(
-                            profile: profiles[currentIndex],
-                            dragOffset: $dragOffset,
-                            rotationAngle: $rotationAngle,
-                            onSwipe: handleSwipe,
-                            isConnection: isConnection,
-                            isPro: proUsers.contains(profiles[currentIndex].userId)
-                        )
+                        if !isTransitioning {
+                            UserProfileCardView(
+                                profile: profiles[currentIndex],
+                                dragOffset: $dragOffset,
+                                rotationAngle: $rotationAngle,
+                                onSwipe: handleSwipe,
+                                isConnection: isConnection,
+                                isPro: proUsers.contains(profiles[currentIndex].userId)
+                            )
+                            .opacity(1.0)
+                        }
                     }
                     .frame(height: screenHeight * 0.8)
                     .padding(.top, 50) // Add top padding to avoid status bar overlap
@@ -252,7 +261,7 @@ struct CategoryRecommendationsView: View {
             }
             .disabled(currentIndex >= profiles.count)
             
-            // Temporary Chat button (新增)
+            // Temporary Chat button (与 match 板块对齐)
             Button(action: {
                 openTemporaryChat()
             }) {
@@ -262,14 +271,14 @@ struct CategoryRecommendationsView: View {
                         .frame(width: 60, height: 60)
                         .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 3)
                     
-                    Image(systemName: "message.fill")
+                    Image(systemName: "envelope.fill")
                         .font(.system(size: 24, weight: .bold))
                         .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                 }
             }
             .disabled(currentIndex >= profiles.count)
             
-            // Like button
+            // Like button (与 match 板块对齐)
             Button(action: {
                 swipeRight()
             }) {
@@ -279,9 +288,9 @@ struct CategoryRecommendationsView: View {
                         .frame(width: 60, height: 60)
                         .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
                     
-                    Image(systemName: "heart.fill")
+                    Image(systemName: "cup.and.saucer.fill")
                         .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(.red)
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 }
             }
             .disabled(currentIndex >= profiles.count)
@@ -394,33 +403,48 @@ struct CategoryRecommendationsView: View {
             return
         }
         
-            let profile = profiles[currentIndex]
-            passedProfiles.append(profile)
+        let profile = profiles[currentIndex]
+        passedProfiles.append(profile)
         
-        // 立即从列表中移除已拒绝的 profile，避免连续闪过
-        profiles.remove(at: currentIndex)
-        
-        // 如果移除后当前索引超出范围，调整索引
-        if currentIndex >= profiles.count && !profiles.isEmpty {
-            currentIndex = 0
-        } else if profiles.isEmpty {
-            // 如果列表为空，加载更多
-            loadMoreProfiles()
+        // 开始平滑过渡
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            isTransitioning = true
+            nextProfileOffset = 0
         }
         
-        // 重置动画状态
-        dragOffset = .zero
-        rotationAngle = 0
-        
-        // 记录 Pass 交互（异步，不阻塞UI）
-        Task {
-            await recommendationService.recordPass(
-                userId: currentUser.id,
-                targetUserId: profile.userId
-            )
+        // 等待过渡动画完成后再更新索引和移除 profile
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            // 从列表中移除已拒绝的 profile
+            // 注意：移除后，后面的元素会自动前移，所以当前索引会指向下一个 profile
+            profiles.remove(at: currentIndex)
+            
+            // 如果移除后当前索引超出范围，调整索引
+            // 如果索引超出范围，应该保持在最后一个有效索引，而不是重置为 0
+            if currentIndex >= profiles.count && !profiles.isEmpty {
+                currentIndex = profiles.count - 1
+            } else if profiles.isEmpty {
+                // 如果列表为空，加载更多
+                loadMoreProfiles()
+            }
+            // 如果 currentIndex < profiles.count，说明索引仍然有效，不需要改变
+            // 因为移除后，原来索引 currentIndex+1 的 profile 现在在索引 currentIndex 的位置
+            
+            // 重置动画状态
+            dragOffset = .zero
+            rotationAngle = 0
+            isTransitioning = false
+            nextProfileOffset = 0
+            
+            // 记录 Pass 交互（异步，不阻塞UI）
+            Task {
+                await recommendationService.recordPass(
+                    userId: currentUser.id,
+                    targetUserId: profile.userId
+                )
+            }
+            
+            print("❌ Passed profile: \(profile.coreIdentity.name), new index: \(currentIndex), profiles count: \(profiles.count)")
         }
-        
-        print("❌ Passed profile: \(profile.coreIdentity.name)")
     }
     
     private func likeProfile() {
@@ -498,13 +522,78 @@ struct CategoryRecommendationsView: View {
                 }
                 
                 await MainActor.run {
-                    moveToNextProfile()
+                    // 开始平滑过渡
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                        isTransitioning = true
+                        nextProfileOffset = 0
+                    }
+                    
+                    // 等待过渡动画完成后再更新数据
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        // 从列表中移除已邀请的 profile
+                        // 注意：移除后，后面的元素会自动前移，所以当前索引会指向下一个 profile
+                        let removedIndex = profiles.firstIndex { $0.userId == profile.userId }
+                        if let index = removedIndex {
+                            profiles.remove(at: index)
+                            // 如果移除的索引小于当前索引，当前索引需要减1
+                            if index < currentIndex {
+                                currentIndex -= 1
+                            } else if index == currentIndex {
+                                // 移除的就是当前索引的元素，索引保持不变（因为后面的元素会前移）
+                                // currentIndex 不变，因为它现在指向原来索引 currentIndex+1 的元素
+                            }
+                            // 如果 index > currentIndex，当前索引不变
+                        }
+                        
+                        // 如果移除后当前索引超出范围，调整索引
+                        if currentIndex >= profiles.count && !profiles.isEmpty {
+                            currentIndex = profiles.count - 1
+                        } else if profiles.isEmpty {
+                            // 如果列表为空，加载更多
+                            loadMoreProfiles()
+                        }
+                        
+                        // 重置动画状态
+                        dragOffset = .zero
+                        rotationAngle = 0
+                        isTransitioning = false
+                        nextProfileOffset = 0
+                        
+                        print("✅ Liked profile: \(profile.coreIdentity.name), new index: \(currentIndex), profiles count: \(profiles.count)")
+                    }
                 }
                 
             } catch {
                 print("❌ Failed to send invitation: \(error.localizedDescription)")
                 await MainActor.run {
-                    moveToNextProfile()
+                    // 即使失败也要平滑过渡到下一个
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                        isTransitioning = true
+                        nextProfileOffset = 0
+                    }
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        let removedIndex = profiles.firstIndex { $0.userId == profile.userId }
+                        if let index = removedIndex {
+                            profiles.remove(at: index)
+                            if index < currentIndex {
+                                currentIndex -= 1
+                            } else if index == currentIndex {
+                                // 索引保持不变
+                            }
+                        }
+                        
+                        if currentIndex >= profiles.count && !profiles.isEmpty {
+                            currentIndex = profiles.count - 1
+                        } else if profiles.isEmpty {
+                            loadMoreProfiles()
+                        }
+                        
+                        dragOffset = .zero
+                        rotationAngle = 0
+                        isTransitioning = false
+                        nextProfileOffset = 0
+                    }
                 }
             }
         }
@@ -517,19 +606,30 @@ struct CategoryRecommendationsView: View {
             return
         }
         
-        currentIndex += 1
-        
-        // 如果超出范围，尝试加载更多或重置
-        if currentIndex >= profiles.count {
-            if hasMoreProfiles {
-                loadMoreProfiles()
-            } else {
-                currentIndex = profiles.count - 1 // 保持在最后一个
-            }
+        // 开始平滑过渡
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            isTransitioning = true
+            nextProfileOffset = 0
         }
         
-        dragOffset = .zero
-        rotationAngle = 0
+        // 等待过渡动画完成后再更新索引
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            currentIndex += 1
+            
+            // 如果超出范围，尝试加载更多或重置
+            if currentIndex >= profiles.count {
+                if hasMoreProfiles {
+                    loadMoreProfiles()
+                } else {
+                    currentIndex = profiles.count - 1 // 保持在最后一个
+                }
+            }
+            
+            dragOffset = .zero
+            rotationAngle = 0
+            isTransitioning = false
+            nextProfileOffset = 0
+        }
     }
     
     // MARK: - Computed Properties
@@ -638,9 +738,11 @@ struct CategoryRecommendationsView: View {
                     hasMoreProfiles = !filteredProfiles.isEmpty
                 }
                 
-                // If current index is beyond profiles count, reset to 0
-                if currentIndex >= profiles.count && !profiles.isEmpty {
-                    currentIndex = 0
+                // If current index is beyond profiles count, adjust to last valid index
+                // 注意：只有在非过渡状态下才调整索引，避免在过渡期间重置索引
+                if !isTransitioning && currentIndex >= profiles.count && !profiles.isEmpty {
+                    currentIndex = profiles.count - 1
+                    print("⚠️ Adjusted index to \(currentIndex) after loading more profiles")
                 }
             }
             

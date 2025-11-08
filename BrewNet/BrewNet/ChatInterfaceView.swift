@@ -69,6 +69,10 @@ struct ChatInterfaceView: View {
                 startMessageRefreshTimer()
                 // 确保初始状态正确
                 updateTabBarVisibility()
+                // 加载当前用户的 profile，确保头像能正确显示
+                Task {
+                    await loadCurrentUserProfile()
+                }
             }
             .onDisappear {
             stopMessageRefreshTimer()
@@ -114,6 +118,24 @@ struct ChatInterfaceView: View {
             scrollToBottomId = nil
             // 更新 TabBar 可见性
             updateTabBarVisibility()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ProfileUpdated"))) { _ in
+            // 当 profile 更新时，重新加载所有用户的 profile 并更新头像
+            print("🔄 [头像更新] 收到 ProfileUpdated 通知，开始刷新头像")
+            Task {
+                await refreshAllUserProfiles()
+                await MainActor.run {
+                    updateChatSessionsWithAvatars()
+                    // 强制刷新当前选中的会话，确保头像更新
+                    if let currentSession = selectedSession {
+                        selectedSession = nil
+                        // 延迟一帧后重新选择，确保头像刷新
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            selectedSession = chatSessions.first(where: { $0.id == currentSession.id })
+                        }
+                    }
+                }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToChat"))) { notification in
             // 当收到导航到 Chat 的通知时，刷新匹配列表并自动选择匹配的用户
@@ -580,6 +602,7 @@ struct ChatInterfaceView: View {
                 }
                 .scrollContentBackground(.hidden)
                 .listStyle(.plain)
+                .padding(.top, -20)
                 .environment(\.defaultMinListHeaderHeight, 0)
             }
         }
@@ -600,6 +623,10 @@ struct ChatInterfaceView: View {
                 ForEach(sessions) { session in
                     ChatSessionRowView(
                         session: session,
+                        getCurrentAvatar: { user in
+                            getCurrentAvatarForUser(user)
+                        },
+                        avatarVersion: session.user.userId.flatMap { avatarRefreshVersions[$0] } ?? 0,
                         onTap: {
                             selectSession(session)
                         },
@@ -614,6 +641,7 @@ struct ChatInterfaceView: View {
                         } : nil
                     )
                     .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
                 }
             }
         } header: {
@@ -635,6 +663,7 @@ struct ChatInterfaceView: View {
                         .foregroundColor(.gray)
                 }
                 .padding(.vertical, 4)
+                .padding(.top, -8)
             }
             .buttonStyle(PlainButtonStyle())
         }
@@ -982,22 +1011,7 @@ struct ChatInterfaceView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(
-            ZStack {
-                // 主背景
-                Color.white
-                
-                // 顶部渐变边框效果
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.98, green: 0.97, blue: 0.95).opacity(0.5),
-                        Color.white
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
-        )
+        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
         .shadow(color: Color(red: 0.4, green: 0.3, blue: 0.2).opacity(0.08), radius: 8, x: 0, y: 2)
         .overlay(
             // 底部细线
@@ -1164,6 +1178,83 @@ struct ChatInterfaceView: View {
             }
         }
         chatSessions = updatedSessions
+    }
+    
+    /// 刷新所有用户的 profile（当 profile 更新时调用）
+    @MainActor
+    private func refreshAllUserProfiles() async {
+        guard let currentUser = authManager.currentUser else {
+            print("⚠️ [头像更新] 当前用户为空，无法刷新 profile")
+            return
+        }
+        
+        print("🔄 [头像更新] 开始刷新所有用户的 profile")
+        
+        // 收集所有需要刷新的用户 ID（包括当前用户和所有聊天对象）
+        var userIdsToRefresh: Set<String> = [currentUser.id]
+        
+        // 添加所有聊天对象的 userId
+        for session in chatSessions {
+            if let userId = session.user.userId {
+                userIdsToRefresh.insert(userId)
+            }
+        }
+        
+        // 并发获取所有用户的 profile
+        var updatedProfileMap: [String: BrewNetProfile] = [:]
+        
+        await withTaskGroup(of: (String, BrewNetProfile?).self) { group in
+            for userId in userIdsToRefresh {
+                group.addTask {
+                    if let supabaseProfile = try? await supabaseService.getProfile(userId: userId) {
+                        return (userId, supabaseProfile.toBrewNetProfile())
+                    }
+                    return (userId, nil)
+                }
+            }
+            
+            for await (userId, profile) in group {
+                if let profile = profile {
+                    updatedProfileMap[userId] = profile
+                    print("✅ [头像更新] 已刷新用户 \(userId) 的 profile")
+                }
+            }
+        }
+        
+        // 更新 profile map
+        userIdToFullProfileMap.merge(updatedProfileMap) { (_, new) in new }
+        
+        // 清除所有用户的头像缓存，强制刷新
+        for (userId, profile) in updatedProfileMap {
+            if let avatarURL = profile.coreIdentity.profileImage,
+               !avatarURL.isEmpty,
+               avatarURL.hasPrefix("http://") || avatarURL.hasPrefix("https://") {
+                ImageCacheManager.shared.removeImage(for: avatarURL)
+                // 增加刷新版本号
+                avatarRefreshVersions[userId] = (avatarRefreshVersions[userId] ?? 0) + 1
+                print("🔄 [头像更新] 已清除用户 \(userId) 的头像缓存，版本: \(avatarRefreshVersions[userId] ?? 0)")
+            }
+        }
+        
+        print("✅ [头像更新] 完成刷新，共更新 \(updatedProfileMap.count) 个用户的 profile")
+    }
+    
+    /// 加载当前用户的 profile（用于显示最新头像）
+    @MainActor
+    private func loadCurrentUserProfile() async {
+        guard let currentUser = authManager.currentUser else {
+            return
+        }
+        
+        do {
+            if let supabaseProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                let brewNetProfile = supabaseProfile.toBrewNetProfile()
+                userIdToFullProfileMap[currentUser.id] = brewNetProfile
+                print("✅ [头像更新] 已加载当前用户的 profile，头像: \(brewNetProfile.coreIdentity.profileImage ?? "nil")")
+            }
+        } catch {
+            print("⚠️ [头像更新] 加载当前用户 profile 失败: \(error.localizedDescription)")
+        }
     }
     
     private func loadChatSessions() {
@@ -1336,8 +1427,14 @@ struct ChatInterfaceView: View {
             }
             
             // 并发获取所有需要的 profile（包括名字、头像、兴趣、bio）
-            if !userIdsToFetch.isEmpty {
-                let profileTasks = userIdsToFetch.map { userId -> Task<BrewNetProfile?, Never> in
+            // 同时也要加载当前用户的 profile，以便显示最新头像
+            var allUserIdsToFetch = userIdsToFetch
+            if !allUserIdsToFetch.contains(currentUser.id) {
+                allUserIdsToFetch.append(currentUser.id)
+            }
+            
+            if !allUserIdsToFetch.isEmpty {
+                let profileTasks = allUserIdsToFetch.map { userId -> Task<BrewNetProfile?, Never> in
                     Task {
                         if let supabaseProfile = try? await supabaseService.getProfile(userId: userId) {
                             return supabaseProfile.toBrewNetProfile()
@@ -1349,7 +1446,7 @@ struct ChatInterfaceView: View {
                 // 等待所有 profile 加载完成
                 var userIdToProfile: [String: BrewNetProfile] = [:]
                 for (index, task) in profileTasks.enumerated() {
-                    let userId = userIdsToFetch[index]
+                    let userId = allUserIdsToFetch[index]
                     if let profile = await task.value {
                         userIdToProfile[userId] = profile
                     }
@@ -1364,8 +1461,8 @@ struct ChatInterfaceView: View {
                     }
                 }
                 
-                // 保存完整 profile 映射
-                userIdToFullProfileMap = userIdToProfile
+                // 保存完整 profile 映射（包括当前用户）
+                userIdToFullProfileMap.merge(userIdToProfile) { (_, new) in new }
             }
             
             // 第二步：并发加载在线状态和消息（加速加载）
@@ -2235,6 +2332,8 @@ struct ChatInterfaceView: View {
 // MARK: - Chat Session Row View
 struct ChatSessionRowView: View {
     let session: ChatSession
+    let getCurrentAvatar: (ChatUser) -> String // 获取最新头像的函数
+    let avatarVersion: Int // 头像刷新版本号
     let onTap: () -> Void
     let onUnmatch: () -> Void
     let onHide: (() -> Void)? // 可选的 Hide 操作
@@ -2243,11 +2342,15 @@ struct ChatSessionRowView: View {
     
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 12) {
-                // Avatar - 使用时间戳确保刷新
-                let timestamp = Date().timeIntervalSince1970
-                AvatarView(avatarString: session.user.avatar, size: 50)
-                    .id("avatar-\(session.user.id)-\(session.user.avatar)-\(Int(timestamp / 10))") // 每10秒刷新一次
+            // 计算变量
+            let currentAvatar = getCurrentAvatar(session.user)
+            let unreadCount = session.unreadCount
+            let shouldShowUnreadBadge = unreadCount > 0 && !session.isHidden
+            
+            HStack(alignment: .top, spacing: 12) {
+                // Avatar - 使用最新头像和版本号确保刷新
+                AvatarView(avatarString: currentAvatar, size: 50)
+                    .id("avatar-\(session.user.id)-\(currentAvatar)-v\(avatarVersion)") // 使用版本号强制刷新
                 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -2268,34 +2371,32 @@ struct ChatSessionRowView: View {
                     // 显示未读的最新消息（如果有），否则显示最后一条消息
                     let unreadMessages = session.messages.filter { !$0.isFromUser && !$0.isRead }
                     let displayMessage = unreadMessages.last ?? session.messages.last
-                    Text(displayMessage?.content ?? "Start chatting...")
-                        .font(.system(size: 16))
-                        .foregroundColor(unreadMessages.isEmpty ? .gray : Color(red: 0.4, green: 0.2, blue: 0.1))
-                        .fontWeight(unreadMessages.isEmpty ? .regular : .semibold)
-                        .lineLimit(1)
                     
-                    HStack(spacing: 4) {
-                        // 在线状态功能已移除
+                    HStack(alignment: .center, spacing: 8) {
+                        Text(displayMessage?.content ?? "Start chatting...")
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray)
+                            .lineLimit(1)
                         
                         Spacer()
                         
-                        // 显示未读消息数（Hidden 的会话不显示未读消息数）
-                        if !session.isHidden {
-                            let unreadCount = session.unreadCount
-                            if unreadCount > 0 {
-                                Text("\(unreadCount)")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 2)
-                                    .background(session.user.isMatched ? session.user.matchType.color : Color(red: 0.4, green: 0.2, blue: 0.1))
-                                    .cornerRadius(10)
-                            }
+                        if shouldShowUnreadBadge {
+                            Text("\(unreadCount)")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(session.user.isMatched ? session.user.matchType.color : Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .cornerRadius(10)
                         }
                     }
                 }
+                
+                Spacer(minLength: 0)
             }
             .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -3858,6 +3959,8 @@ struct AvatarView: View {
             Image(systemName: avatarString)
                 .font(.system(size: size))
                 .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                .frame(width: size, height: size)
+                .clipShape(Circle())
         }
     }
     

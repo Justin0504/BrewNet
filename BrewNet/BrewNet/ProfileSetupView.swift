@@ -469,12 +469,13 @@ struct ProfileSetupView: View {
                 
                 await MainActor.run {
                     isLoading = false
-                    showAlert(message: "Progress saved successfully!")
                     
                     // 发送通知刷新 profile 数据
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        NotificationCenter.default.post(name: NSNotification.Name("ProfileUpdated"), object: nil)
-                    }
+                    NotificationCenter.default.post(name: NSNotification.Name("ProfileUpdated"), object: nil)
+                    
+                    // 直接关闭 edit profile 界面，不显示 Notice
+                    print("✅ Profile saved successfully, closing edit profile view...")
+                    dismiss()
                 }
                 
             } catch {
