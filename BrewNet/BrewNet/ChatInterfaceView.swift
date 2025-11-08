@@ -2274,8 +2274,12 @@ struct ChatSessionRowView: View {
                         }
                     }
                 }
+                
+                Spacer(minLength: 0)
             }
             .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
