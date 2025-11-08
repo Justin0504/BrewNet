@@ -90,8 +90,23 @@ struct ProfileView: View {
                 }
             }
         }
-        .navigationTitle("Profile")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 8) {
+                    Image("Logo")
+                        .resizable()
+                        .renderingMode(.original)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 32, height: 32)
+                    
+                    Text("BrewNet")
+                        .font(.system(size: 20, weight: .heavy, design: .rounded))
+                        .foregroundColor(Color(red: 0.55, green: 0.35, blue: 0.18))
+                }
+            }
+        }
         .onAppear {
             // 只在首次加载时显示加载动画
             if userProfile == nil {

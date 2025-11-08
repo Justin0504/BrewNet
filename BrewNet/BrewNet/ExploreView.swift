@@ -31,21 +31,36 @@ struct ExploreMainView: View {
                 Color(red: 0.98, green: 0.97, blue: 0.95)
                     .ignoresSafeArea()
                 
-                if isLoadingProfile {
-                    // Loading state
-                    VStack {
+                VStack(spacing: 0) {
+                    // Custom Top Bar
+                    HStack {
                         Spacer()
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
-                            .scaleEffect(1.2)
-                        Text("Loading...")
-                            .font(.system(size: 16))
-                            .foregroundColor(.gray)
-                            .padding(.top, 16)
+                        
+                        Text("Explore")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        
                         Spacer()
                     }
-                } else {
-                    ScrollView {
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+                    .background(Color.white)
+                    
+                    if isLoadingProfile {
+                        // Loading state
+                        VStack {
+                            Spacer()
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.6, green: 0.4, blue: 0.2)))
+                                .scaleEffect(1.2)
+                            Text("Loading...")
+                                .font(.system(size: 16))
+                                .foregroundColor(.gray)
+                                .padding(.top, 16)
+                            Spacer()
+                        }
+                    } else {
+                        ScrollView {
                         VStack(spacing: 24) {
                             // Category Cards
                             let sortedCategories = getSortedCategories()
@@ -102,11 +117,11 @@ struct ExploreMainView: View {
                             }
                             .padding(.bottom, 40)
                         }
+                        }
                     }
                 }
             }
-            .navigationTitle("Explore")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarHidden(true)
         }
         .onAppear {
             loadUserProfile()
