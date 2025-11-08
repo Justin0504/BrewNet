@@ -230,7 +230,7 @@ struct ProfileDisplayView: View {
                     }
                 )
                 .padding(.horizontal, 16)
-                .padding(.top, 20)
+                .padding(.top, 8)
                 
                 // Coffee Chat Schedule, Points System and Redemption System Buttons
                 HStack(spacing: 12) {
