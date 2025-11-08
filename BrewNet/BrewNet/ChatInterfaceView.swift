@@ -2342,19 +2342,15 @@ struct ChatSessionRowView: View {
     
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 12) {
-                // Avatar - 使用最新头像和版本号确保刷新
-                let currentAvatar = getCurrentAvatar(session.user)
-                AvatarView(avatarString: currentAvatar, size: 50)
-                    .id("avatar-\(session.user.id)-\(currentAvatar)-v\(avatarVersion)") // 使用版本号强制刷新
+            // 计算变量
+            let currentAvatar = getCurrentAvatar(session.user)
             let unreadCount = session.unreadCount
             let shouldShowUnreadBadge = unreadCount > 0 && !session.isHidden
             
             HStack(alignment: .top, spacing: 12) {
-                // Avatar - 使用时间戳确保刷新
-                let timestamp = Date().timeIntervalSince1970
-                AvatarView(avatarString: session.user.avatar, size: 50)
-                    .id("avatar-\(session.user.id)-\(session.user.avatar)-\(Int(timestamp / 10))") // 每10秒刷新一次
+                // Avatar - 使用最新头像和版本号确保刷新
+                AvatarView(avatarString: currentAvatar, size: 50)
+                    .id("avatar-\(session.user.id)-\(currentAvatar)-v\(avatarVersion)") // 使用版本号强制刷新
                 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
