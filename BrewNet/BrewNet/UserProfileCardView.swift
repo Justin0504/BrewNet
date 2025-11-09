@@ -7,6 +7,7 @@ struct DistanceDisplayView: View {
     @StateObject private var locationService = LocationService.shared
     @State private var distance: Double?
     @State private var isLoading = false
+    @State private var debounceTask: DispatchWorkItem? // ⭐ 防抖动任务
     
     var body: some View {
         Group {
@@ -94,7 +95,10 @@ struct DistanceDisplayView: View {
     }
     
     private func calculateDistance() {
-        print("🔍 [DistanceDisplay] 开始计算距离...")
+        // ⭐ 取消之前的防抖动任务
+        debounceTask?.cancel()
+        
+        print("🔍 [DistanceDisplay] 开始计算距离（使用防抖动）...")
         print("   - 对方地址: \(otherUserLocation ?? "nil")")
         print("   - 当前用户地址: \(currentUserLocation ?? "nil")")
         
@@ -117,35 +121,42 @@ struct DistanceDisplayView: View {
             return
         }
         
-        print("📍 [DistanceDisplay] 开始地理编码和计算距离...")
-        print("   - 调用 locationService.calculateDistanceBetweenAddresses")
-        print("   - address1 (当前用户): '\(currentLocation)'")
-        print("   - address2 (对方): '\(otherLocation)'")
-        
-        isLoading = true
-        distance = nil // 清除之前的值
-        
-        locationService.calculateDistanceBetweenAddresses(
-            address1: currentLocation,
-            address2: otherLocation
-        ) { calculatedDistance in
-            print("🔔 [DistanceDisplay] 收到距离计算回调")
-            print("   - calculatedDistance: \(calculatedDistance != nil ? "\(calculatedDistance!) km" : "nil")")
+        // ⭐ 创建新的防抖动任务，延迟 0.3 秒执行
+        let task = DispatchWorkItem { [self] in
+            print("📍 [DistanceDisplay] 防抖动延迟后执行地理编码...")
+            print("   - 调用 locationService.calculateDistanceBetweenAddresses")
+            print("   - address1 (当前用户): '\(currentLocation)'")
+            print("   - address2 (对方): '\(otherLocation)'")
             
-            DispatchQueue.main.async {
-                print("🔄 [DistanceDisplay] 在主线程更新 UI")
-                self.isLoading = false
-                if let distance = calculatedDistance {
-                    self.distance = distance
-                    print("✅ [DistanceDisplay] ✅✅✅ 距离计算成功: \(self.locationService.formatDistance(distance)) ✅✅✅")
-                    print("   - distance 状态变量已设置为: \(self.distance != nil ? "\(self.distance!)" : "nil")")
-                } else {
-                    self.distance = nil
-                    print("⚠️ [DistanceDisplay] ⚠️⚠️⚠️ 距离计算失败 ⚠️⚠️⚠️")
-                    print("   - 可能原因：地理编码失败、网络问题或地址格式不正确")
+            isLoading = true
+            distance = nil // 清除之前的值
+            
+            locationService.calculateDistanceBetweenAddresses(
+                address1: currentLocation,
+                address2: otherLocation
+            ) { calculatedDistance in
+                print("🔔 [DistanceDisplay] 收到距离计算回调")
+                print("   - calculatedDistance: \(calculatedDistance != nil ? "\(calculatedDistance!) km" : "nil")")
+                
+                DispatchQueue.main.async {
+                    print("🔄 [DistanceDisplay] 在主线程更新 UI")
+                    isLoading = false
+                    if let distance = calculatedDistance {
+                        self.distance = distance
+                        print("✅ [DistanceDisplay] ✅✅✅ 距离计算成功: \(locationService.formatDistance(distance)) ✅✅✅")
+                        print("   - distance 状态变量已设置为: \(self.distance != nil ? "\(self.distance!)" : "nil")")
+                    } else {
+                        self.distance = nil
+                        print("⚠️ [DistanceDisplay] ⚠️⚠️⚠️ 距离计算失败 ⚠️⚠️⚠️")
+                        print("   - 可能原因：地理编码失败、网络问题或地址格式不正确")
+                    }
                 }
             }
         }
+        
+        debounceTask = task
+        // ⭐ 延迟 0.3 秒执行，如果在这期间又有新的调用，旧任务会被取消
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: task)
     }
 }
 

@@ -19,6 +19,10 @@ class LocationService: NSObject, ObservableObject {
     private var geocodeCache: [String: CLLocation] = [:]
     private let cacheQueue = DispatchQueue(label: "com.brewnet.geocodeCache")
     
+    // ⭐ 新增：跟踪正在进行的地理编码请求，避免重复请求
+    private var pendingRequests: [String: [(CLLocation?) -> Void]] = [:]
+    private let requestsQueue = DispatchQueue(label: "com.brewnet.pendingRequests")
+    
     override init() {
         super.init()
         locationManager.delegate = self
@@ -166,42 +170,76 @@ class LocationService: NSObject, ObservableObject {
             return
         }
         
-        // 检查缓存
+        // 1. 检查缓存
+        var cachedLocation: CLLocation?
         cacheQueue.sync {
-            if let cachedLocation = geocodeCache[address] {
-                print("✅ [缓存] 使用缓存的坐标: \(address)")
-                DispatchQueue.main.async {
-                    completion(cachedLocation)
-                }
-                return
+            cachedLocation = geocodeCache[address]
+        }
+        
+        if let cached = cachedLocation {
+            print("✅ [缓存] 使用缓存的坐标: \(address)")
+            DispatchQueue.main.async {
+                completion(cached)
+            }
+            return
+        }
+        
+        // 2. ⭐ 检查是否已有相同地址的请求正在进行
+        var shouldStartNewRequest = false
+        requestsQueue.sync {
+            if var callbacks = pendingRequests[address] {
+                // 已有请求在进行，添加到回调列表
+                callbacks.append(completion)
+                pendingRequests[address] = callbacks
+                print("⏳ [请求去重] 地址 '\(address)' 已有请求在进行，加入等待队列")
+            } else {
+                // 没有进行中的请求，创建新请求
+                pendingRequests[address] = [completion]
+                shouldStartNewRequest = true
+                print("🌍 [地理编码] 开始新请求: '\(address)'")
             }
         }
         
-        // 进行地理编码
-        print("🌍 [地理编码] 编码地址: '\(address)'")
+        // 如果不需要发起新请求（已有请求在进行），直接返回
+        guard shouldStartNewRequest else { return }
+        
+        // 3. 进行地理编码
         geocoder.geocodeAddressString(address) { [weak self] placemarks, error in
+            guard let self = self else { return }
+            
+            // 获取所有等待这个地址结果的回调
+            var callbacks: [(CLLocation?) -> Void] = []
+            self.requestsQueue.sync {
+                callbacks = self.pendingRequests[address] ?? []
+                self.pendingRequests.removeValue(forKey: address)
+            }
+            
             DispatchQueue.main.async {
+                let location: CLLocation?
+                
                 if let error = error {
                     print("⚠️ [地理编码] 编码失败: \(error.localizedDescription)")
-                    completion(nil)
-                    return
-                }
-                
-                guard let placemark = placemarks?.first,
-                      let location = placemark.location else {
+                    location = nil
+                } else if let placemark = placemarks?.first, let placeLocation = placemark.location {
+                    location = placeLocation
+                    
+                    // 存入缓存
+                    self.cacheQueue.async {
+                        self.geocodeCache[address] = placeLocation
+                        print("💾 [缓存] 已缓存地址: \(address)")
+                    }
+                    
+                    print("✅ [地理编码] 编码成功: \(address) -> (\(placeLocation.coordinate.latitude), \(placeLocation.coordinate.longitude))")
+                } else {
                     print("⚠️ [地理编码] 无位置结果: \(address)")
-                    completion(nil)
-                    return
+                    location = nil
                 }
                 
-                // 存入缓存
-                self?.cacheQueue.async {
-                    self?.geocodeCache[address] = location
-                    print("💾 [缓存] 已缓存地址: \(address)")
+                // ⭐ 通知所有等待的回调
+                print("📢 [请求去重] 通知 \(callbacks.count) 个等待的回调")
+                for callback in callbacks {
+                    callback(location)
                 }
-                
-                print("✅ [地理编码] 编码成功: (\(location.coordinate.latitude), \(location.coordinate.longitude))")
-                completion(location)
             }
         }
     }
