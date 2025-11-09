@@ -85,11 +85,19 @@ struct DistanceDisplayView: View {
         }
         .onChange(of: otherUserLocation) { newValue in
             print("🔄 [DistanceDisplay] otherUserLocation 变化: \(newValue ?? "nil")")
-            calculateDistance()
+            // ⭐ 使用 DispatchQueue.main.async 确保状态完全更新后再计算
+            DispatchQueue.main.async {
+                calculateDistance()
+            }
         }
         .onChange(of: currentUserLocation) { newValue in
             print("🔄 [DistanceDisplay] currentUserLocation 变化: \(newValue ?? "nil")")
-            calculateDistance()
+            print("   - [调试] 当前 self.currentUserLocation: \(self.currentUserLocation ?? "nil")")
+            // ⭐ 使用 DispatchQueue.main.async 确保状态完全更新后再计算
+            DispatchQueue.main.async {
+                print("   - [调试] async 后 self.currentUserLocation: \(self.currentUserLocation ?? "nil")")
+                calculateDistance()
+            }
         }
     }
     
@@ -158,8 +166,9 @@ struct DistanceDisplayView: View {
         }
         
         debounceTask = task
-        // ⭐ 延迟 0.3 秒执行，如果在这期间又有新的调用，旧任务会被取消
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: task)
+        // ⭐ 延迟 0.05 秒执行，足够快响应用户操作，同时避免极短时间内的重复请求
+        // LocationService 内部已有请求去重机制，可以安全地使用较短延迟
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: task)
     }
     
     @ViewBuilder
