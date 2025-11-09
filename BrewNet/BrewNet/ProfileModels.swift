@@ -23,8 +23,9 @@ struct BrewNetProfile: Codable, Identifiable {
     // MARK: - 5. Personality & Social Layer
     let personalitySocial: PersonalitySocial
     
-    // MARK: - 6. Moments
-    let moments: Moments?
+    // MARK: - 6. Work Photos & Lifestyle Photos
+    let workPhotos: PhotoCollection?
+    let lifestylePhotos: PhotoCollection?
     
     // MARK: - 7. Privacy & Trust Controls
     let privacyTrust: PrivacyTrust
@@ -39,7 +40,8 @@ struct BrewNetProfile: Codable, Identifiable {
         case networkingIntention = "networking_intention"
         case networkingPreferences = "networking_preferences"
         case personalitySocial = "personality_social"
-        case moments
+        case workPhotos = "work_photos"
+        case lifestylePhotos = "lifestyle_photos"
         case privacyTrust = "privacy_trust"
     }
 }
@@ -304,20 +306,20 @@ struct PersonalitySocial: Codable {
     }
 }
 
-// MARK: - 6. Moments
-struct Moments: Codable, Equatable {
-    var moments: [Moment]
+// MARK: - 6. Photo Collection (Work Photos & Lifestyle Photos)
+struct PhotoCollection: Codable, Equatable {
+    var photos: [Photo]
     
     enum CodingKeys: String, CodingKey {
-        case moments
+        case photos
     }
     
-    init(moments: [Moment] = []) {
-        self.moments = moments
+    init(photos: [Photo] = []) {
+        self.photos = photos
     }
 }
 
-struct Moment: Codable, Equatable, Identifiable {
+struct Photo: Codable, Equatable, Identifiable {
     let id: String
     var imageUrl: String?
     var caption: String?
@@ -335,7 +337,7 @@ struct Moment: Codable, Equatable, Identifiable {
     }
 }
 
-// MARK: - 5. Privacy & Trust Controls
+// MARK: - . Privacy & Trust Controls
 struct PrivacyTrust: Codable {
     let visibilitySettings: VisibilitySettings
     let verifiedStatus: VerifiedStatus
@@ -766,7 +768,8 @@ struct ProfileCreationData {
     var networkingIntention: NetworkingIntention?
     var networkingPreferences: NetworkingPreferences?
     var personalitySocial: PersonalitySocial?
-    var moments: Moments?
+    var workPhotos: PhotoCollection?
+    var lifestylePhotos: PhotoCollection?
     var privacyTrust: PrivacyTrust?
     
     var isComplete: Bool {
@@ -785,7 +788,7 @@ struct ProfileCreationData {
             networkingIntention != nil,
             networkingPreferences != nil,
             personalitySocial != nil,
-            moments != nil,
+            (workPhotos != nil || lifestylePhotos != nil), // 只要有一个照片集合就算完成
             privacyTrust != nil
         ]
         let completedCount = completedSections.filter { $0 }.count
@@ -851,7 +854,8 @@ extension BrewNetProfile {
                 preferredMeetingVibes: [.casual],
                 selfIntroduction: nil
             ),
-            moments: nil,
+            workPhotos: nil,
+            lifestylePhotos: nil,
             privacyTrust: PrivacyTrust(
                 visibilitySettings: VisibilitySettings.createDefault(),
                 verifiedStatus: .unverified,

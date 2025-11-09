@@ -267,7 +267,7 @@ struct ProfileSetupView: View {
                                                 PersonalitySocialStep(profileData: $profileData)
                                                     .id("step-5")
                                             case 6:
-                                                MomentsStep(profileData: $profileData)
+                                                WorkAndLifestylePhotosStep(profileData: $profileData)
                                                     .id("step-6")
                                             case 7:
                                                 PrivacyTrustStep(profileData: $profileData)
@@ -378,7 +378,7 @@ struct ProfileSetupView: View {
         case 3: return "Networking Intention"
         case 4: return "Networking Preferences"
         case 5: return "Personality & Social"
-        case 6: return "Highlights"
+        case 6: return "Work & Lifestyle Photos"
         case 7: return "Privacy & Trust"
         default: return ""
         }
@@ -391,7 +391,7 @@ struct ProfileSetupView: View {
         case 3: return "Define your networking goals and intentions"
         case 4: return "Set your networking preferences and availability"
         case 5: return "Show your personality and what makes you unique"
-        case 6: return "Share your highlights - upload up to 6 photos with captions"
+        case 6: return "Share your work and lifestyle - up to 10 photos each"
         case 7: return "Control your privacy and how others can discover you"
         default: return ""
         }
@@ -436,7 +436,8 @@ struct ProfileSetupView: View {
                         networkingIntention: profileData.networkingIntention ?? existing.networkingIntention,
                         networkingPreferences: profileData.networkingPreferences ?? existing.networkingPreferences,
                         personalitySocial: profileData.personalitySocial ?? existing.personalitySocial,
-                        moments: profileData.moments ?? existing.moments,
+                        workPhotos: profileData.workPhotos ?? existing.workPhotos,
+                        lifestylePhotos: profileData.lifestylePhotos ?? existing.lifestylePhotos,
                         privacyTrust: profileData.privacyTrust ?? existing.privacyTrust,
                         createdAt: existing.createdAt,
                         updatedAt: ISO8601DateFormatter().string(from: Date())
@@ -458,7 +459,8 @@ struct ProfileSetupView: View {
                         networkingIntention: updatedProfile.networkingIntention,
                         networkingPreferences: updatedProfile.networkingPreferences,
                         personalitySocial: updatedProfile.personalitySocial,
-                        moments: updatedProfile.moments,
+                        workPhotos: updatedProfile.workPhotos,
+                        lifestylePhotos: updatedProfile.lifestylePhotos,
                         privacyTrust: updatedProfile.privacyTrust,
                         createdAt: updatedProfile.createdAt,
                         updatedAt: updatedProfile.updatedAt
@@ -469,6 +471,18 @@ struct ProfileSetupView: View {
                 
                 await MainActor.run {
                     isLoading = false
+                    
+                    // 重新加载保存后的数据到 profileData
+                    print("🔄 Reloading saved profile data...")
+                    profileData.coreIdentity = supabaseProfile.coreIdentity
+                    profileData.professionalBackground = supabaseProfile.professionalBackground
+                    profileData.networkingIntention = supabaseProfile.networkingIntention
+                    profileData.networkingPreferences = supabaseProfile.networkingPreferences
+                    profileData.personalitySocial = supabaseProfile.personalitySocial
+                    profileData.workPhotos = supabaseProfile.workPhotos
+                    profileData.lifestylePhotos = supabaseProfile.lifestylePhotos
+                    profileData.privacyTrust = supabaseProfile.privacyTrust
+                    print("✅ Profile data reloaded from saved profile")
                     
                     // 发送通知刷新 profile 数据
                     NotificationCenter.default.post(name: NSNotification.Name("ProfileUpdated"), object: nil)
@@ -530,7 +544,8 @@ struct ProfileSetupView: View {
                         networkingIntention: profileData.networkingIntention ?? existing.networkingIntention,
                         networkingPreferences: profileData.networkingPreferences ?? existing.networkingPreferences,
                         personalitySocial: profileData.personalitySocial ?? existing.personalitySocial,
-                        moments: profileData.moments ?? existing.moments,
+                        workPhotos: profileData.workPhotos ?? existing.workPhotos,
+                        lifestylePhotos: profileData.lifestylePhotos ?? existing.lifestylePhotos,
                         privacyTrust: profileData.privacyTrust ?? existing.privacyTrust,
                         createdAt: existing.createdAt,
                         updatedAt: ISO8601DateFormatter().string(from: Date())
@@ -552,7 +567,8 @@ struct ProfileSetupView: View {
                         networkingIntention: updatedProfile.networkingIntention,
                         networkingPreferences: updatedProfile.networkingPreferences,
                         personalitySocial: updatedProfile.personalitySocial,
-                        moments: updatedProfile.moments,
+                        workPhotos: updatedProfile.workPhotos,
+                        lifestylePhotos: updatedProfile.lifestylePhotos,
                         privacyTrust: updatedProfile.privacyTrust,
                         createdAt: updatedProfile.createdAt,
                         updatedAt: updatedProfile.updatedAt
@@ -645,7 +661,6 @@ struct ProfileSetupView: View {
         let networkingIntention = profileData.networkingIntention ?? profile.networkingIntention
         let networkingPreferences = profileData.networkingPreferences ?? profile.networkingPreferences
         let personalitySocial = profileData.personalitySocial ?? profile.personalitySocial
-        let moments = profileData.moments ?? profile.moments
         let privacyTrust = profileData.privacyTrust ?? profile.privacyTrust
         
         updatedProfile = BrewNetProfile(
@@ -658,7 +673,8 @@ struct ProfileSetupView: View {
             networkingIntention: networkingIntention,
             networkingPreferences: networkingPreferences,
             personalitySocial: personalitySocial,
-            moments: moments,
+            workPhotos: profileData.workPhotos ?? profile.workPhotos,
+            lifestylePhotos: profileData.lifestylePhotos ?? profile.lifestylePhotos,
             privacyTrust: privacyTrust
         )
         
@@ -705,7 +721,8 @@ struct ProfileSetupView: View {
                         profileData.networkingIntention = existingProfile.networkingIntention
                         profileData.networkingPreferences = existingProfile.networkingPreferences
                         profileData.personalitySocial = existingProfile.personalitySocial
-                        profileData.moments = existingProfile.moments
+                        profileData.workPhotos = existingProfile.workPhotos
+                        profileData.lifestylePhotos = existingProfile.lifestylePhotos
                         profileData.privacyTrust = existingProfile.privacyTrust
                         
                         print("✅ Profile data loaded into profileData")
@@ -2908,40 +2925,65 @@ struct PersonalitySocialStep: View {
     }
 }
 
-// MARK: - Step 6: Highlights
-struct MomentsStep: View {
+// MARK: - Step 6: Work & Lifestyle Photos
+struct WorkAndLifestylePhotosStep: View {
     @Binding var profileData: ProfileCreationData
     @EnvironmentObject var supabaseService: SupabaseService
     @EnvironmentObject var authManager: AuthManager
     
-    @State private var moments: [Moment] = []
-    @State private var selectedPhotoItems: [PhotosPickerItem?] = Array(repeating: nil, count: 6)
-    @State private var imageDataArray: [Data?] = Array(repeating: nil, count: 6)
-    @State private var captions: [String] = Array(repeating: "", count: 6)
+    @State private var selectedPhotoType: PhotoType = .work
+    @State private var workPhotos: [Photo] = []
+    @State private var lifestylePhotos: [Photo] = []
+    @State private var selectedPhotoItems: [PhotosPickerItem?] = Array(repeating: nil, count: 10)
+    @State private var imageDataArray: [Data?] = Array(repeating: nil, count: 10)
+    @State private var captions: [String] = Array(repeating: "", count: 10)
     @State private var isUploading: [Int: Bool] = [:]
     @State private var uploadedImageURLs: [Int: String] = [:]
     @State private var currentPageIndex: Int = 0
     
+    enum PhotoType: String, CaseIterable {
+        case work = "Work Photos"
+        case lifestyle = "Lifestyle Photos"
+    }
+    
+    // 获取当前类型的照片
+    private var currentPhotos: [Photo] {
+        selectedPhotoType == .work ? workPhotos : lifestylePhotos
+    }
+    
     // 计算总页面数
     private var totalPages: Int {
-        let validMomentsCount = moments.filter { $0.imageUrl != nil && !($0.imageUrl?.isEmpty ?? true) }.count
+        let validPhotosCount = currentPhotos.filter { $0.imageUrl != nil && !($0.imageUrl?.isEmpty ?? true) }.count
         let uploadingCount = imageDataArray.enumerated().filter { $0.element != nil && uploadedImageURLs[$0.offset] == nil }.count
-        let totalItems = validMomentsCount + uploadingCount
-        return max(1, min(totalItems + (totalItems < 6 ? 1 : 0), 6))
+        let totalItems = validPhotosCount + uploadingCount
+        return max(1, min(totalItems + (totalItems < 10 ? 1 : 0), 10))
     }
     
     // 判断是否显示下一张箭头
     private func shouldShowNextArrow(for index: Int) -> Bool {
-        // 当前页面有图片（已上传或正在上传），且不是最后一页，且还有空位
         let hasImage = (uploadedImageURLs[index] != nil && !uploadedImageURLs[index]!.isEmpty) || imageDataArray[index] != nil
         let isNotLastPage = index < totalPages - 1
-        let hasMoreSpace = totalPages < 6 || index < 5
-        
+        let hasMoreSpace = totalPages < 10 || index < 9
         return hasImage && isNotLastPage && hasMoreSpace
     }
     
     var body: some View {
         VStack(spacing: 24) {
+            // Photo type selector
+            Picker("Photo Type", selection: $selectedPhotoType) {
+                ForEach(PhotoType.allCases, id: \.self) { type in
+                    Text(type.rawValue).tag(type)
+                }
+            }
+            .pickerStyle(SegmentedPickerStyle())
+            .padding(.horizontal, 20)
+            .onChange(of: selectedPhotoType) { newType in
+                print("🔄 切换照片类型到: \(newType.rawValue)")
+                // 加载新类型的数据（旧类型的数据已经在上传和编辑时自动保存了）
+                loadExistingPhotos()
+                currentPageIndex = 0
+            }
+            
             // 始终使用 TabView 显示，支持翻页
             ZStack {
                 TabView(selection: $currentPageIndex) {
@@ -2958,14 +3000,15 @@ struct MomentsStep: View {
                                 get: { uploadedImageURLs[index] },
                                 set: { uploadedImageURLs[index] = $0 }
                             ),
+                            photoType: selectedPhotoType, // 传递照片类型
                             onImageSelected: { item in
                                 selectedPhotoItems[index] = item
                                 loadImageData(for: index, item: item)
                             },
                             onRemove: {
-                                removeMoment(at: index)
+                                removePhoto(at: index)
                                 // 如果删除后还有图片，保持在当前页面，否则回到第一页
-                                if moments.isEmpty && imageDataArray.allSatisfy({ $0 == nil }) {
+                                if currentPhotos.isEmpty && imageDataArray.allSatisfy({ $0 == nil }) {
                                     currentPageIndex = 0
                                 } else if currentPageIndex >= totalPages - 1 {
                                     currentPageIndex = max(0, totalPages - 2)
@@ -3020,11 +3063,21 @@ struct MomentsStep: View {
             }
         }
         .onAppear {
-            loadExistingMoments()
+            loadExistingPhotos()
+        }
+        .onChange(of: profileData.workPhotos) { _ in
+            // 当 profileData.workPhotos 更新时（比如从数据库重新加载），刷新显示
+            print("🔄 profileData.workPhotos 变化，重新加载...")
+            loadExistingPhotos()
+        }
+        .onChange(of: profileData.lifestylePhotos) { _ in
+            // 当 profileData.lifestylePhotos 更新时（比如从数据库重新加载），刷新显示
+            print("🔄 profileData.lifestylePhotos 变化，重新加载...")
+            loadExistingPhotos()
         }
         .onChange(of: imageDataArray) { _ in
             // 当图片数据加载完成时，自动上传
-            for index in 0..<6 {
+            for index in 0..<10 {
                 if imageDataArray[index] != nil && uploadedImageURLs[index] == nil && !(isUploading[index] ?? false) {
                     uploadImage(for: index)
                 }
@@ -3032,36 +3085,67 @@ struct MomentsStep: View {
         }
         .onChange(of: uploadedImageURLs) { _ in
             // 当图片上传成功后，强制刷新视图
-            // 不再自动切换页面，让用户手动点击箭头切换
-            let validCount = moments.filter { $0.imageUrl != nil && !($0.imageUrl?.isEmpty ?? true) }.count
+            let validCount = currentPhotos.filter { $0.imageUrl != nil && !($0.imageUrl?.isEmpty ?? true) }.count
             let uploadingCount = imageDataArray.enumerated().filter { $0.element != nil && uploadedImageURLs[$0.offset] == nil }.count
             let totalItems = validCount + uploadingCount
             
-            print("🔄 [Highlight] uploadedImageURLs 变化，validCount: \(validCount), uploadingCount: \(uploadingCount), totalItems: \(totalItems)")
+            print("🔄 [\(selectedPhotoType.rawValue)] uploadedImageURLs 变化，validCount: \(validCount), uploadingCount: \(uploadingCount), totalItems: \(totalItems)")
         }
-        .onChange(of: moments) { _ in
-            // 当 moments 更新时，也刷新视图
-            print("🔄 [Highlight] moments 更新，数量: \(moments.count)")
+        .onChange(of: workPhotos) { _ in
+            print("🔄 [Work Photos] 更新，数量: \(workPhotos.count)")
+        }
+        .onChange(of: lifestylePhotos) { _ in
+            print("🔄 [Lifestyle Photos] 更新，数量: \(lifestylePhotos.count)")
         }
     }
     
-    private func loadExistingMoments() {
-        if let existingMoments = profileData.moments {
-            moments = existingMoments.moments
-            // 加载已有的图片和文字
-            for (index, moment) in moments.enumerated() {
-                if index < 6 {
-                    captions[index] = moment.caption ?? ""
-                    if let imageUrl = moment.imageUrl {
-                        uploadedImageURLs[index] = imageUrl
-                    }
+    private func loadExistingPhotos() {
+        print("📥 loadExistingPhotos() 被调用，selectedPhotoType: \(selectedPhotoType.rawValue)")
+        
+        // 加载 Work Photos
+        if let existingWorkPhotos = profileData.workPhotos {
+            workPhotos = existingWorkPhotos.photos
+            print("📥 加载了 \(workPhotos.count) 张 Work Photos")
+        } else {
+            workPhotos = []
+            print("📥 没有 Work Photos 数据")
+        }
+        
+        // 加载 Lifestyle Photos
+        if let existingLifestylePhotos = profileData.lifestylePhotos {
+            lifestylePhotos = existingLifestylePhotos.photos
+            print("📥 加载了 \(lifestylePhotos.count) 张 Lifestyle Photos")
+        } else {
+            lifestylePhotos = []
+            print("📥 没有 Lifestyle Photos 数据")
+        }
+        
+        // 清空UI状态
+        selectedPhotoItems = Array(repeating: nil, count: 10)
+        imageDataArray = Array(repeating: nil, count: 10)
+        captions = Array(repeating: "", count: 10)
+        uploadedImageURLs = [:]
+        
+        // 根据当前选择的类型加载对应的照片
+        let photos = currentPhotos
+        print("📥 当前类型 [\(selectedPhotoType.rawValue)] 有 \(photos.count) 张照片")
+        
+        for (index, photo) in photos.enumerated() {
+            if index < 10 {
+                captions[index] = photo.caption ?? ""
+                if let imageUrl = photo.imageUrl {
+                    uploadedImageURLs[index] = imageUrl
+                    print("📥 [\(selectedPhotoType.rawValue)][\(index)] 加载图片: \(imageUrl)")
                 }
             }
-            // 如果有已存在的 moments，设置当前页面为第一个
-            if !moments.isEmpty {
-                currentPageIndex = 0
-            }
         }
+        
+        // 如果有照片，设置当前页面为第一个
+        if !photos.isEmpty {
+            currentPageIndex = 0
+        }
+        
+        print("📥 loadExistingPhotos() 完成，uploadedImageURLs 数量: \(uploadedImageURLs.count)")
     }
     
     private func loadImageData(for index: Int, item: PhotosPickerItem?) {
@@ -3090,7 +3174,8 @@ struct MomentsStep: View {
         
         Task {
             do {
-                let fileName = "moment_\(currentUser.id)_\(UUID().uuidString).jpg"
+                let photoType = selectedPhotoType == .work ? "work" : "lifestyle"
+                let fileName = "\(photoType)_photo_\(currentUser.id)_\(UUID().uuidString).jpg"
                 let imageURL = try await supabaseService.uploadMomentImage(
                     userId: currentUser.id,
                     imageData: imageData,
@@ -3101,28 +3186,34 @@ struct MomentsStep: View {
                     uploadedImageURLs[index] = imageURL
                     isUploading[index] = false
                     
-                    // 注意：不清除本地图片数据，保持显示本地图片
-                    // 这样用户可以看到图片，即使网络有问题也能看到
-                    // imageDataArray[index] = nil  // 注释掉，保持本地图片显示
+                    // 根据当前类型更新对应的照片数组
+                    var photos = selectedPhotoType == .work ? workPhotos : lifestylePhotos
                     
-                    // 确保 moments 数组有足够的元素
-                    while moments.count <= index {
-                        moments.append(Moment(id: UUID().uuidString, imageUrl: nil, caption: nil))
+                    // 确保数组有足够的元素
+                    while photos.count <= index {
+                        photos.append(Photo(id: UUID().uuidString, imageUrl: nil, caption: nil))
                     }
                     
-                    // 更新或创建 moment
-                    let moment = Moment(
-                        id: moments[index].id,
+                    // 更新或创建 photo
+                    let photo = Photo(
+                        id: photos[index].id,
                         imageUrl: imageURL,
                         caption: captions[index].isEmpty ? nil : captions[index]
                     )
                     
-                    moments[index] = moment
+                    photos[index] = photo
+                    
+                    // 回写到对应的数组
+                    if selectedPhotoType == .work {
+                        workPhotos = photos
+                    } else {
+                        lifestylePhotos = photos
+                    }
                     
                     updateProfileData()
                     
-                    print("✅ [Highlight] 图片上传成功，URL: \(imageURL)")
-                    print("✅ [Highlight] 当前 uploadedImageURLs[\(index)]: \(uploadedImageURLs[index] ?? "nil")")
+                    print("✅ [\(photoType)] 图片上传成功，URL: \(imageURL)")
+                    print("✅ [\(photoType)] 当前 uploadedImageURLs[\(index)]: \(uploadedImageURLs[index] ?? "nil")")
                 }
             } catch {
                 print("❌ Failed to upload image: \(error.localizedDescription)")
@@ -3133,27 +3224,83 @@ struct MomentsStep: View {
         }
     }
     
-    private func removeMoment(at index: Int) {
-        // 移除对应位置的 moment
-        if index < moments.count {
-            moments.remove(at: index)
+    private func removePhoto(at index: Int) {
+        // 根据当前类型移除对应照片
+        var photos = selectedPhotoType == .work ? workPhotos : lifestylePhotos
+        
+        if index < photos.count {
+            photos.remove(at: index)
         }
-        // 清空对应位置的数据
+        
+        // 回写到对应的数组
+        if selectedPhotoType == .work {
+            workPhotos = photos
+        } else {
+            lifestylePhotos = photos
+        }
+        
+        // 清空对应位置的 UI 数据
         selectedPhotoItems[index] = nil
         imageDataArray[index] = nil
         captions[index] = ""
         uploadedImageURLs[index] = nil
         isUploading[index] = false
-        // 重新整理数组，保持连续性
-        // 注意：这里不重新整理，保持索引对应关系，空位置可以重新使用
+        
         updateProfileData()
     }
     
     private func updateProfileData() {
-        // 只保存有图片的 moments（过滤掉空位置）
-        let validMoments = moments.filter { $0.imageUrl != nil && !($0.imageUrl?.isEmpty ?? true) }
-        let momentsData = Moments(moments: validMoments)
-        profileData.moments = momentsData
+        print("💾 updateProfileData() 被调用，当前类型: \(selectedPhotoType.rawValue)")
+        
+        // 首先，根据当前选择的类型，将 UI 中的 captions 和 uploadedImageURLs 同步回对应的数组
+        if selectedPhotoType == .work {
+            // 更新 workPhotos 数组，使用当前 UI 的数据
+            var updatedPhotos: [Photo] = []
+            
+            // 遍历 uploadedImageURLs，创建或更新 Photo 对象
+            for index in 0..<10 {
+                if let imageUrl = uploadedImageURLs[index], !imageUrl.isEmpty {
+                    // 如果该位置有图片 URL
+                    let existingId = (index < workPhotos.count) ? workPhotos[index].id : UUID().uuidString
+                    let photo = Photo(
+                        id: existingId,
+                        imageUrl: imageUrl,
+                        caption: captions[index].isEmpty ? nil : captions[index]
+                    )
+                    updatedPhotos.append(photo)
+                    print("   💾 [Work][\(index)] 保存: URL=\(imageUrl), Caption=\(photo.caption ?? "nil")")
+                }
+            }
+            
+            workPhotos = updatedPhotos
+        } else {
+            // 更新 lifestylePhotos 数组，使用当前 UI 的数据
+            var updatedPhotos: [Photo] = []
+            
+            // 遍历 uploadedImageURLs，创建或更新 Photo 对象
+            for index in 0..<10 {
+                if let imageUrl = uploadedImageURLs[index], !imageUrl.isEmpty {
+                    // 如果该位置有图片 URL
+                    let existingId = (index < lifestylePhotos.count) ? lifestylePhotos[index].id : UUID().uuidString
+                    let photo = Photo(
+                        id: existingId,
+                        imageUrl: imageUrl,
+                        caption: captions[index].isEmpty ? nil : captions[index]
+                    )
+                    updatedPhotos.append(photo)
+                    print("   💾 [Lifestyle][\(index)] 保存: URL=\(imageUrl), Caption=\(photo.caption ?? "nil")")
+                }
+            }
+            
+            lifestylePhotos = updatedPhotos
+        }
+        
+        // 最后，保存到 profileData
+        profileData.workPhotos = workPhotos.isEmpty ? nil : PhotoCollection(photos: workPhotos)
+        profileData.lifestylePhotos = lifestylePhotos.isEmpty ? nil : PhotoCollection(photos: lifestylePhotos)
+        
+        print("💾 最终 Work Photos 数量: \(workPhotos.count)")
+        print("💾 最终 Lifestyle Photos 数量: \(lifestylePhotos.count)")
     }
 }
 
@@ -3164,6 +3311,7 @@ struct HighlightUploadCard: View {
     @Binding var caption: String
     @Binding var isUploading: Bool
     @Binding var uploadedImageURL: String?
+    let photoType: WorkAndLifestylePhotosStep.PhotoType // 新增：照片类型
     let onImageSelected: (PhotosPickerItem) -> Void
     let onRemove: () -> Void
     let onCaptionChanged: (String) -> Void
@@ -3221,10 +3369,29 @@ struct HighlightUploadCard: View {
                         }
                     }
                 } else {
-                    // 空状态 - 只显示图标，不显示文字
-                    Image(systemName: "photo.badge.plus")
-                        .font(.system(size: 64))
-                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                    // 空状态 - 显示图标和描述文案
+                    VStack(spacing: 16) {
+                        Image(systemName: "photo.badge.plus")
+                            .font(.system(size: 48))
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        
+                        VStack(spacing: 8) {
+                            Text(photoType == .work ? "Show your professional side." : "Add a glimpse of your everyday life.")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .multilineTextAlignment(.center)
+                            
+                            Text(photoType == .work 
+                                ? "Upload a photo that represents you at work — in the office, at a project, or doing what you love professionally."
+                                : "A casual or candid photo that shows your personality outside of work — coffee moments, hobbies, or travels.")
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundColor(Color(red: 0.5, green: 0.3, blue: 0.15).opacity(0.8))
+                                .multilineTextAlignment(.center)
+                                .lineSpacing(4)
+                        }
+                        .padding(.horizontal, 24)
+                    }
+                    .padding(.vertical, 20)
                 }
                 
                 // 删除按钮（如果有图片）

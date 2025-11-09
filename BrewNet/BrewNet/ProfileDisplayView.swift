@@ -508,7 +508,8 @@ struct ProfileDisplayView: View {
                         networkingIntention: profile.networkingIntention,
                         networkingPreferences: profile.networkingPreferences,
                         personalitySocial: profile.personalitySocial,
-                        moments: profile.moments,
+                        workPhotos: profile.workPhotos,
+                        lifestylePhotos: profile.lifestylePhotos,
                         privacyTrust: profile.privacyTrust
                     )
                     profile = updatedProfile
@@ -832,7 +833,8 @@ struct ProfileHeaderView: View {
                                 networkingIntention: profile.networkingIntention,
                                 networkingPreferences: profile.networkingPreferences,
                                 personalitySocial: profile.personalitySocial,
-                                moments: profile.moments,
+                                workPhotos: profile.workPhotos,
+                                lifestylePhotos: profile.lifestylePhotos,
                                 privacyTrust: profile.privacyTrust
                             )
                             
@@ -845,7 +847,8 @@ struct ProfileHeaderView: View {
                                 networkingIntention: profile.networkingIntention,
                                 networkingPreferences: profile.networkingPreferences,
                                 personalitySocial: profile.personalitySocial,
-                                moments: profile.moments,
+                                workPhotos: profile.workPhotos,
+                                lifestylePhotos: profile.lifestylePhotos,
                                 privacyTrust: profile.privacyTrust,
                                 createdAt: profile.createdAt,
                                 updatedAt: ISO8601DateFormatter().string(from: Date())

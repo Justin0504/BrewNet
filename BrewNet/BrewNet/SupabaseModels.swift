@@ -161,7 +161,8 @@ struct SupabaseProfile: Codable, Identifiable {
     let networkingIntention: NetworkingIntention
     let networkingPreferences: NetworkingPreferences
     let personalitySocial: PersonalitySocial
-    let moments: Moments?
+    let workPhotos: PhotoCollection?
+    let lifestylePhotos: PhotoCollection?
     let privacyTrust: PrivacyTrust
     let createdAt: String
     let updatedAt: String
@@ -174,7 +175,8 @@ struct SupabaseProfile: Codable, Identifiable {
         case networkingIntention = "networking_intention"
         case networkingPreferences = "networking_preferences"
         case personalitySocial = "personality_social"
-        case moments
+        case workPhotos = "work_photos"
+        case lifestylePhotos = "lifestyle_photos"
         case privacyTrust = "privacy_trust"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
@@ -192,7 +194,8 @@ struct SupabaseProfile: Codable, Identifiable {
             networkingIntention: networkingIntention,
             networkingPreferences: networkingPreferences,
             personalitySocial: personalitySocial,
-            moments: moments,
+            workPhotos: workPhotos,
+            lifestylePhotos: lifestylePhotos,
             privacyTrust: privacyTrust
         )
     }
