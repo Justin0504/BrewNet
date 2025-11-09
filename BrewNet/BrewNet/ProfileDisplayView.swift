@@ -698,11 +698,14 @@ struct ProfileHeaderView: View {
                 Text(profile.coreIdentity.name)
                     .font(.system(size: 30, weight: .bold))
                     .foregroundColor(.black)
+                    .lineLimit(1)
                 
                 if authManager.currentUser?.isPro == true {
                     ProBadge(size: .medium)
+                        .fixedSize()
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
             
             // Icons row
             HStack(spacing: 12) {
@@ -737,39 +740,45 @@ struct ProfileHeaderView: View {
     
     @ViewBuilder
     private var resourcesView: some View {
-        VStack(alignment: .trailing, spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
             // Credits
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 Image(systemName: "star.fill")
                     .font(.system(size: 14))
                     .foregroundColor(.yellow)
+                    .frame(width: 20, alignment: .center)
                 Text("\(credits)")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.black)
+                    .frame(minWidth: 30, alignment: .leading)
             }
             
             // Boost
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 Image(systemName: "bolt.fill")
                     .font(.system(size: 14))
                     .foregroundColor(Color(red: 0.4, green: 0.5, blue: 0.5))
+                    .frame(width: 20, alignment: .center)
                 Text("\(boosts)")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.black)
+                    .frame(minWidth: 30, alignment: .leading)
             }
             
             // Superboost
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 Image(systemName: "bolt.fill")
                     .font(.system(size: 14))
                     .foregroundColor(.yellow)
+                    .frame(width: 20, alignment: .center)
                 Text("\(superboosts)")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.black)
+                    .frame(minWidth: 30, alignment: .leading)
             }
             
             // BrewToken
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 ZStack {
                     Circle()
                         .fill(Color(red: 0.9, green: 0.7, blue: 0.2))
@@ -779,9 +788,11 @@ struct ProfileHeaderView: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.white)
                 }
+                .frame(width: 20, alignment: .center)
                 Text("\(tokens)")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.black)
+                    .frame(minWidth: 30, alignment: .leading)
             }
         }
     }
@@ -841,7 +852,7 @@ struct ProfileHeaderView: View {
             Button(action: {
                 onShowProfileCard?()
             }) {
-                HStack(alignment: .top, spacing: 16) {
+                HStack(alignment: .top, spacing: 12) {
                     avatarWithProgressView
                     
                     VStack(alignment: .leading, spacing: 8) {
@@ -849,15 +860,17 @@ struct ProfileHeaderView: View {
                         //companyTitleView
                     }
                     
-                    Spacer()
+                    Spacer(minLength: 8)
                     
                     // ⭐ 资源显示
                     if isLoadingResources {
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .gray))
                             .scaleEffect(0.8)
+                            .frame(width: 60)
                     } else {
                         resourcesView
+                            .frame(width: 60)
                     }
                 }
             }
