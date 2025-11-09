@@ -827,7 +827,9 @@ struct WorkExperienceRowView: View {
             
             Spacer()
             
-            Text("\(workExp.startYear)\(workExp.endYear != nil ? "-\(workExp.endYear!)" : "-Present")")
+            let startYearText = String(workExp.startYear)
+            let endYearText = workExp.endYear.map { String($0) } ?? "Present"
+            Text(verbatim: "\(startYearText)-\(endYearText)")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.gray)
         }
@@ -1432,10 +1434,12 @@ struct WorkExperienceDetailSheet: View {
     let industry: String?
     
     private var durationText: String {
+        let startYearText = String(workExperience.startYear)
         if let end = workExperience.endYear {
-            return "\(workExperience.startYear) - \(end)"
+            let endYearText = String(end)
+            return "\(startYearText) - \(endYearText)"
         } else {
-            return "\(workExperience.startYear) - Present"
+            return "\(startYearText) - Present"
         }
     }
     
@@ -1463,13 +1467,22 @@ struct WorkExperienceDetailSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     
                     VStack(alignment: .leading, spacing: 12) {
-                        Label(durationText, systemImage: "calendar.badge.clock")
+                        Label {
+                            Text(verbatim: durationText)
+                        } icon: {
+                            Image(systemName: "calendar.badge.clock")
+                        }
+                        .font(.system(size: 16))
+                        .foregroundColor(.gray)
+                        
+                        if let industry = industry, !industry.isEmpty {
+                            Label {
+                                Text(verbatim: industry)
+                            } icon: {
+                                Image(systemName: "building.2.fill")
+                            }
                             .font(.system(size: 16))
                             .foregroundColor(.gray)
-                        if let industry = industry, !industry.isEmpty {
-                            Label(industry, systemImage: "building.2.fill")
-                                .font(.system(size: 16))
-                                .foregroundColor(.gray)
                         }
                     }
                     

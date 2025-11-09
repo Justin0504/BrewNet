@@ -670,11 +670,11 @@ struct ProfileHeaderView: View {
     
     @ViewBuilder
     private var nameAndIconsView: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 25) {
             // Name
             HStack(spacing: 4) {
                 Text(profile.coreIdentity.name)
-                    .font(.system(size: 22, weight: .bold))
+                    .font(.system(size: 30, weight: .bold))
                     .foregroundColor(.black)
                 
                 if authManager.currentUser?.isPro == true {
@@ -693,20 +693,20 @@ struct ProfileHeaderView: View {
                                 .scaleEffect(0.8)
                         } else {
                             Image(systemName: "camera.fill")
-                                .font(.system(size: 30))
+                                .font(.system(size: 20))
                                 .foregroundColor(.blue)
                         }
                     }
-                    .frame(width: 50, height: 50)
+                    .frame(width: 30, height: 30)
                     .background(Color.blue.opacity(0.1))
                     .clipShape(Circle())
                 }
                 
                 // Verification icon (grey)
                 Image(systemName: "person.badge.shield.checkmark.fill")
-                    .font(.system(size: 30))
+                    .font(.system(size: 20))
                     .foregroundColor(.gray)
-                    .frame(width: 50, height: 50)
+                    .frame(width: 30, height: 30)
                     .background(Color.gray.opacity(0.1))
                     .clipShape(Circle())
             }
