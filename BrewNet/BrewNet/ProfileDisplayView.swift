@@ -1283,7 +1283,7 @@ struct TokenCard: View {
                         .font(.system(size: 18, weight: .bold))
                         .foregroundColor(.primary)
                     
-                    Text("BrewTokens let you invite mentors, start conversations, and show appreciation for their time.")
+                    Text("BrewTokens are a way to show respect for someone's time and insight.")
                         .font(.system(size: 14))
                         .foregroundColor(.gray)
                         .lineLimit(3)
