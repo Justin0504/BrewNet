@@ -3456,7 +3456,7 @@ struct PrivacyTrustStep: View {
     @State private var locationVisibility = VisibilityLevel.public_
     @State private var skillsVisibility = VisibilityLevel.public_
     @State private var interestsVisibility = VisibilityLevel.public_
-    @State private var timeslotVisibility = VisibilityLevel.private_
+    @State private var timeslotVisibility = VisibilityLevel.connectionsOnly
     @State private var dataSharingConsent = false
     
     var body: some View {
@@ -3712,6 +3712,15 @@ struct WorkExperienceCard: View {
     let workExperience: WorkExperience
     let onDelete: () -> Void
     
+    private var isValidWorkExperience: Bool {
+        let currentYear = Calendar.current.component(.year, from: Date())
+        guard workExperience.startYear <= currentYear else { return false }
+        if let endYear = workExperience.endYear, workExperience.startYear > endYear {
+            return false
+        }
+        return true
+    }
+    
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
@@ -3735,6 +3744,12 @@ struct WorkExperienceCard: View {
                 }
                 .font(.system(size: 12))
                 .foregroundColor(.gray)
+                
+                if !isValidWorkExperience {
+                    Text("Invalid year settings")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.red)
+                }
             }
             
             Spacer()
@@ -3768,6 +3783,26 @@ struct AddWorkExperienceView: View {
     @State private var skillInput = ""
     @State private var addedSkills: [String] = []
     @State private var responsibilities = ""
+    @State private var validationError: String?
+    
+    private var currentYear: Int {
+        Calendar.current.component(.year, from: Date())
+    }
+    
+    private var isValidYears: Bool {
+        guard startYear <= currentYear else {
+            validationError = "Start year cannot be in the future."
+            return false
+        }
+        
+        if let endYear = endYear, !isPresent, startYear > endYear {
+            validationError = "Start year must be before or equal to end year."
+            return false
+        }
+        
+        validationError = nil
+        return true
+    }
     
     var body: some View {
         NavigationView {
@@ -3915,6 +3950,14 @@ struct AddWorkExperienceView: View {
                 }
                 
                 Spacer()
+                
+                if let validationError {
+                    Text(validationError)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.red)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
             }
             .padding()
             .navigationTitle("Add Work Experience")
@@ -3928,6 +3971,8 @@ struct AddWorkExperienceView: View {
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Save") {
+                        guard isValidYears else { return }
+                        
                         let workExperience = WorkExperience(
                             companyName: companyName,
                             startYear: startYear,
@@ -3970,6 +4015,26 @@ struct AddEducationView: View {
     @State private var degree = DegreeType.bachelor
     @State private var fieldOfStudy = ""
     @State private var isPresent = false
+    @State private var validationError: String?
+    
+    private var currentYear: Int {
+        Calendar.current.component(.year, from: Date())
+    }
+    
+    private var isValidYears: Bool {
+        guard startYear <= currentYear else {
+            validationError = "Start year cannot be in the future."
+            return false
+        }
+        
+        if let endYear = endYear, !isPresent, startYear > endYear {
+            validationError = "Start year must be before or equal to end year."
+            return false
+        }
+        
+        validationError = nil
+        return true
+    }
     
     var body: some View {
         NavigationView {
@@ -4064,6 +4129,14 @@ struct AddEducationView: View {
                 }
                 
                 Spacer()
+                
+                if let validationError {
+                    Text(validationError)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.red)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
             }
             .padding()
             .navigationTitle("Add Education")
@@ -4077,6 +4150,8 @@ struct AddEducationView: View {
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Save") {
+                        guard isValidYears else { return }
+                        
                         let education = Education(
                             schoolName: schoolName,
                             startYear: startYear,
