@@ -68,6 +68,102 @@ struct UserTowerFeatures: Codable {
             isVerified: profile.privacyTrust.verifiedStatus == .verifiedProfessional ? 1 : 0
         )
     }
+
+    init(
+        location: String?,
+        timeZone: String?,
+        industry: String?,
+        experienceLevel: String?,
+        careerStage: String?,
+        mainIntention: String?,
+        skills: [String],
+        hobbies: [String],
+        values: [String],
+        languages: [String],
+        subIntentions: [String],
+        skillsToLearn: [String],
+        skillsToTeach: [String],
+        yearsOfExperience: Double,
+        profileCompletion: Double,
+        isVerified: Int
+    ) {
+        self.location = location
+        self.timeZone = timeZone
+        self.industry = industry
+        self.experienceLevel = experienceLevel
+        self.careerStage = careerStage
+        self.mainIntention = mainIntention
+        self.skills = skills
+        self.hobbies = hobbies
+        self.values = values
+        self.languages = languages
+        self.subIntentions = subIntentions
+        self.skillsToLearn = skillsToLearn
+        self.skillsToTeach = skillsToTeach
+        self.yearsOfExperience = yearsOfExperience
+        self.profileCompletion = profileCompletion
+        self.isVerified = isVerified
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.location = try container.decodeIfPresent(String.self, forKey: .location)
+        self.timeZone = try container.decodeIfPresent(String.self, forKey: .timeZone)
+        self.industry = try container.decodeIfPresent(String.self, forKey: .industry)
+        self.experienceLevel = try container.decodeIfPresent(String.self, forKey: .experienceLevel)
+        self.careerStage = try container.decodeIfPresent(String.self, forKey: .careerStage)
+        self.mainIntention = try container.decodeIfPresent(String.self, forKey: .mainIntention)
+
+        self.skills = try container.decodeIfPresent([String].self, forKey: .skills) ?? []
+        self.hobbies = try container.decodeIfPresent([String].self, forKey: .hobbies) ?? []
+        self.values = try container.decodeIfPresent([String].self, forKey: .values) ?? []
+        self.languages = try container.decodeIfPresent([String].self, forKey: .languages) ?? []
+        self.subIntentions = try container.decodeIfPresent([String].self, forKey: .subIntentions) ?? []
+        self.skillsToLearn = try container.decodeIfPresent([String].self, forKey: .skillsToLearn) ?? []
+        self.skillsToTeach = try container.decodeIfPresent([String].self, forKey: .skillsToTeach) ?? []
+
+        self.yearsOfExperience = try container.decodeIfPresent(Double.self, forKey: .yearsOfExperience) ?? 0
+        self.profileCompletion = try container.decodeIfPresent(Double.self, forKey: .profileCompletion) ?? 0
+
+        if let intValue = try? container.decode(Int.self, forKey: .isVerified) {
+            self.isVerified = intValue
+        } else if let boolValue = try? container.decode(Bool.self, forKey: .isVerified) {
+            self.isVerified = boolValue ? 1 : 0
+        } else if let stringValue = try? container.decode(String.self, forKey: .isVerified) {
+            let normalized = stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if ["1", "true", "t", "yes", "y"].contains(normalized) {
+                self.isVerified = 1
+            } else {
+                self.isVerified = 0
+            }
+        } else {
+            self.isVerified = 0
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        try container.encodeIfPresent(location, forKey: .location)
+        try container.encodeIfPresent(timeZone, forKey: .timeZone)
+        try container.encodeIfPresent(industry, forKey: .industry)
+        try container.encodeIfPresent(experienceLevel, forKey: .experienceLevel)
+        try container.encodeIfPresent(careerStage, forKey: .careerStage)
+        try container.encodeIfPresent(mainIntention, forKey: .mainIntention)
+
+        try container.encode(skills, forKey: .skills)
+        try container.encode(hobbies, forKey: .hobbies)
+        try container.encode(values, forKey: .values)
+        try container.encode(languages, forKey: .languages)
+        try container.encode(subIntentions, forKey: .subIntentions)
+        try container.encode(skillsToLearn, forKey: .skillsToLearn)
+        try container.encode(skillsToTeach, forKey: .skillsToTeach)
+
+        try container.encode(yearsOfExperience, forKey: .yearsOfExperience)
+        try container.encode(profileCompletion, forKey: .profileCompletion)
+        try container.encode(isVerified, forKey: .isVerified)
+    }
     
     private static func extractSkills(_ profile: BrewNetProfile, mode: ExtractMode) -> [String] {
         guard let skills = profile.networkingIntention.skillDevelopment?.skills else {
