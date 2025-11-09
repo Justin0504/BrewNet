@@ -24,6 +24,7 @@ struct CategoryRecommendationsView: View {
     @State private var showingTemporaryChat = false
     @State private var selectedProfileForChat: BrewNetProfile?
     @State private var proUsers: Set<String> = []
+    @State private var verifiedUsers: Set<String> = []
     @State private var showSubscriptionPayment = false
     @State private var isTransitioning = false // 标记是否正在过渡
     @State private var nextProfileOffset: CGFloat = 0 // 下一个 profile 的偏移量
@@ -64,7 +65,10 @@ struct CategoryRecommendationsView: View {
                                 rotationAngle: .constant(0),
                                 onSwipe: { _ in },
                                 isConnection: isConnection,
-                                isPro: proUsers.contains(profiles[currentIndex + 1].userId)
+                                isPro: proUsers.contains(profiles[currentIndex + 1].userId),
+                                isVerified: verifiedUsers.contains(profiles[currentIndex + 1].userId),
+                                showsOuterFrame: false,
+                                cardWidth: screenWidth - 20
                             )
                             .scaleEffect(isTransitioning ? 1.0 : 0.95)
                             .offset(y: isTransitioning ? 0 : 10)
@@ -82,7 +86,10 @@ struct CategoryRecommendationsView: View {
                                 rotationAngle: $rotationAngle,
                                 onSwipe: handleSwipe,
                                 isConnection: isConnection,
-                                isPro: proUsers.contains(profiles[currentIndex].userId)
+                                isPro: proUsers.contains(profiles[currentIndex].userId),
+                                isVerified: verifiedUsers.contains(profiles[currentIndex].userId),
+                                showsOuterFrame: false,
+                                cardWidth: screenWidth - 20
                             )
                             .opacity(1.0)
                         }
@@ -416,6 +423,7 @@ struct CategoryRecommendationsView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             // 从列表中移除已拒绝的 profile
             // 注意：移除后，后面的元素会自动前移，所以当前索引会指向下一个 profile
+            verifiedUsers.remove(profile.userId)
             profiles.remove(at: currentIndex)
             
             // 如果移除后当前索引超出范围，调整索引
@@ -534,6 +542,7 @@ struct CategoryRecommendationsView: View {
                         // 注意：移除后，后面的元素会自动前移，所以当前索引会指向下一个 profile
                         let removedIndex = profiles.firstIndex { $0.userId == profile.userId }
                         if let index = removedIndex {
+                            verifiedUsers.remove(profile.userId)
                             profiles.remove(at: index)
                             // 如果移除的索引小于当前索引，当前索引需要减1
                             if index < currentIndex {
@@ -575,6 +584,7 @@ struct CategoryRecommendationsView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                         let removedIndex = profiles.firstIndex { $0.userId == profile.userId }
                         if let index = removedIndex {
+                            verifiedUsers.remove(profile.userId)
                             profiles.remove(at: index)
                             if index < currentIndex {
                                 currentIndex -= 1
@@ -647,6 +657,7 @@ struct CategoryRecommendationsView: View {
         isLoading = true
         currentIndex = 0
         profiles.removeAll()
+        verifiedUsers.removeAll()
         
         Task {
             await loadProfilesBatch(isInitial: true)
@@ -746,8 +757,9 @@ struct CategoryRecommendationsView: View {
                 }
             }
             
-            // Load Pro status from users table for all loaded profiles
+            // Load Pro and verification status from Supabase for all loaded profiles
             await loadProStatusForProfiles()
+            await loadVerifiedStatusForProfiles()
             
         } catch {
             print("❌ CategoryRecommendationsView: Failed to load recommendations: \(error.localizedDescription)")
@@ -779,6 +791,23 @@ struct CategoryRecommendationsView: View {
         } catch {
             print("⚠️ [Pro] Failed to load Pro status: \(error.localizedDescription)")
             // Don't fail the whole load if Pro status fails
+        }
+    }
+    
+    private func loadVerifiedStatusForProfiles() async {
+        guard !profiles.isEmpty else { return }
+        
+        let userIds = profiles.map { $0.userId }
+        print("🔍 [Verify] Loading verification status for \(userIds.count) profiles...")
+        
+        do {
+            let verified = try await supabaseService.getVerifiedUserIds(from: userIds)
+            await MainActor.run {
+                self.verifiedUsers = verified
+                print("✅ [Verify] Loaded verification status: \(verified.count) verified users")
+            }
+        } catch {
+            print("⚠️ [Verify] Failed to load verification status: \(error.localizedDescription)")
         }
     }
     

@@ -19,6 +19,9 @@ class LocationService: NSObject, ObservableObject {
     private var geocodeCache: [String: CLLocation] = [:]
     private let cacheQueue = DispatchQueue(label: "com.brewnet.geocodeCache")
     
+    // ⭐ 新增：缓存距离计算结果，避免重复计算相同地址对的距离
+    private var distanceCache: [String: Double] = [:]
+    
     // ⭐ 新增：跟踪正在进行的地理编码请求，避免重复请求
     private var pendingRequests: [String: [(CLLocation?) -> Void]] = [:]
     private let requestsQueue = DispatchQueue(label: "com.brewnet.pendingRequests")
@@ -252,6 +255,19 @@ class LocationService: NSObject, ObservableObject {
         }
     }
     
+    // MARK: - Clear Distance Cache
+    func clearDistanceCache() {
+        distanceCache.removeAll()
+        print("🗑️ [缓存] 已清空距离缓存")
+    }
+    
+    // MARK: - Clear All Caches
+    func clearAllCaches() {
+        clearGeocodeCache()
+        clearDistanceCache()
+        print("🗑️ [缓存] 已清空所有缓存")
+    }
+    
     // MARK: - Calculate Distance Between Two Addresses
     func calculateDistanceBetweenAddresses(
         address1: String?,
@@ -267,6 +283,16 @@ class LocationService: NSObject, ObservableObject {
         // 如果两个地址相同，距离为0
         if address1 == address2 {
             completion(0.0)
+            return
+        }
+        
+        // ⭐ 检查距离缓存（双向检查：A->B 和 B->A）
+        let cacheKey1 = "\(address1)||\(address2)"
+        let cacheKey2 = "\(address2)||\(address1)"
+        
+        if let cachedDistance = distanceCache[cacheKey1] ?? distanceCache[cacheKey2] {
+            print("⚡️ [距离缓存] 命中缓存: \(address1) <-> \(address2) = \(formatDistance(cachedDistance))")
+            completion(cachedDistance)
             return
         }
         
@@ -314,6 +340,11 @@ class LocationService: NSObject, ObservableObject {
             
             let distance = self.calculateDistance(from: loc1, to: loc2)
             print("📏 [LocationService] 计算距离: '\(address1)' 到 '\(address2)' = \(self.formatDistance(distance))")
+            
+            // ⭐ 存入距离缓存
+            self.distanceCache[cacheKey1] = distance
+            print("💾 [距离缓存] 已缓存: \(address1) <-> \(address2) = \(self.formatDistance(distance))")
+            
             completion(distance)
         }
     }

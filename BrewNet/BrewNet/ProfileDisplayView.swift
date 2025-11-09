@@ -1,3 +1,189 @@
+struct MinimalProfileHeaderView: View {
+    let profile: BrewNetProfile
+    let isVerified: Bool
+    let showProBadge: Bool
+    var onEditProfile: (() -> Void)?
+    var onAvatarTap: (() -> Void)?
+    var onProfileUpdated: ((BrewNetProfile) -> Void)?
+
+    @EnvironmentObject var supabaseService: SupabaseService
+    @EnvironmentObject var authManager: AuthManager
+
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var isUploadingImage = false
+
+    private var verificationColor: Color {
+        isVerified ? Color(red: 0.15, green: 0.43, blue: 0.85) : Color.gray.opacity(0.5)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ZStack(alignment: .bottomLeading) {
+                AvatarView(avatarString: profile.coreIdentity.profileImage ?? "", size: 140)
+                    .onTapGesture {
+                        onAvatarTap?()
+                    }
+
+                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                    Image(systemName: "camera.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(10)
+                        .background(Color.blue)
+                        .clipShape(Circle())
+                        .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
+                }
+                .disabled(isUploadingImage)
+                .offset(x: -8, y: 8)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                Image(systemName: "person.badge.shield.checkmark.fill")
+                    .font(.system(size: 22))
+                    .foregroundColor(verificationColor)
+                    .padding(8)
+                    .background(Color.white)
+                    .clipShape(Circle())
+                    .shadow(color: Color.black.opacity(0.1), radius: 3, x: 0, y: 1)
+                    .offset(x: 8, y: 8)
+            }
+
+            VStack(spacing: 8) {
+                ZStack {
+                    Text(profile.coreIdentity.name)
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        .frame(maxWidth: .infinity)
+                    
+                    if showProBadge {
+                        HStack {
+                            Spacer()
+                            ProBadge(size: .medium)
+                                .offset(x: -20)
+                        }
+                    }
+                }
+
+                // if let pronouns = profile.coreIdentity.pronouns, !pronouns.isEmpty {
+                //     Text(pronouns)
+                //         .font(.system(size: 13, weight: .semibold))
+                //         .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                //         .padding(.horizontal, 14)
+                //         .padding(.vertical, 6)
+                //         .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.12))
+                //         .cornerRadius(16)
+                // }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(24)
+        .background(Color.white)
+        .cornerRadius(28)
+        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+        .onChange(of: selectedPhotoItem) { newItem in
+            Task {
+                await handlePhotoSelection(newItem)
+            }
+        }
+    }
+
+    private func handlePhotoSelection(_ item: PhotosPickerItem?) async {
+        guard let item = item else { return }
+        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+
+        await MainActor.run {
+            isUploadingImage = true
+        }
+
+        if let userId = authManager.currentUser?.id {
+            do {
+                let fileExtension = detectImageFormat(from: data) ?? "jpg"
+
+                let publicURL = try await supabaseService.uploadProfileImage(
+                    userId: userId,
+                    imageData: data,
+                    fileExtension: fileExtension
+                )
+
+                let updatedCoreIdentity = CoreIdentity(
+                    name: profile.coreIdentity.name,
+                    email: profile.coreIdentity.email,
+                    phoneNumber: profile.coreIdentity.phoneNumber,
+                    profileImage: publicURL,
+                    bio: profile.coreIdentity.bio,
+                    pronouns: profile.coreIdentity.pronouns,
+                    location: profile.coreIdentity.location,
+                    personalWebsite: profile.coreIdentity.personalWebsite,
+                    githubUrl: profile.coreIdentity.githubUrl,
+                    linkedinUrl: profile.coreIdentity.linkedinUrl,
+                    timeZone: profile.coreIdentity.timeZone
+                )
+
+                let updatedProfile = BrewNetProfile(
+                    id: profile.id,
+                    userId: profile.userId,
+                    createdAt: profile.createdAt,
+                    updatedAt: ISO8601DateFormatter().string(from: Date()),
+                    coreIdentity: updatedCoreIdentity,
+                    professionalBackground: profile.professionalBackground,
+                    networkingIntention: profile.networkingIntention,
+                    networkingPreferences: profile.networkingPreferences,
+                    personalitySocial: profile.personalitySocial,
+                    workPhotos: profile.workPhotos,
+                    lifestylePhotos: profile.lifestylePhotos,
+                    privacyTrust: profile.privacyTrust
+                )
+
+                let supabaseProfile = SupabaseProfile(
+                    id: profile.id,
+                    userId: profile.userId,
+                    coreIdentity: updatedCoreIdentity,
+                    professionalBackground: profile.professionalBackground,
+                    networkingIntention: profile.networkingIntention,
+                    networkingPreferences: profile.networkingPreferences,
+                    personalitySocial: profile.personalitySocial,
+                    workPhotos: profile.workPhotos,
+                    lifestylePhotos: profile.lifestylePhotos,
+                    privacyTrust: profile.privacyTrust,
+                    createdAt: profile.createdAt,
+                    updatedAt: ISO8601DateFormatter().string(from: Date())
+                )
+
+                _ = try await supabaseService.updateProfile(profileId: profile.id, profile: supabaseProfile)
+
+                if let verifiedProfile = try? await supabaseService.getProfile(userId: profile.userId) {
+                    let verifiedBrewNetProfile = verifiedProfile.toBrewNetProfile()
+                    await MainActor.run {
+                        onProfileUpdated?(verifiedBrewNetProfile)
+                    }
+                } else {
+                    await MainActor.run {
+                        onProfileUpdated?(updatedProfile)
+                    }
+                }
+
+                await MainActor.run {
+                    isUploadingImage = false
+                    NotificationCenter.default.post(name: NSNotification.Name("ProfileUpdated"), object: nil)
+                }
+            } catch {
+                await MainActor.run {
+                    isUploadingImage = false
+                }
+            }
+        }
+    }
+
+    private func detectImageFormat(from data: Data) -> String? {
+        guard data.count >= 12 else { return nil }
+
+        if data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF { return "jpg" }
+        if data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 { return "png" }
+        if String(data: data.prefix(6), encoding: .ascii) == "GIF89a" ||
+            String(data: data.prefix(6), encoding: .ascii) == "GIF87a" { return "gif" }
+
+        return nil
+    }
+}
 import SwiftUI
 import PhotosUI
 import UIKit
@@ -193,6 +379,8 @@ struct ProfileDisplayView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var supabaseService: SupabaseService
     
+    private let themeBrown = Color(red: 0.4, green: 0.2, blue: 0.1)
+    
     // State variables for matches and invitations
     @State private var showingMatches = false
     @State private var matches: [SupabaseMatch] = []
@@ -213,25 +401,27 @@ struct ProfileDisplayView: View {
     // 头像同步定时器
     @State private var avatarSyncTimer: Timer?
     @State private var lastProfileImageURL: String? = nil // 跟踪上次的头像URL
+    @State private var resolvedVerifiedStatus: Bool? = nil
+    @State private var selectedWorkExperience: WorkExperience?
     
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
-                // Profile Header with new layout
-                ProfileHeaderView(
+                MinimalProfileHeaderView(
                     profile: profile,
+                    isVerified: resolvedVerifiedStatus ?? false,
+                    showProBadge: authManager.currentUser?.isPro ?? false,
                     onEditProfile: onEditProfile,
-                    onProfileUpdated: { updatedProfile in
-                        profile = updatedProfile
-                        // 同时调用父视图的回调，确保更新同步
-                        onProfileUpdated?(updatedProfile)
-                    },
-                    onShowProfileCard: {
+                    onAvatarTap: {
                         showingProfileCard = true
+                    },
+                    onProfileUpdated: { updated in
+                        profile = updated
+                        onProfileUpdated?(updated)
                     }
                 )
                 .padding(.horizontal, 16)
-                .padding(.top, 8)
+                .padding(.top, 16)
                 
                 // Coffee Chat Schedule, Points System and Redemption System Buttons
                 HStack(spacing: 12) {
@@ -249,7 +439,11 @@ struct ProfileDisplayView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(Color.clear)
+                        .background(Color.white)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.3), lineWidth: 1.5)
+                        )
                         .cornerRadius(12)
                     }
                     
@@ -267,7 +461,11 @@ struct ProfileDisplayView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(Color.clear)
+                        .background(Color.white)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.3), lineWidth: 1.5)
+                        )
                         .cornerRadius(12)
                     }
                     
@@ -285,7 +483,11 @@ struct ProfileDisplayView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(Color.clear)
+                        .background(Color.white)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.3), lineWidth: 1.5)
+                        )
                         .cornerRadius(12)
                     }
                 }
@@ -323,6 +525,7 @@ struct ProfileDisplayView: View {
             loadSentInvitations()
             startAvatarSyncTimer()
             lastProfileImageURL = profile.coreIdentity.profileImage
+            resolveVerifiedStatusIfNeeded(force: true)
         }
         .onDisappear {
             stopAvatarSyncTimer()
@@ -335,6 +538,9 @@ struct ProfileDisplayView: View {
                 print("🔄 [Profile] 头像URL变化，已清除旧缓存: \(oldURL)")
             }
             lastProfileImageURL = newImageURL
+        }
+        .onChange(of: profile.privacyTrust.verifiedStatus) { _ in
+            resolveVerifiedStatusIfNeeded(force: true)
         }
         .sheet(isPresented: $showingMatches) {
             NavigationStack {
@@ -357,6 +563,13 @@ struct ProfileDisplayView: View {
             UserProfileCardSheetView(
                 profile: profile,
                 isConnection: true // 自己查看自己，所以 connections_only 的内容也应该显示
+            )
+        }
+        .sheet(item: $selectedWorkExperience) { workExp in
+            WorkExperienceDetailSheet(
+                workExperience: workExp,
+                allSkills: Array(profile.professionalBackground.skills.prefix(8)),
+                industry: profile.professionalBackground.industry
             )
         }
         .sheet(isPresented: $showingPointsSystem) {
@@ -387,6 +600,21 @@ struct ProfileDisplayView: View {
             RedemptionSystemView()
                 .environmentObject(authManager)
                 .environmentObject(supabaseService)
+        }
+    }
+    
+    private func resolveVerifiedStatusIfNeeded(force: Bool = false) {
+        if !force, resolvedVerifiedStatus != nil { return }
+        
+        Task {
+            do {
+                let verifiedIds = try await supabaseService.getVerifiedUserIds(from: [profile.userId])
+                await MainActor.run {
+                    resolvedVerifiedStatus = verifiedIds.contains(profile.userId)
+                }
+            } catch {
+                print("⚠️ [ProfileDisplayView] Failed to resolve verification status: \(error.localizedDescription)")
+            }
         }
     }
     
@@ -608,6 +836,14 @@ struct ProfileHeaderView: View {
     @State private var errorMessage = ""
     @State private var showSuccessAlert = false
     
+    // ⭐ 资源数量
+    @State private var credits: Int = 0
+    @State private var boosts: Int = 0
+    @State private var superboosts: Int = 0
+    @State private var tokens: Int = 0
+    @State private var isLoadingResources = true
+    @State private var isResourcesExpanded = false // 资源展开/收起状态
+    
     // 计算资料完成度百分比
     private var profileCompletionPercentage: Int {
         var completedFields = 0
@@ -691,11 +927,14 @@ struct ProfileHeaderView: View {
                 Text(profile.coreIdentity.name)
                     .font(.system(size: 30, weight: .bold))
                     .foregroundColor(.black)
+                    .lineLimit(1)
                 
                 if authManager.currentUser?.isPro == true {
                     ProBadge(size: .medium)
+                        .fixedSize()
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
             
             // Icons row
             HStack(spacing: 12) {
@@ -726,6 +965,79 @@ struct ProfileHeaderView: View {
                     .clipShape(Circle())
             }
         }
+    }
+    
+    @ViewBuilder
+    private var resourcesView: some View {
+        Button(action: {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                isResourcesExpanded.toggle()
+            }
+        }) {
+            VStack(alignment: .leading, spacing: 6) {
+                // Credits (always visible)
+                HStack(spacing: 4) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.yellow)
+                        .frame(width: 20, alignment: .center)
+                    Text("\(credits)")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.black)
+                        .frame(minWidth: 30, alignment: .leading)
+                    
+                    // 展开/收起图标
+                    Image(systemName: isResourcesExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.gray)
+                }
+                
+                if isResourcesExpanded {
+                    // Boost
+                    HStack(spacing: 4) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(Color(red: 0.4, green: 0.5, blue: 0.5))
+                            .frame(width: 20, alignment: .center)
+                        Text("\(boosts)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.black)
+                            .frame(minWidth: 30, alignment: .leading)
+                    }
+                    
+                    // Superboost
+                    HStack(spacing: 4) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.yellow)
+                            .frame(width: 20, alignment: .center)
+                        Text("\(superboosts)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.black)
+                            .frame(minWidth: 30, alignment: .leading)
+                    }
+                    
+                    // BrewToken
+                    HStack(spacing: 4) {
+                        ZStack {
+                            Circle()
+                                .fill(Color(red: 0.9, green: 0.7, blue: 0.2))
+                                .frame(width: 18, height: 18)
+                            
+                            Text("B")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                        .frame(width: 20, alignment: .center)
+                        Text("\(tokens)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.black)
+                            .frame(minWidth: 30, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
     }
     
     @ViewBuilder
@@ -783,7 +1095,7 @@ struct ProfileHeaderView: View {
             Button(action: {
                 onShowProfileCard?()
             }) {
-                HStack(alignment: .top, spacing: 16) {
+                HStack(alignment: .top, spacing: 12) {
                     avatarWithProgressView
                     
                     VStack(alignment: .leading, spacing: 8) {
@@ -791,13 +1103,31 @@ struct ProfileHeaderView: View {
                         //companyTitleView
                     }
                     
-                    Spacer()
+                    Spacer(minLength: 8)
+                    
+                    // ⭐ 资源显示
+                    if isLoadingResources {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                            .scaleEffect(0.8)
+                            .frame(width: 60)
+                    } else {
+                        resourcesView
+                            .frame(width: 60)
+                    }
                 }
             }
             .buttonStyle(PlainButtonStyle())
         }
         .padding(20)
         .background(Color.white)
+        .onAppear {
+            loadResources()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ResourcesUpdated"))) { _ in
+            print("📨 [ProfileHeaderView] 收到资源更新通知，重新加载...")
+            loadResources()
+        }
         .onChange(of: selectedPhotoItem) { newItem in
             Task {
                 guard let newItem = newItem else { return }
@@ -941,6 +1271,57 @@ struct ProfileHeaderView: View {
         }
         
         return nil
+    }
+    
+    // ⭐ 加载用户资源数量
+    private func loadResources() {
+        guard let userId = authManager.currentUser?.id else {
+            isLoadingResources = false
+            return
+        }
+        
+        Task {
+            do {
+                // 从 users 表查询资源数量
+                struct UserResources: Codable {
+                    let credits: Int?
+                    let boost_count: Int?
+                    let superboost_count: Int?
+                    let tokens: Int?
+                    
+                    enum CodingKeys: String, CodingKey {
+                        case credits
+                        case boost_count
+                        case superboost_count
+                        case tokens
+                    }
+                }
+                
+                let response: UserResources = try await SupabaseConfig.shared.client
+                    .from("users")
+                    .select("credits, boost_count, superboost_count, tokens")
+                    .eq("id", value: userId)
+                    .single()
+                    .execute()
+                    .value
+                
+                await MainActor.run {
+                    self.credits = response.credits ?? 0
+                    self.boosts = response.boost_count ?? 0
+                    self.superboosts = response.superboost_count ?? 0
+                    self.tokens = response.tokens ?? 0
+                    self.isLoadingResources = false
+                    
+                    print("✅ [Resources] 加载成功 - Credits: \(credits), Boosts: \(boosts), Superboosts: \(superboosts), Tokens: \(tokens)")
+                }
+                
+            } catch {
+                print("❌ [Resources] 加载失败: \(error)")
+                await MainActor.run {
+                    self.isLoadingResources = false
+                }
+            }
+        }
     }
 }
 
@@ -1126,11 +1507,11 @@ struct TokenCard: View {
                 
                 // 中间文本
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Buy Tokens")
+                    Text("BrewTokens")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundColor(.primary)
                     
-                    Text("Tokens let you invite mentors, start conversations, and show appreciation for their time.")
+                    Text("BrewTokens are a way to show respect for someone's time and insight.")
                         .font(.system(size: 14))
                         .foregroundColor(.gray)
                         .lineLimit(3)
@@ -1511,9 +1892,24 @@ struct ProfessionalBackgroundDisplayView: View {
 struct NetworkingIntentionDisplayView: View {
     let intention: NetworkingIntention
     
+    private var allIntentions: [NetworkingIntentionType] {
+        var set: [NetworkingIntentionType] = []
+        if !set.contains(intention.selectedIntention) {
+            set.append(intention.selectedIntention)
+        }
+        for extra in intention.additionalIntentions where !set.contains(extra) {
+            set.append(extra)
+        }
+        return set
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            InfoRow(label: "Main Intention", value: intention.selectedIntention.displayName)
+            FlowLayout(spacing: 12) {
+                ForEach(allIntentions, id: \.self) { item in
+                    NetworkingIntentionBadgeView(intention: item)
+                }
+            }
             
             if let careerDirection = intention.careerDirection {
                 CareerDirectionDisplayView(data: careerDirection)
@@ -2192,12 +2588,18 @@ struct SentInvitationRowView: View {
 struct PublicProfileView: View {
     let profile: BrewNetProfile
     @EnvironmentObject var supabaseService: SupabaseService
+    @EnvironmentObject var authManager: AuthManager
     @Environment(\.dismiss) var dismiss
     
     var body: some View {
         NavigationStack {
             // Use unified PublicProfileCardView
-            PublicProfileCardView(profile: profile)
+            PublicProfileCardView(
+                profile: profile,
+                isConnection: authManager.currentUser?.id == profile.userId,
+                isProUser: authManager.currentUser?.id == profile.userId ? authManager.currentUser?.isPro : nil,
+                showDistance: authManager.currentUser?.id == profile.userId ? false : true
+            )
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -2302,7 +2704,7 @@ struct PublicProfileHeaderView: View {
                     // Pronouns (always visible)
                     if let pronouns = profile.coreIdentity.pronouns {
                         Text(pronouns)
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.system(size: 10, weight: .medium))
                             .foregroundColor(.gray)
                     }
                     
@@ -2373,49 +2775,43 @@ struct UserProfileCardSheetView: View {
     let isConnection: Bool // Whether the current user is connected to this profile
     
     @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
     @State private var selectedWorkExperience: WorkExperience?
+    @State private var resolvedVerifiedStatus: Bool?
+    @State private var currentUserLocation: String?
     
-    // Verify privacy settings are loaded from database
-    private var privacySettings: VisibilitySettings {
-        let settings = profile.privacyTrust.visibilitySettings
-        // Log privacy settings for debugging
-        print("🔒 Profile Page Privacy Settings for \(profile.coreIdentity.name):")
-        print("   - company: \(settings.company.rawValue) -> visible: \(settings.company.isVisible(isConnection: isConnection))")
-        print("   - skills: \(settings.skills.rawValue) -> visible: \(settings.skills.isVisible(isConnection: isConnection))")
-        print("   - interests: \(settings.interests.rawValue) -> visible: \(settings.interests.isVisible(isConnection: isConnection))")
-        print("   - location: \(settings.location.rawValue) -> visible: \(settings.location.isVisible(isConnection: isConnection))")
-        print("   - timeslot: \(settings.timeslot.rawValue) -> visible: \(settings.timeslot.isVisible(isConnection: isConnection))")
-        print("   - isConnection: \(isConnection)")
-        return settings
+    private var displayIsPro: Bool {
+        if let currentUser = authManager.currentUser, currentUser.id == profile.userId {
+            return currentUser.isPro
+        }
+        return false
     }
-    
-    private let screenWidth = UIScreen.main.bounds.width
-    private let screenHeight = UIScreen.main.bounds.height
     
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(Color(red: 0.98, green: 0.97, blue: 0.95))
-                    .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
-                    .frame(width: screenWidth - 40, height: screenHeight * 0.85)
+                Color(red: 0.98, green: 0.97, blue: 0.95)
+                    .ignoresSafeArea()
                 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        // Level 1: Core Information Area
-                        level1CoreInfoView
-                        
-                        // Level 2: Matching Clues
-                        level2MatchingCluesView
-                        
-                        // Level 3: Deep Understanding
-                        level3DeepUnderstandingView
-                    }
-                    .frame(maxWidth: screenWidth - 40)
+                ScrollView(.vertical, showsIndicators: false) {
+                    ProfileCardContentView(
+                        profile: profile,
+                        isConnection: isConnection,
+                        isProUser: displayIsPro,
+                    isVerified: resolvedVerifiedStatus,
+                        currentUserLocation: currentUserLocation,
+                        showDistance: true,
+                        onWorkExperienceTap: { workExp in
+                            selectedWorkExperience = workExp
+                        }
+                    )
+                    .background(Color.white)
+                    .cornerRadius(28)
+                    .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 24)
                 }
-                .frame(height: screenHeight * 0.85)
-                .cornerRadius(20)
             }
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
@@ -2426,6 +2822,10 @@ struct UserProfileCardSheetView: View {
                     }
                 }
             }
+            .onAppear {
+                loadCurrentUserLocation()
+                resolveVerifiedStatusIfNeeded()
+            }
         }
         .sheet(item: $selectedWorkExperience) { workExp in
             WorkExperienceDetailSheet(
@@ -2434,94 +2834,9 @@ struct UserProfileCardSheetView: View {
                 industry: profile.professionalBackground.industry
             )
         }
-    }
-    
-    // MARK: - Level 1: Core Information Area
-    private var level1CoreInfoView: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Profile Image and Name Section
-            HStack(alignment: .top, spacing: 16) {
-                // Profile Image
-                profileImageView
-                
-                // Name and Pronouns
-                VStack(alignment: .leading, spacing: 8) {
-                    // Name - 独立换行
-                    Text(profile.coreIdentity.name)
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                        .lineLimit(nil)
-                    
-                    // Pronouns - 独立一行
-                    if let pronouns = profile.coreIdentity.pronouns {
-                        Text(pronouns)
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.gray)
-                    }
-                    
-                    // Headline / Bio
-                    if let bio = profile.coreIdentity.bio, !bio.isEmpty {
-                        Text(bio)
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                            .lineLimit(nil)
-                    }
-                }
-                
-                Spacer()
-            }
-            
-            // Professional Info (only if company visibility is public or connections_only)
-            if shouldShowCompany {
-                HStack(spacing: 8) {
-                    if let jobTitle = profile.professionalBackground.jobTitle, !jobTitle.isEmpty {
-                        Text(jobTitle)
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(.primary)
-                            .lineLimit(nil)
-                        
-                        if let company = profile.professionalBackground.currentCompany, !company.isEmpty {
-                            Text("@")
-                                .font(.system(size: 18))
-                                .foregroundColor(.gray)
-                            Text(company)
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(.primary)
-                                .lineLimit(nil)
-                        }
-                    }
-                    
-                    Spacer(minLength: 0)
-                }
-            }
-            
-            // Industry and Experience Level
-            HStack(spacing: 8) {
-                if let industry = profile.professionalBackground.industry, !industry.isEmpty {
-                    Text(industry)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.gray)
-                        .lineLimit(nil)
-                    
-                    if profile.professionalBackground.experienceLevel != .entry {
-                        Text("·")
-                            .font(.system(size: 16))
-                            .foregroundColor(.gray)
-                        
-                        Text(profile.professionalBackground.experienceLevel.displayName)
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.gray)
-                    }
-                }
-                
-                Spacer(minLength: 0)
-            }
-            
-            // Networking Intention Badge
-            NetworkingIntentionBadgeView(intention: profile.networkingIntention.selectedIntention)
+        .onAppear {
+            resolveVerifiedStatusIfNeeded()
         }
-        .padding(20)
-        .background(Color.clear)
     }
     
     private var profileImageView: some View {
@@ -2551,6 +2866,54 @@ struct UserProfileCardSheetView: View {
                 .stroke(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.3), lineWidth: 2)
         )
     }
+
+    private func resolveVerifiedStatusIfNeeded() {
+        guard resolvedVerifiedStatus == nil else { return }
+        
+        Task {
+            do {
+                let verifiedIds = try await supabaseService.getVerifiedUserIds(from: [profile.userId])
+                await MainActor.run {
+                    resolvedVerifiedStatus = verifiedIds.contains(profile.userId)
+                }
+            } catch {
+                print("⚠️ [UserProfileCardSheet] Failed to load verification status: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    // MARK: - Load Current User Location
+    private func loadCurrentUserLocation() {
+        guard let currentUser = authManager.currentUser else {
+            print("⚠️ [UserProfileCardSheet] 没有当前用户，无法加载位置")
+            return
+        }
+        
+        print("📍 [UserProfileCardSheet] 开始加载当前用户位置...")
+        print("   - 当前用户 ID: \(currentUser.id)")
+        
+        Task {
+            do {
+                if let currentProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                    let rawLocation = currentProfile.coreIdentity.location
+                    print("   - [原始数据] coreIdentity.location: \(rawLocation ?? "nil")")
+                    
+                    let brewNetProfile = currentProfile.toBrewNetProfile()
+                    await MainActor.run {
+                        currentUserLocation = brewNetProfile.coreIdentity.location
+                        print("✅ [UserProfileCardSheet] 已加载当前用户位置: \(brewNetProfile.coreIdentity.location ?? "nil")")
+                        if brewNetProfile.coreIdentity.location == nil || brewNetProfile.coreIdentity.location?.isEmpty == true {
+                            print("⚠️ [UserProfileCardSheet] 当前用户没有设置位置信息")
+                        }
+                    }
+                } else {
+                    print("⚠️ [UserProfileCardSheet] 无法获取当前用户 profile")
+                }
+            } catch {
+                print("⚠️ [UserProfileCardSheet] 加载当前用户位置失败: \(error.localizedDescription)")
+            }
+        }
+    }
     
     private var placeholderImageView: some View {
         LinearGradient(
@@ -2570,7 +2933,7 @@ struct UserProfileCardSheetView: View {
     
     // MARK: - Level 2: Matching Clues
     private var level2MatchingCluesView: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
             Divider()
             
             // Sub-Intentions
@@ -2726,7 +3089,7 @@ struct UserProfileCardSheetView: View {
                     HStack {
                         Image(systemName: "briefcase.fill")
                             .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        Text("Experience")
+                        Text("Working Experience")
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                     }
@@ -2787,6 +3150,10 @@ struct UserProfileCardSheetView: View {
     }
     
     // MARK: - Privacy Visibility Checks (strictly follows database privacy_trust.visibility_settings)
+    private var privacySettings: VisibilitySettings {
+        profile.privacyTrust.visibilitySettings
+    }
+    
     // Shows fields marked as "public" or "connections_only" when isConnection is true
     private var shouldShowCompany: Bool {
         let settings = privacySettings
@@ -4250,6 +4617,8 @@ struct TokenPurchaseView: View {
     @State private var isProcessing = false
     @State private var showError = false
     @State private var errorMessage = ""
+    @State private var showSuccess = false // ⭐ 成功提示
+    @State private var purchasedTokens = 0 // ⭐ 购买的 Token 数量
     
     let tokenOptions = [
         TokenOption(
@@ -4258,7 +4627,7 @@ struct TokenPurchaseView: View {
             priceValue: 4.99,
             description: "Trial Pack",
             subtitle: "Perfect for first-time users",
-            unitPrice: "≈ $0.10 / Token",
+            unitPrice: "≈ $0.10 / BrewToken",
             bonus: nil
         ),
         TokenOption(
@@ -4267,7 +4636,7 @@ struct TokenPurchaseView: View {
             priceValue: 9.99,
             description: "Most Popular",
             subtitle: "Great for regular users",
-            unitPrice: "≈ $0.083 / Token",
+            unitPrice: "≈ $0.083 / BrewToken",
             bonus: "+20% Bonus"
         ),
         TokenOption(
@@ -4276,7 +4645,7 @@ struct TokenPurchaseView: View {
             priceValue: 19.99,
             description: "Best Value",
             subtitle: "Popular choice",
-            unitPrice: "≈ $0.077 / Token",
+            unitPrice: "≈ $0.077 / BrewToken",
             bonus: "+30% Bonus"
         ),
         TokenOption(
@@ -4285,7 +4654,7 @@ struct TokenPurchaseView: View {
             priceValue: 49.99,
             description: "Professional",
             subtitle: "For power users",
-            unitPrice: "≈ $0.071 / Token",
+            unitPrice: "≈ $0.071 / BrewToken",
             bonus: "+40% Bonus"
         ),
         TokenOption(
@@ -4294,7 +4663,7 @@ struct TokenPurchaseView: View {
             priceValue: 99.99,
             description: "Mentor Pack",
             subtitle: "For mentors & heavy users",
-            unitPrice: "≈ $0.066 / Token",
+            unitPrice: "≈ $0.066 / BrewToken",
             bonus: "+50% Bonus"
         )
     ]
@@ -4309,7 +4678,7 @@ struct TokenPurchaseView: View {
                         .foregroundColor(.gray)
                 }
                 Spacer()
-                Text("Buy Tokens")
+                Text("BrewTokens")
                     .font(.system(size: 20, weight: .bold))
                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 Spacer()
@@ -4344,7 +4713,7 @@ struct TokenPurchaseView: View {
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
                     } else {
-                        Text("Purchase \(tokenOptions[selectedTokenIndex].tokens) Tokens")
+                        Text("Purchase \(tokenOptions[selectedTokenIndex].tokens) BrewTokens")
                             .font(.system(size: 18, weight: .bold))
                     }
                 }
@@ -4366,6 +4735,13 @@ struct TokenPurchaseView: View {
         } message: {
             Text(errorMessage)
         }
+        .alert("Purchase Successful! 🎉", isPresented: $showSuccess) {
+            Button("OK") {
+                dismiss()
+            }
+        } message: {
+            Text("You have received \(purchasedTokens) BrewTokens!\n\nYour new balance will be updated shortly.")
+        }
     }
     
     private func handlePurchase(option: TokenOption) {
@@ -4379,25 +4755,58 @@ struct TokenPurchaseView: View {
         
         Task {
             do {
-                // TODO: 实际的支付逻辑（集成 Stripe/Apple Pay）
-                // 这里先模拟购买成功，直接增加 tokens
-                
                 print("💳 [Token Purchase] 用户 \(userId) 购买 \(option.tokens) tokens，价格 \(option.price)")
                 
-                // 模拟网络延迟
-                try await Task.sleep(nanoseconds: 1_000_000_000)
+                // TODO: 实际的支付逻辑（集成 Stripe/Apple Pay）
+                // 这里先模拟支付成功，直接增加 tokens
                 
-                // TODO: 调用后端 API 记录交易并增加 tokens
-                // 现在先直接在数据库中增加 tokens
-                
-                await MainActor.run {
-                    isProcessing = false
-                    dismiss()
+                // 1. 查询当前 token 余额
+                struct UserTokens: Codable {
+                    let tokens: Int?
                 }
                 
-                print("✅ [Token Purchase] 购买成功")
+                let currentData: UserTokens = try await SupabaseConfig.shared.client
+                    .from("users")
+                    .select("tokens")
+                    .eq("id", value: userId)
+                    .single()
+                    .execute()
+                    .value
+                
+                let currentTokens = currentData.tokens ?? 0
+                let newTokens = currentTokens + option.tokens
+                
+                print("💰 [Token Purchase] 当前: \(currentTokens), 购买: \(option.tokens), 新余额: \(newTokens)")
+                
+                // 2. 更新数据库中的 token 数量
+                struct TokenUpdate: Codable {
+                    let tokens: Int
+                }
+                
+                try await SupabaseConfig.shared.client
+                    .from("users")
+                    .update(TokenUpdate(tokens: newTokens))
+                    .eq("id", value: userId)
+                    .execute()
+                
+                print("✅ [Token Purchase] 数据库更新成功，新余额: \(newTokens)")
+                
+                // 3. 发送通知刷新资源显示
+                await MainActor.run {
+                    NotificationCenter.default.post(name: NSNotification.Name("ResourcesUpdated"), object: nil)
+                }
+                
+                // 4. 显示成功提示
+                await MainActor.run {
+                    isProcessing = false
+                    purchasedTokens = option.tokens
+                    showSuccess = true
+                }
+                
+                print("🎉 [Token Purchase] 购买完成，获得 \(option.tokens) Tokens")
                 
             } catch {
+                print("❌ [Token Purchase] 购买失败: \(error)")
                 await MainActor.run {
                     isProcessing = false
                     errorMessage = "Purchase failed: \(error.localizedDescription)"
@@ -4457,7 +4866,7 @@ struct TokenOptionCard: View {
                 .padding(.top, option.bonus != nil ? 8 : 2)
                 
                 // Tokens Amount
-                Text("\(option.tokens) Tokens")
+                Text("\(option.tokens) BrewTokens")
                     .font(.system(size: 28, weight: .heavy))
                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 
