@@ -896,6 +896,10 @@ struct ProfileHeaderView: View {
         .onAppear {
             loadResources()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ResourcesUpdated"))) { _ in
+            print("📨 [ProfileHeaderView] 收到资源更新通知，重新加载...")
+            loadResources()
+        }
         .onChange(of: selectedPhotoItem) { newItem in
             Task {
                 guard let newItem = newItem else { return }
@@ -4399,6 +4403,8 @@ struct TokenPurchaseView: View {
     @State private var isProcessing = false
     @State private var showError = false
     @State private var errorMessage = ""
+    @State private var showSuccess = false // ⭐ 成功提示
+    @State private var purchasedTokens = 0 // ⭐ 购买的 Token 数量
     
     let tokenOptions = [
         TokenOption(
@@ -4515,6 +4521,13 @@ struct TokenPurchaseView: View {
         } message: {
             Text(errorMessage)
         }
+        .alert("Purchase Successful! 🎉", isPresented: $showSuccess) {
+            Button("OK") {
+                dismiss()
+            }
+        } message: {
+            Text("You have received \(purchasedTokens) Tokens!\n\nYour new balance will be updated shortly.")
+        }
     }
     
     private func handlePurchase(option: TokenOption) {
@@ -4528,25 +4541,58 @@ struct TokenPurchaseView: View {
         
         Task {
             do {
-                // TODO: 实际的支付逻辑（集成 Stripe/Apple Pay）
-                // 这里先模拟购买成功，直接增加 tokens
-                
                 print("💳 [Token Purchase] 用户 \(userId) 购买 \(option.tokens) tokens，价格 \(option.price)")
                 
-                // 模拟网络延迟
-                try await Task.sleep(nanoseconds: 1_000_000_000)
+                // TODO: 实际的支付逻辑（集成 Stripe/Apple Pay）
+                // 这里先模拟支付成功，直接增加 tokens
                 
-                // TODO: 调用后端 API 记录交易并增加 tokens
-                // 现在先直接在数据库中增加 tokens
-                
-                await MainActor.run {
-                    isProcessing = false
-                    dismiss()
+                // 1. 查询当前 token 余额
+                struct UserTokens: Codable {
+                    let tokens: Int?
                 }
                 
-                print("✅ [Token Purchase] 购买成功")
+                let currentData: UserTokens = try await SupabaseConfig.shared.client
+                    .from("users")
+                    .select("tokens")
+                    .eq("id", value: userId)
+                    .single()
+                    .execute()
+                    .value
+                
+                let currentTokens = currentData.tokens ?? 0
+                let newTokens = currentTokens + option.tokens
+                
+                print("💰 [Token Purchase] 当前: \(currentTokens), 购买: \(option.tokens), 新余额: \(newTokens)")
+                
+                // 2. 更新数据库中的 token 数量
+                struct TokenUpdate: Codable {
+                    let tokens: Int
+                }
+                
+                try await SupabaseConfig.shared.client
+                    .from("users")
+                    .update(TokenUpdate(tokens: newTokens))
+                    .eq("id", value: userId)
+                    .execute()
+                
+                print("✅ [Token Purchase] 数据库更新成功，新余额: \(newTokens)")
+                
+                // 3. 发送通知刷新资源显示
+                await MainActor.run {
+                    NotificationCenter.default.post(name: NSNotification.Name("ResourcesUpdated"), object: nil)
+                }
+                
+                // 4. 显示成功提示
+                await MainActor.run {
+                    isProcessing = false
+                    purchasedTokens = option.tokens
+                    showSuccess = true
+                }
+                
+                print("🎉 [Token Purchase] 购买完成，获得 \(option.tokens) Tokens")
                 
             } catch {
+                print("❌ [Token Purchase] 购买失败: \(error)")
                 await MainActor.run {
                     isProcessing = false
                     errorMessage = "Purchase failed: \(error.localizedDescription)"
