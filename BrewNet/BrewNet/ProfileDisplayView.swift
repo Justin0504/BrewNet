@@ -17,9 +17,9 @@ struct MinimalProfileHeaderView: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 12) {
             ZStack(alignment: .bottomLeading) {
-                AvatarView(avatarString: profile.coreIdentity.profileImage ?? "", size: 140)
+                AvatarView(avatarString: profile.coreIdentity.profileImage ?? "", size: 120)
                     .onTapGesture {
                         onAvatarTap?()
                     }
@@ -75,7 +75,7 @@ struct MinimalProfileHeaderView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(24)
+        .padding(20)
         .background(Color.white)
         .cornerRadius(28)
         .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
@@ -420,7 +420,7 @@ struct ProfileDisplayView: View {
                         onProfileUpdated?(updated)
                     }
                 )
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 24)
                 .padding(.top, 16)
                 
                 // Coffee Chat Schedule, Points System and Redemption System Buttons
@@ -491,28 +491,28 @@ struct ProfileDisplayView: View {
                         .cornerRadius(12)
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 24)
                 .padding(.top, 16)
                 
                 if let currentUser = authManager.currentUser {
                     ProUpgradeCard(isProActive: currentUser.isProActive) {
                         showSubscriptionPayment = true
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 24)
                     .padding(.top, 16)
                     
                     // Boost Card
                     BoostCard {
                         showingBoostPurchase = true
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 24)
                     .padding(.top, 12)
                     
                     // ⭐ Token 充值卡片
                     TokenCard {
                         showingTokenPurchase = true
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 24)
                     .padding(.top, 12)
                 }
             }

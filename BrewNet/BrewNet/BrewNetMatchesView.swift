@@ -85,7 +85,7 @@ struct BrewNetMatchesView: View {
                         }
                     }
                     .padding(.leading, 20)
-                    .padding(.top, 60) // 避免状态栏重叠
+                    .padding(.top, 35) // 避免状态栏重叠
                     
                     Spacer()
                     
@@ -102,9 +102,9 @@ struct BrewNetMatchesView: View {
                             .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
                     }
                     .padding(.trailing, 20)
-                    .padding(.top, 60) // 避免状态栏重叠
+                    .padding(.top, 35) // 避免状态栏重叠
                 }
-                .padding(.bottom, 10) // 与卡片之间的间距
+                .padding(.bottom, 0) // 与卡片之间的间距
                 
                 // Loading indicator
                 if isLoading {
@@ -125,7 +125,7 @@ struct BrewNetMatchesView: View {
                                 isPro: proUsers.contains(profiles[currentIndex + 1].userId),
                                 isVerified: verifiedUsers.contains(profiles[currentIndex + 1].userId),
                                 showsOuterFrame: false,
-                                cardWidth: screenWidth - 20
+                                cardWidth: screenWidth - 4
                             )
                             .scaleEffect(isTransitioning ? 1.0 : 0.95)
                             .offset(y: isTransitioning ? 0 : 10)
@@ -146,7 +146,7 @@ struct BrewNetMatchesView: View {
                                 isPro: proUsers.contains(profiles[currentIndex].userId),
                                 isVerified: verifiedUsers.contains(profiles[currentIndex].userId),
                                 showsOuterFrame: false,
-                                cardWidth: screenWidth - 20
+                                cardWidth: screenWidth - 4
                             )
                             .opacity(1.0)
                         }
@@ -1514,6 +1514,7 @@ struct BrewNetMatchesView: View {
             
         } catch {
             print("❌ Failed to load profiles: \(error.localizedDescription)")
+            print("🔍 Error type: \(type(of: error))")
             
             // 检查是否是 noCandidates 错误（通过错误描述判断）
             let errorString = error.localizedDescription.lowercased()
@@ -1536,9 +1537,50 @@ struct BrewNetMatchesView: View {
                 return
             }
             
+            // 检查是否是数据解码错误
+            if let decodingError = error as? DecodingError {
+                print("🔍 DecodingError detected:")
+                switch decodingError {
+                case .keyNotFound(let key, let context):
+                    print("   - Missing key: \(key.stringValue)")
+                    print("   - Path: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+                case .valueNotFound(let type, let context):
+                    print("   - Missing value of type: \(type)")
+                    print("   - Path: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+                case .typeMismatch(let type, let context):
+                    print("   - Type mismatch: expected \(type)")
+                    print("   - Path: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+                case .dataCorrupted(let context):
+                    print("   - Data corrupted: \(context.debugDescription)")
+                @unknown default:
+                    print("   - Unknown decoding error")
+                }
+            }
+            
             await MainActor.run {
                 if isInitial {
-                    errorMessage = "Failed to load profiles: \(error.localizedDescription)"
+                    // 更详细的错误提示，帮助诊断问题
+                    if let decodingError = error as? DecodingError {
+                        var detailMessage = "Data format issue: "
+                        switch decodingError {
+                        case .keyNotFound(let key, let context):
+                            detailMessage += "Missing '\(key.stringValue)' at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))"
+                        case .valueNotFound(let type, let context):
+                            detailMessage += "Missing value of type \(type) at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))"
+                        case .typeMismatch(let type, let context):
+                            detailMessage += "Type mismatch for \(type) at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))"
+                        case .dataCorrupted(let context):
+                            detailMessage += "Corrupted data at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))"
+                        @unknown default:
+                            detailMessage += "Unknown decoding error"
+                        }
+                        print("🔍 详细错误: \(detailMessage)")
+                        errorMessage = "Profile data error. Please check console for details."
+                    } else if errorString.contains("couldn't be read") || errorString.contains("missing") {
+                        errorMessage = "Some profile data is incomplete. Please refresh to try again."
+                    } else {
+                        errorMessage = "Failed to load profiles: \(error.localizedDescription)"
+                    }
                     isLoading = false
                 } else {
                     isLoadingMore = false

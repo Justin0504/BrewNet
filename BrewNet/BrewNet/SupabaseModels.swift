@@ -182,6 +182,116 @@ struct SupabaseProfile: Codable, Identifiable {
         case updatedAt = "updated_at"
     }
     
+    // 标准初始化器（用于创建和更新profile）
+    init(
+        id: String,
+        userId: String,
+        coreIdentity: CoreIdentity,
+        professionalBackground: ProfessionalBackground,
+        networkingIntention: NetworkingIntention,
+        networkingPreferences: NetworkingPreferences,
+        personalitySocial: PersonalitySocial,
+        workPhotos: PhotoCollection?,
+        lifestylePhotos: PhotoCollection?,
+        privacyTrust: PrivacyTrust,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.id = id
+        self.userId = userId
+        self.coreIdentity = coreIdentity
+        self.professionalBackground = professionalBackground
+        self.networkingIntention = networkingIntention
+        self.networkingPreferences = networkingPreferences
+        self.personalitySocial = personalitySocial
+        self.workPhotos = workPhotos
+        self.lifestylePhotos = lifestylePhotos
+        self.privacyTrust = privacyTrust
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+    
+    // 自定义解码器，提供更详细的错误信息
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        do {
+            self.id = try container.decode(String.self, forKey: .id)
+            self.userId = try container.decode(String.self, forKey: .userId)
+            self.createdAt = try container.decode(String.self, forKey: .createdAt)
+            self.updatedAt = try container.decode(String.self, forKey: .updatedAt)
+            
+            // 解码各个复杂字段，并提供更详细的错误信息
+            do {
+                self.coreIdentity = try container.decode(CoreIdentity.self, forKey: .coreIdentity)
+            } catch {
+                print("❌ Failed to decode core_identity for user \(userId): \(error)")
+                throw DecodingError.dataCorrupted(DecodingError.Context(
+                    codingPath: [CodingKeys.coreIdentity],
+                    debugDescription: "Failed to decode core_identity: \(error.localizedDescription)"
+                ))
+            }
+            
+            do {
+                self.professionalBackground = try container.decode(ProfessionalBackground.self, forKey: .professionalBackground)
+            } catch {
+                print("❌ Failed to decode professional_background for user \(userId): \(error)")
+                throw DecodingError.dataCorrupted(DecodingError.Context(
+                    codingPath: [CodingKeys.professionalBackground],
+                    debugDescription: "Failed to decode professional_background: \(error.localizedDescription)"
+                ))
+            }
+            
+            do {
+                self.networkingIntention = try container.decode(NetworkingIntention.self, forKey: .networkingIntention)
+            } catch {
+                print("❌ Failed to decode networking_intention for user \(userId): \(error)")
+                throw DecodingError.dataCorrupted(DecodingError.Context(
+                    codingPath: [CodingKeys.networkingIntention],
+                    debugDescription: "Failed to decode networking_intention: \(error.localizedDescription)"
+                ))
+            }
+            
+            do {
+                self.networkingPreferences = try container.decode(NetworkingPreferences.self, forKey: .networkingPreferences)
+            } catch {
+                print("❌ Failed to decode networking_preferences for user \(userId): \(error)")
+                throw DecodingError.dataCorrupted(DecodingError.Context(
+                    codingPath: [CodingKeys.networkingPreferences],
+                    debugDescription: "Failed to decode networking_preferences: \(error.localizedDescription)"
+                ))
+            }
+            
+            do {
+                self.personalitySocial = try container.decode(PersonalitySocial.self, forKey: .personalitySocial)
+            } catch {
+                print("❌ Failed to decode personality_social for user \(userId): \(error)")
+                throw DecodingError.dataCorrupted(DecodingError.Context(
+                    codingPath: [CodingKeys.personalitySocial],
+                    debugDescription: "Failed to decode personality_social: \(error.localizedDescription)"
+                ))
+            }
+            
+            do {
+                self.privacyTrust = try container.decode(PrivacyTrust.self, forKey: .privacyTrust)
+            } catch {
+                print("❌ Failed to decode privacy_trust for user \(userId): \(error)")
+                throw DecodingError.dataCorrupted(DecodingError.Context(
+                    codingPath: [CodingKeys.privacyTrust],
+                    debugDescription: "Failed to decode privacy_trust: \(error.localizedDescription)"
+                ))
+            }
+            
+            // Optional fields
+            self.workPhotos = try container.decodeIfPresent(PhotoCollection.self, forKey: .workPhotos)
+            self.lifestylePhotos = try container.decodeIfPresent(PhotoCollection.self, forKey: .lifestylePhotos)
+            
+        } catch {
+            print("❌ Failed to decode SupabaseProfile: \(error)")
+            throw error
+        }
+    }
+    
     // Convert to BrewNetProfile
     func toBrewNetProfile() -> BrewNetProfile {
         return BrewNetProfile(
