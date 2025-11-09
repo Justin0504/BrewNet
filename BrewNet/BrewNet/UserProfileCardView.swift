@@ -124,15 +124,6 @@ struct DistanceDisplayView: View {
         print("   - address1 (当前用户): '\(currentLocation)'")
         print("   - address2 (对方): '\(otherLocation)'")
         
-        isLoading = true
-        distance = nil
-        
-        locationService.calculateDistanceBetweenAddresses(
-            address1: currentLocation,
-            address2: otherLocation
-        ) { calculatedDistance in
-            print("🔔 [DistanceDisplay] 收到距离计算回调")
-            print("   - calculatedDistance: \(calculatedDistance != nil ? "\(calculatedDistance!) km" : "nil")")
         // ⭐ 创建新的防抖动任务，延迟 0.3 秒执行
         let task = DispatchWorkItem { [self] in
             print("📍 [DistanceDisplay] 防抖动延迟后执行地理编码...")
@@ -172,7 +163,7 @@ struct DistanceDisplayView: View {
     }
     
     @ViewBuilder
-    private func styledContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+    func styledContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         if let backgroundColor {
             content()
                 .padding(.horizontal, 12)
