@@ -126,18 +126,16 @@ struct DistanceDisplayView: View {
         locationService.calculateDistanceBetweenAddresses(
             address1: currentLocation,
             address2: otherLocation
-        ) { [weak self] calculatedDistance in
-            guard let self = self else { return }
-            
+        ) { calculatedDistance in
             print("🔔 [DistanceDisplay] 收到距离计算回调")
             print("   - calculatedDistance: \(calculatedDistance != nil ? "\(calculatedDistance!) km" : "nil")")
             
             DispatchQueue.main.async {
                 print("🔄 [DistanceDisplay] 在主线程更新 UI")
-                self.isLoading = false
+                isLoading = false
                 if let distance = calculatedDistance {
                     self.distance = distance
-                    print("✅ [DistanceDisplay] ✅✅✅ 距离计算成功: \(self.locationService.formatDistance(distance)) ✅✅✅")
+                    print("✅ [DistanceDisplay] ✅✅✅ 距离计算成功: \(locationService.formatDistance(distance)) ✅✅✅")
                     print("   - distance 状态变量已设置为: \(self.distance != nil ? "\(self.distance!)" : "nil")")
                 } else {
                     self.distance = nil
