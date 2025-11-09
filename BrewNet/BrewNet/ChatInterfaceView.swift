@@ -34,6 +34,12 @@ struct ChatInterfaceView: View {
     @State private var showingCoffeeChatSchedule = false // 显示咖啡聊天日程列表
     @State private var textAnimationState: (line1: Bool, line2: Bool, question: Bool) = (false, false, false) // 文字动画状态
     @State private var invitationStatusCache: [String: CoffeeChatInvitation.InvitationStatus] = [:] // 邀请状态缓存，key: "senderId-receiverId"
+    @State private var currentInvitationInfo: [String: (status: CoffeeChatInvitation.InvitationStatus?, scheduledDate: Date?, location: String?, invitationId: String?, isSentByMe: Bool)] = [:] // 当前会话的邀请信息，key: "sessionId"
+    @State private var showingInvitationErrorAlert = false // 显示邀请错误提示
+    @State private var invitationErrorMessage = "" // 邀请错误消息
+    @State private var showingLocationErrorAlert = false // 显示地点错误提示
+    @State private var cancelledInvitationIds: Set<String> = [] // 已取消的邀请ID集合，防止重新加载
+    private let cancelledInvitationIdsKey = "cancelled_coffee_chat_invitation_ids" // UserDefaults key
     
     var body: some View {
         mainContent
@@ -73,40 +79,85 @@ struct ChatInterfaceView: View {
                 Task {
                     await loadCurrentUserProfile()
                 }
+                
+                // 从 UserDefaults 加载已取消的邀请ID
+                loadCancelledInvitationIds()
+                
+                // 监听邀请被接受的通知
+                NotificationCenter.default.addObserver(
+                    forName: NSNotification.Name("CoffeeChatInvitationAccepted"),
+                    object: nil,
+                    queue: .main
+                ) { notification in
+                    handleInvitationAccepted(notification: notification)
+                }
+                
+                // 监听邀请被取消的通知
+                NotificationCenter.default.addObserver(
+                    forName: NSNotification.Name("CoffeeChatInvitationCancelled"),
+                    object: nil,
+                    queue: .main
+                ) { notification in
+                    handleInvitationCancelled(notification: notification)
+                }
+                
+                // 监听邀请被拒绝的通知
+                NotificationCenter.default.addObserver(
+                    forName: NSNotification.Name("CoffeeChatInvitationRejected"),
+                    object: nil,
+                    queue: .main
+                ) { notification in
+                    handleInvitationRejected(notification: notification)
+                }
+                
+                // 监听消息刷新通知
+                NotificationCenter.default.addObserver(
+                    forName: NSNotification.Name("RefreshMessages"),
+                    object: nil,
+                    queue: .main
+                ) { _ in
+                    Task {
+                        await refreshMessagesForCurrentSession()
+                    }
+                }
             }
             .onDisappear {
-            stopMessageRefreshTimer()
-            // 先尝试从持久化缓存加载
-            loadCachedChatSessionsFromStorage()
-            
-            // 如果有缓存数据且距离上次加载不到5分钟，先显示缓存，然后后台刷新
-            if !cachedChatSessions.isEmpty, let lastLoad = lastChatLoadTime, Date().timeIntervalSince(lastLoad) < 300 {
-                // 验证缓存数据：过滤掉可能有问题的会话
-                guard let currentUser = authManager.currentUser else {
-                    loadChatSessions()
-                    return
-                }
+                NotificationCenter.default.removeObserver(self, name: NSNotification.Name("CoffeeChatInvitationAccepted"), object: nil)
+                NotificationCenter.default.removeObserver(self, name: NSNotification.Name("CoffeeChatInvitationCancelled"), object: nil)
+                NotificationCenter.default.removeObserver(self, name: NSNotification.Name("CoffeeChatInvitationRejected"), object: nil)
+                NotificationCenter.default.removeObserver(self, name: NSNotification.Name("RefreshMessages"), object: nil)
+                stopMessageRefreshTimer()
+                // 先尝试从持久化缓存加载
+                loadCachedChatSessionsFromStorage()
                 
-                let validCachedSessions = cachedChatSessions.filter { session in
-                    // 确保不是自己的会话
-                    if let userId = session.user.userId, userId == currentUser.id {
-                        return false
+                // 如果有缓存数据且距离上次加载不到5分钟，先显示缓存，然后后台刷新
+                if !cachedChatSessions.isEmpty, let lastLoad = lastChatLoadTime, Date().timeIntervalSince(lastLoad) < 300 {
+                    // 验证缓存数据：过滤掉可能有问题的会话
+                    guard let currentUser = authManager.currentUser else {
+                        loadChatSessions()
+                        return
                     }
-                    return true
+                    
+                    let validCachedSessions = cachedChatSessions.filter { session in
+                        // 确保不是自己的会话
+                        if let userId = session.user.userId, userId == currentUser.id {
+                            return false
+                        }
+                        return true
+                    }
+                    
+                    // 显示缓存数据（立即显示，无延迟）
+                    chatSessions = validCachedSessions
+                    isLoadingMatches = false
+                    print("✅ Using cached chat sessions: \(validCachedSessions.count) valid sessions (filtered from \(cachedChatSessions.count))")
+                    // 后台静默刷新
+                    Task {
+                        await refreshChatSessionsSilently()
+                    }
+                } else {
+                    // 首次加载或缓存过期，正常加载
+                    loadChatSessions()
                 }
-                
-                // 显示缓存数据（立即显示，无延迟）
-                chatSessions = validCachedSessions
-                isLoadingMatches = false
-                print("✅ Using cached chat sessions: \(validCachedSessions.count) valid sessions (filtered from \(cachedChatSessions.count))")
-                // 后台静默刷新
-                Task {
-                    await refreshChatSessionsSilently()
-                }
-            } else {
-                // 首次加载或缓存过期，正常加载
-                loadChatSessions()
-            }
         }
         .refreshable {
             // 下拉刷新时，保持现有聊天列表显示，后台更新数据
@@ -118,6 +169,16 @@ struct ChatInterfaceView: View {
             scrollToBottomId = nil
             // 更新 TabBar 可见性
             updateTabBarVisibility()
+        }
+        .alert("Notice", isPresented: $showingInvitationErrorAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(invitationErrorMessage)
+        }
+        .alert("Notice", isPresented: $showingLocationErrorAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Location cannot be empty. Please enter a location.")
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ProfileUpdated"))) { _ in
             // 当 profile 更新时，重新加载所有用户的 profile 并更新头像
@@ -602,11 +663,11 @@ struct ChatInterfaceView: View {
                 }
                 .scrollContentBackground(.hidden)
                 .listStyle(.plain)
-                .padding(.top, -10)
+                .padding(.top, -20)
                 .environment(\.defaultMinListHeaderHeight, 0)
             }
         }
-        .padding(.top, -10)
+        .padding(.top, -20)
     }
     
     // MARK: - 分类章节视图
@@ -708,11 +769,41 @@ struct ChatInterfaceView: View {
             // Chat Header
             chatHeaderView(session: session)
             
+            // Coffee Chat Invitation Banner (置顶区域)
+            // 只显示：1) 自己发送的邀请（pending或accepted） 2) 已接受的邀请（双方都显示）
+            if let invitationInfo = currentInvitationInfo[session.id.uuidString],
+               let status = invitationInfo.status,
+               (invitationInfo.isSentByMe || status == .accepted) {
+                coffeeChatInvitationBanner(session: session, invitationInfo: invitationInfo)
+            }
+            
             // Messages
             ScrollViewReader { proxy in
+                // 只过滤掉自己发送的coffee_chat_invitation消息，保留收到的邀请消息（在聊天框内显示）
+                // 但是，如果邀请已被拒绝（有拒绝系统消息），邀请者这边不应该显示任何邀请消息
+                // 注意：这个检查只对邀请者有效（因为拒绝消息是发给邀请者的）
+                let hasRejectionMessage = session.messages.contains { msg in
+                    msg.messageType == .system && 
+                    msg.content.contains("declined your coffee chat invitation") &&
+                    msg.isFromUser == false // 只有收到的系统消息才可能是拒绝消息
+                }
+                
+                let filteredMessages = session.messages.filter { message in
+                    if message.messageType == .coffeeChatInvitation {
+                        // 如果已经有拒绝消息，且这是邀请者看到的（自己发送的邀请），过滤掉所有邀请消息
+                        // 对于被邀请方，不应该过滤掉邀请消息
+                        if hasRejectionMessage && message.isFromUser {
+                            return false
+                        }
+                        // 保留收到的邀请消息（在聊天框内显示），过滤掉自己发送的
+                        return !message.isFromUser
+                    }
+                    return true
+                }
+                
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        ForEach(session.messages) { message in
+                        ForEach(filteredMessages) { message in
                             MessageBubbleView(
                                 message: message,
                                 session: session,
@@ -735,10 +826,12 @@ struct ChatInterfaceView: View {
                         }
                     )
                     .onAppear {
-                        // 在内容出现时立即滚动到底部，避免闪现顶部
-                        if let lastMessage = session.messages.last {
-                            // 立即尝试滚动，不等待
-                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                        // 在内容出现时滚动到底部，确保邀请消息可见
+                        if let lastMessage = filteredMessages.last {
+                            // 延迟滚动，确保所有消息（包括邀请消息）都已渲染
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                            }
                             // 设置初始状态为在底部
                             isAtBottom = true
                         }
@@ -769,28 +862,36 @@ struct ChatInterfaceView: View {
                 }
                 .task {
                     // 使用 task 在视图出现之前就开始滚动，避免闪现顶部
-                    if let lastMessage = session.messages.last {
+                    if let lastMessage = filteredMessages.last {
                         // 立即尝试滚动（无延迟）
                         proxy.scrollTo(lastMessage.id, anchor: .bottom)
                     }
                 }
                 .onAppear {
                     // 视图出现时再次确保滚动到底部（作为保险）
-                    if let lastMessage = session.messages.last {
-                        // 使用极短的延迟，确保视图已渲染
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                    if let lastMessage = filteredMessages.last {
+                        // 使用稍长的延迟，确保视图和消息都已渲染
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             proxy.scrollTo(lastMessage.id, anchor: .bottom)
                         }
                         // 双重保险
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             proxy.scrollTo(lastMessage.id, anchor: .bottom)
                         }
                     }
                 }
                 .onChange(of: session.id) { _ in
                     // 当会话切换时，立即滚动到底部
-                    if let lastMessage = session.messages.last {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    // 重新计算filteredMessages（因为session已更新）
+                    let currentFilteredMessages = session.messages.filter { message in
+                        if message.messageType == .coffeeChatInvitation {
+                            // 保留收到的邀请消息（在聊天框内显示），过滤掉自己发送的
+                            return !message.isFromUser
+                        }
+                        return true
+                    }
+                    if let lastMessage = currentFilteredMessages.last {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                             proxy.scrollTo(lastMessage.id, anchor: .bottom)
                         }
                     }
@@ -1688,41 +1789,134 @@ struct ChatInterfaceView: View {
             return
         }
         
-        // 创建邀请消息
-        let invitationMessage = ChatMessage(
-            content: "Coffee chat invitation",
-            isFromUser: true,
-            messageType: .coffeeChatInvitation,
-            senderName: currentUser.name
-        )
-        
-        // 先更新本地UI（乐观更新）
-        if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
-            chatSessions[index].addMessage(invitationMessage)
-            chatSessions[index].lastMessageAt = invitationMessage.timestamp
-            selectedSession = chatSessions[index]
-            scrollToBottomId = invitationMessage.id
-            
-            // 重新排序列表
-            chatSessions.sort { session1, session2 in
-                let hasMessages1 = !session1.messages.isEmpty
-                let hasMessages2 = !session2.messages.isEmpty
+        // 检查是否已经发送过邀请或已有约定
+        Task {
+            do {
+                // 检查自己是否已经发送过pending的邀请
+                let sentInvitation = try await supabaseService.getCoffeeChatInvitationInfo(
+                    senderId: currentUser.id,
+                    receiverId: receiverUserId
+                )
                 
-                if hasMessages1 && hasMessages2 {
-                    return session1.lastMessageAt > session2.lastMessageAt
+                // 检查是否已经有accepted的邀请（双方都不能再发送）
+                let receivedInvitation = try await supabaseService.getCoffeeChatInvitationInfo(
+                    senderId: receiverUserId,
+                    receiverId: currentUser.id
+                )
+                
+                await MainActor.run {
+                    // 检查邀请ID是否在已取消列表中
+                    let sentInvitationId = sentInvitation.invitationId
+                    let receivedInvitationId = receivedInvitation.invitationId
+                    
+                    // 如果自己已经发送过pending的邀请，且未被取消
+                    if let sentStatus = sentInvitation.status,
+                       sentStatus == .pending,
+                       let sentId = sentInvitationId,
+                       !cancelledInvitationIds.contains(sentId) {
+                        // 显示提示：你已经发送过一个了
+                        showingCoffeeInviteAlert = false
+                        invitationErrorMessage = "You have already sent a coffee chat invitation"
+                        showingInvitationErrorAlert = true
+                        return
+                    }
+                    
+                    // 如果已经有accepted的邀请（双方都不能再发送），且未被取消
+                    // 需要检查对应的 schedule 是否已经 met
+                    if let sentStatus = sentInvitation.status,
+                       sentStatus == .accepted,
+                       let sentId = sentInvitationId,
+                       !cancelledInvitationIds.contains(sentId),
+                       let scheduledDate = sentInvitation.scheduledDate,
+                       let location = sentInvitation.location {
+                        // 检查 schedule 是否已经 met
+                        Task {
+                            do {
+                                let hasMet = try await supabaseService.checkCoffeeChatScheduleMet(
+                                    userId: currentUser.id,
+                                    participantId: receiverUserId,
+                                    scheduledDate: scheduledDate,
+                                    location: location
+                                )
+                                
+                                await MainActor.run {
+                                    if !hasMet {
+                                        // 如果未 met，显示提示
+                                        showingCoffeeInviteAlert = false
+                                        invitationErrorMessage = "You already have a coffee chat scheduled"
+                                        showingInvitationErrorAlert = true
+                                    } else {
+                                        // 如果已 met，允许发送新邀请
+                                        performSendCoffeeChatInvitation(session: session, currentUser: currentUser, receiverUserId: receiverUserId)
+                                    }
+                                }
+                            } catch {
+                                print("❌ [检查 schedule met] 失败: \(error.localizedDescription)")
+                                // 如果检查失败，保守处理：不允许发送
+                                await MainActor.run {
+                                    showingCoffeeInviteAlert = false
+                                    invitationErrorMessage = "You already have a coffee chat scheduled"
+                                    showingInvitationErrorAlert = true
+                                }
+                            }
+                        }
+                        return
+                    }
+                    
+                    if let receivedStatus = receivedInvitation.status,
+                       receivedStatus == .accepted,
+                       let receivedId = receivedInvitationId,
+                       !cancelledInvitationIds.contains(receivedId),
+                       let scheduledDate = receivedInvitation.scheduledDate,
+                       let location = receivedInvitation.location {
+                        // 检查 schedule 是否已经 met
+                        Task {
+                            do {
+                                let hasMet = try await supabaseService.checkCoffeeChatScheduleMet(
+                                    userId: receiverUserId,
+                                    participantId: currentUser.id,
+                                    scheduledDate: scheduledDate,
+                                    location: location
+                                )
+                                
+                                await MainActor.run {
+                                    if !hasMet {
+                                        // 如果未 met，显示提示
+                                        showingCoffeeInviteAlert = false
+                                        invitationErrorMessage = "You already have a coffee chat scheduled"
+                                        showingInvitationErrorAlert = true
+                                    } else {
+                                        // 如果已 met，允许发送新邀请
+                                        performSendCoffeeChatInvitation(session: session, currentUser: currentUser, receiverUserId: receiverUserId)
+                                    }
+                                }
+                            } catch {
+                                print("❌ [检查 schedule met] 失败: \(error.localizedDescription)")
+                                // 如果检查失败，保守处理：不允许发送
+                                await MainActor.run {
+                                    showingCoffeeInviteAlert = false
+                                    invitationErrorMessage = "You already have a coffee chat scheduled"
+                                    showingInvitationErrorAlert = true
+                                }
+                            }
+                        }
+                        return
+                    }
+                    
+                    // 可以发送邀请
+                    performSendCoffeeChatInvitation(session: session, currentUser: currentUser, receiverUserId: receiverUserId)
                 }
-                if hasMessages1 && !hasMessages2 {
-                    return true
+            } catch {
+                print("❌ [检查邀请] 失败: \(error.localizedDescription)")
+                // 如果检查失败，仍然尝试发送（避免因为检查失败而阻止发送）
+                await MainActor.run {
+                    performSendCoffeeChatInvitation(session: session, currentUser: currentUser, receiverUserId: receiverUserId)
                 }
-                if !hasMessages1 && hasMessages2 {
-                    return false
-                }
-                let date1 = session1.user.matchDate ?? Date.distantPast
-                let date2 = session2.user.matchDate ?? Date.distantPast
-                return date1 > date2
             }
         }
-        
+    }
+    
+    private func performSendCoffeeChatInvitation(session: ChatSession, currentUser: AppUser, receiverUserId: String) {
         // 显示发送动画
         showingCoffeeInviteAnimation = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
@@ -1746,23 +1940,37 @@ struct ChatInterfaceView: View {
                     receiverName: receiverName
                 )
                 
-                // 发送消息
+                // 为接收方创建新的邀请消息（这样每次新邀请都会显示新的消息）
+                // 发送邀请消息到数据库，让接收方能够看到新的邀请
+                let invitationMessageContent = "\(currentUser.name) invited you to a coffee chat"
                 let _ = try await supabaseService.sendMessage(
                     senderId: currentUser.id,
                     receiverId: receiverUserId,
-                    content: invitationMessage.content,
+                    content: invitationMessageContent,
                     messageType: "coffee_chat_invitation"
                 )
+                
+                // 不发送消息到消息列表，只更新邀请信息
+                await MainActor.run {
+                    // 更新邀请信息
+                    let sessionId = session.id.uuidString
+                    currentInvitationInfo[sessionId] = (
+                        status: .pending,
+                        scheduledDate: nil,
+                        location: nil,
+                        invitationId: invitationId,
+                        isSentByMe: true
+                    )
+                    
+                    // 触发消息刷新，让接收方看到新的邀请消息
+                    Task {
+                        await refreshMessagesForCurrentSession()
+                    }
+                }
+                
                 print("✅ Coffee chat invitation sent to database: \(invitationId)")
             } catch {
                 print("❌ Failed to send coffee chat invitation: \(error.localizedDescription)")
-                // 如果发送失败，移除本地消息
-                await MainActor.run {
-                    if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
-                        chatSessions[index].messages.removeAll { $0.id == invitationMessage.id }
-                        selectedSession = chatSessions[index]
-                    }
-                }
             }
         }
     }
@@ -2009,6 +2217,30 @@ struct ChatInterfaceView: View {
                     }
                 }
                 
+                // 保留本地的系统消息和已处理的coffee chat邀请消息（这些消息不会在数据库中，需要保留）
+                let localSystemMessages = chatSessions[index].messages.filter { $0.messageType == .system }
+                for systemMessage in localSystemMessages {
+                    if !seenMessageIds.contains(systemMessage.id) {
+                        uniqueMessages.append(systemMessage)
+                        seenMessageIds.insert(systemMessage.id)
+                    }
+                }
+                
+                // 保留本地的已处理的coffee chat邀请消息（accepted或rejected状态）
+                // 这些消息的状态不应该被新的pending邀请覆盖
+                let localProcessedInvitations = chatSessions[index].messages.filter { message in
+                    message.messageType == .coffeeChatInvitation && !message.isFromUser
+                }
+                for invitationMessage in localProcessedInvitations {
+                    if !seenMessageIds.contains(invitationMessage.id) {
+                        uniqueMessages.append(invitationMessage)
+                        seenMessageIds.insert(invitationMessage.id)
+                    }
+                }
+                
+                // 按时间戳排序
+                uniqueMessages.sort { $0.timestamp < $1.timestamp }
+                
                 // 更新会话消息，但保留 hidden 状态
                 // hidden 的会话即使收到新消息，也保持 hidden 状态
                 chatSessions[index].messages = uniqueMessages
@@ -2093,6 +2325,30 @@ struct ChatInterfaceView: View {
                 }
             }
             
+            // 保留本地的系统消息和已处理的coffee chat邀请消息（这些消息不会在数据库中，需要保留）
+            let localSystemMessages = session.messages.filter { $0.messageType == .system }
+            for systemMessage in localSystemMessages {
+                if !seenMessageIds.contains(systemMessage.id) {
+                    uniqueMessages.append(systemMessage)
+                    seenMessageIds.insert(systemMessage.id)
+                }
+            }
+            
+            // 保留本地的已处理的coffee chat邀请消息（accepted或rejected状态）
+            // 这些消息的状态不应该被新的pending邀请覆盖
+            let localProcessedInvitations = session.messages.filter { message in
+                message.messageType == .coffeeChatInvitation && !message.isFromUser
+            }
+            for invitationMessage in localProcessedInvitations {
+                if !seenMessageIds.contains(invitationMessage.id) {
+                    uniqueMessages.append(invitationMessage)
+                    seenMessageIds.insert(invitationMessage.id)
+                }
+            }
+            
+            // 按时间戳排序
+            uniqueMessages.sort { $0.timestamp < $1.timestamp }
+            
             // 检查是否有新消息（来自对方）
             let hasNewMessageFromOther = uniqueMessages.count > previousMessageCount && 
                                          uniqueMessages.last?.isFromUser == false &&
@@ -2108,6 +2364,9 @@ struct ChatInterfaceView: View {
                 if let lastMessage = uniqueMessages.last {
                     chatSessions[index].lastMessageAt = lastMessage.timestamp
                 }
+                
+                // 更新消息后，重新检查邀请状态（可能邀请已被拒绝）
+                loadInvitationInfo(for: chatSessions[index])
                 
                 // 确保 hidden 状态不会被改变
                 if wasHidden {
@@ -2150,6 +2409,19 @@ struct ChatInterfaceView: View {
                     // 通过设置 scrollToBottomId 触发滚动（会在 onChange 中处理）
                     scrollToBottomId = lastMessage.id
                 }
+                
+                // 检查是否有新的邀请消息（来自对方）
+                let previousInvitationMessages = session.messages.filter { $0.messageType == .coffeeChatInvitation && !$0.isFromUser }
+                let newInvitationMessages = uniqueMessages.filter { $0.messageType == .coffeeChatInvitation && !$0.isFromUser }
+                
+                // 如果有新的邀请消息，确保滚动到它
+                if newInvitationMessages.count > previousInvitationMessages.count,
+                   let newInvitationMessage = newInvitationMessages.last {
+                    // 延迟滚动，确保消息已渲染
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        scrollToBottomId = newInvitationMessage.id
+                    }
+                }
             }
         } catch {
             print("⚠️ Failed to refresh messages: \(error.localizedDescription)")
@@ -2183,9 +2455,608 @@ struct ChatInterfaceView: View {
         isAtBottom = true // 切换会话时，默认认为在底部
         loadAISuggestions(for: session.user)
         
+        // 加载邀请信息
+        loadInvitationInfo(for: session)
+        
         // 标记来自对方的未读消息为已读
         Task {
             await markMessagesAsRead(for: session)
+        }
+    }
+    
+    // 加载邀请信息
+    private func loadInvitationInfo(for session: ChatSession) {
+        guard let currentUser = authManager.currentUser,
+              let otherUserId = session.user.userId else {
+            return
+        }
+        
+        let sessionId = session.id.uuidString
+        
+        Task {
+            do {
+                // 检查是否有自己发送的邀请
+                let sentInvitation = try await supabaseService.getCoffeeChatInvitationInfo(
+                    senderId: currentUser.id,
+                    receiverId: otherUserId
+                )
+                
+                // 检查是否有对方发送的邀请
+                let receivedInvitation = try await supabaseService.getCoffeeChatInvitationInfo(
+                    senderId: otherUserId,
+                    receiverId: currentUser.id
+                )
+                
+                await MainActor.run {
+                    // 检查邀请ID是否在已取消列表中
+                    let sentInvitationId = sentInvitation.invitationId
+                    let receivedInvitationId = receivedInvitation.invitationId
+                    
+                    // 如果邀请已被取消，不再显示
+                    if let sentId = sentInvitationId, cancelledInvitationIds.contains(sentId) {
+                        currentInvitationInfo.removeValue(forKey: sessionId)
+                        return
+                    }
+                    
+                    if let receivedId = receivedInvitationId, cancelledInvitationIds.contains(receivedId) {
+                        currentInvitationInfo.removeValue(forKey: sessionId)
+                        return
+                    }
+                    
+                    // 检查自己发送的邀请是否被拒绝
+                    if let sentStatus = sentInvitation.status,
+                       sentStatus == .rejected,
+                       let sentId = sentInvitationId,
+                       !cancelledInvitationIds.contains(sentId) {
+                        // 找到最新的会话数据
+                        if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
+                            let currentSession = chatSessions[index]
+                            
+                            // 如果邀请被拒绝，添加系统消息（如果还没有）
+                            let hasRejectionMessage = currentSession.messages.contains { msg in
+                                msg.messageType == .system && 
+                                msg.content.contains("declined your coffee chat invitation")
+                            }
+                            
+                            if !hasRejectionMessage {
+                                // 获取接收者名称
+                                let receiverName = currentSession.user.name
+                                
+                                // 添加系统消息：对方拒绝了你的邀请
+                                let rejectionMessage = ChatMessage(
+                                    content: "\(receiverName) declined your coffee chat invitation",
+                                    isFromUser: false,
+                                    messageType: .system
+                                )
+                                
+                                chatSessions[index].addMessage(rejectionMessage)
+                                chatSessions[index].lastMessageAt = rejectionMessage.timestamp
+                                
+                                if selectedSession?.id == session.id {
+                                    selectedSession = chatSessions[index]
+                                    scrollToBottomId = rejectionMessage.id
+                                }
+                            }
+                        }
+                        
+                        // 不显示在置顶区域
+                        currentInvitationInfo.removeValue(forKey: sessionId)
+                        return
+                    }
+                    
+                    // 优先显示自己发送的邀请，如果没有则显示收到的邀请
+                    // 只显示pending或accepted状态的邀请，且未被取消
+                    if let sentStatus = sentInvitation.status,
+                       (sentStatus == .pending || sentStatus == .accepted),
+                       let sentId = sentInvitationId,
+                       !cancelledInvitationIds.contains(sentId) {
+                        // 如果是 accepted 状态，需要检查是否已经 met
+                        if sentStatus == .accepted,
+                           let scheduledDate = sentInvitation.scheduledDate,
+                           let location = sentInvitation.location {
+                            // 异步检查 met 状态
+                            Task {
+                                do {
+                                    let hasMet = try await supabaseService.checkCoffeeChatScheduleMet(
+                                        userId: currentUser.id,
+                                        participantId: otherUserId,
+                                        scheduledDate: scheduledDate,
+                                        location: location
+                                    )
+                                    
+                                    await MainActor.run {
+                                        // 如果已 met，不显示在置顶区域
+                                        if hasMet {
+                                            currentInvitationInfo.removeValue(forKey: sessionId)
+                                        } else {
+                                            currentInvitationInfo[sessionId] = (
+                                                status: sentStatus,
+                                                scheduledDate: scheduledDate,
+                                                location: location,
+                                                invitationId: sentId,
+                                                isSentByMe: true
+                                            )
+                                        }
+                                    }
+                                } catch {
+                                    print("❌ [加载邀请信息] 检查 met 状态失败: \(error.localizedDescription)")
+                                    // 如果检查失败，保守处理：显示邀请
+                                    await MainActor.run {
+                                        currentInvitationInfo[sessionId] = (
+                                            status: sentStatus,
+                                            scheduledDate: scheduledDate,
+                                            location: location,
+                                            invitationId: sentId,
+                                            isSentByMe: true
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            // pending 状态，直接显示
+                            currentInvitationInfo[sessionId] = (
+                                status: sentStatus,
+                                scheduledDate: sentInvitation.scheduledDate,
+                                location: sentInvitation.location,
+                                invitationId: sentId,
+                                isSentByMe: true
+                            )
+                        }
+                    } else if let receivedStatus = receivedInvitation.status {
+                        // 收到的邀请：如果是pending，不在置顶显示（在聊天框内显示）
+                        // 如果是accepted，在置顶显示，但需要检查是否已 met
+                        if receivedStatus == .accepted {
+                            // 如果已经有 currentInvitationInfo（比如刚接受邀请时设置的），保留它
+                            let existingInfo = currentInvitationInfo[sessionId]
+                            
+                            // 如果有 invitationId 且未被取消，检查 met 状态
+                            if let receivedId = receivedInvitationId,
+                               !cancelledInvitationIds.contains(receivedId),
+                               let scheduledDate = receivedInvitation.scheduledDate,
+                               let location = receivedInvitation.location {
+                                // 异步检查 met 状态
+                                Task {
+                                    do {
+                                        let hasMet = try await supabaseService.checkCoffeeChatScheduleMet(
+                                            userId: otherUserId,
+                                            participantId: currentUser.id,
+                                            scheduledDate: scheduledDate,
+                                            location: location
+                                        )
+                                        
+                                        await MainActor.run {
+                                            // 如果已 met，不显示在置顶区域
+                                            if hasMet {
+                                                currentInvitationInfo.removeValue(forKey: sessionId)
+                                            } else {
+                                                // 更新邀请信息，保留已有的信息（如果有）
+                                                currentInvitationInfo[sessionId] = (
+                                                    status: receivedStatus,
+                                                    scheduledDate: scheduledDate,
+                                                    location: location,
+                                                    invitationId: receivedId,
+                                                    isSentByMe: false
+                                                )
+                                            }
+                                        }
+                                    } catch {
+                                        print("❌ [加载邀请信息] 检查 met 状态失败: \(error.localizedDescription)")
+                                        // 如果检查失败，保守处理：显示邀请
+                                        await MainActor.run {
+                                            currentInvitationInfo[sessionId] = (
+                                                status: receivedStatus,
+                                                scheduledDate: scheduledDate,
+                                                location: location,
+                                                invitationId: receivedId,
+                                                isSentByMe: false
+                                            )
+                                        }
+                                    }
+                                }
+                            } else if let existingInfo = existingInfo,
+                                      existingInfo.status == .accepted,
+                                      existingInfo.scheduledDate != nil,
+                                      existingInfo.location != nil {
+                                // 如果 invitationId 为空（刚接受邀请时），但已有 accepted 状态的信息，保留它
+                                // 不执行任何操作，保持现有的 currentInvitationInfo
+                                print("✅ [加载邀请信息] 保留已有的 accepted 邀请信息（等待 invitationId 更新）")
+                            } else {
+                                // 如果没有 invitationId，但 receivedStatus 是 accepted，且没有 existingInfo
+                                // 可能是数据库还没完全更新，尝试使用 receivedInvitation 的信息
+                                if let scheduledDate = receivedInvitation.scheduledDate,
+                                   let location = receivedInvitation.location {
+                                    // 即使没有 invitationId，也显示 accepted 状态的邀请
+                                    currentInvitationInfo[sessionId] = (
+                                        status: receivedStatus,
+                                        scheduledDate: scheduledDate,
+                                        location: location,
+                                        invitationId: receivedInvitationId,
+                                        isSentByMe: false
+                                    )
+                                    print("✅ [加载邀请信息] 使用 receivedInvitation 的信息显示 accepted 邀请")
+                                } else {
+                                    // pending状态的收到邀请不在置顶显示，在聊天框内显示
+                                    currentInvitationInfo.removeValue(forKey: sessionId)
+                                }
+                            }
+                        } else {
+                            // pending状态的收到邀请不在置顶显示，在聊天框内显示
+                            // 但如果已有 accepted 状态的 existingInfo，保留它
+                            if let existingInfo = currentInvitationInfo[sessionId],
+                               existingInfo.status == .accepted,
+                               existingInfo.scheduledDate != nil,
+                               existingInfo.location != nil {
+                                print("✅ [加载邀请信息] 保留已有的 accepted 邀请信息（数据库可能还在更新）")
+                            } else {
+                                currentInvitationInfo.removeValue(forKey: sessionId)
+                            }
+                        }
+                    } else {
+                        // 如果没有有效的邀请，确保移除
+                        currentInvitationInfo.removeValue(forKey: sessionId)
+                    }
+                }
+            } catch {
+                print("❌ [加载邀请信息] 失败: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    // Coffee Chat Invitation Banner (置顶区域)
+    private func coffeeChatInvitationBanner(session: ChatSession, invitationInfo: (status: CoffeeChatInvitation.InvitationStatus?, scheduledDate: Date?, location: String?, invitationId: String?, isSentByMe: Bool)) -> some View {
+        let isSentByMe = invitationInfo.isSentByMe
+        
+        return AnyView(
+            HStack(spacing: 12) {
+                // 信封图标
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.9, green: 0.85, blue: 0.8),
+                                    Color(red: 0.85, green: 0.8, blue: 0.75)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 40, height: 40)
+                        .shadow(color: Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.15), radius: 4, x: 0, y: 2)
+                    
+                    Image(systemName: "envelope.fill")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                }
+                
+                // 内容区域
+                VStack(alignment: .leading, spacing: 4) {
+                    if invitationInfo.status == .accepted, let scheduledDate = invitationInfo.scheduledDate, let location = invitationInfo.location {
+                        // 已接受：显示时间和地点
+                        Text("Coffee chat scheduled")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        
+                        HStack(spacing: 8) {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 12))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            Text(formatDate(scheduledDate))
+                                .font(.system(size: 14))
+                                .foregroundColor(Color(red: 0.5, green: 0.4, blue: 0.3))
+                            
+                            Image(systemName: "mappin.circle")
+                                .font(.system(size: 12))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            Text(location)
+                                .font(.system(size: 14))
+                                .foregroundColor(Color(red: 0.5, green: 0.4, blue: 0.3))
+                                .lineLimit(1)
+                        }
+                    } else if invitationInfo.status == .pending {
+                        // 待处理：显示已发送邀请或收到邀请
+                        if isSentByMe {
+                            Text("Coffee chat invitation sent")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        } else {
+                            Text("\(session.user.name) invited you to a coffee chat")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        }
+                    } else {
+                        Text("Coffee chat invitation")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                }
+                
+                Spacer()
+                
+                // 取消按钮
+                if let invitationId = invitationInfo.invitationId {
+                    // pending状态且是自己发送的邀请，或者accepted状态（双方都可以取消）
+                    if (invitationInfo.status == .pending && isSentByMe) || invitationInfo.status == .accepted {
+                        Button(action: {
+                            if invitationInfo.status == .accepted {
+                                cancelAcceptedCoffeeChat(invitationId: invitationId, session: session)
+                            } else {
+                                cancelInvitation(invitationId: invitationId, session: session)
+                            }
+                        }) {
+                            Text("Cancel")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(red: 0.98, green: 0.96, blue: 0.94))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color(red: 0.8, green: 0.7, blue: 0.6), lineWidth: 1)
+                                )
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.99, green: 0.98, blue: 0.97),
+                        Color(red: 0.98, green: 0.96, blue: 0.94)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay(
+                Rectangle()
+                    .frame(height: 1)
+                    .foregroundColor(Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.5)),
+                alignment: .bottom
+            )
+        )
+    }
+    
+    // 格式化日期和时间
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, HH:mm"
+        return formatter.string(from: date)
+    }
+    
+    // 取消邀请（pending状态）
+    private func cancelInvitation(invitationId: String, session: ChatSession) {
+        let sessionId = session.id.uuidString
+        guard let currentUser = authManager.currentUser,
+              let receiverUserId = session.user.userId else { return }
+        
+        // 立即移除邀请信息，避免UI闪烁
+        currentInvitationInfo.removeValue(forKey: sessionId)
+        // 标记为已取消，防止重新加载（持久化保存）
+        cancelledInvitationIds.insert(invitationId)
+        saveCancelledInvitationIds()
+        
+        Task {
+            do {
+                // 1. 删除b那边的邀请消息（从数据库删除，不留痕迹）
+                try await supabaseService.deleteMessagesByType(
+                    senderId: currentUser.id,
+                    receiverId: receiverUserId,
+                    messageType: "coffee_chat_invitation"
+                )
+                
+                // 2. 删除邀请记录
+                try await supabaseService.cancelCoffeeChatInvitation(invitationId: invitationId)
+                
+                await MainActor.run {
+                    // 确保邀请信息已移除
+                    currentInvitationInfo.removeValue(forKey: sessionId)
+                    
+                    // 刷新消息，确保b那边的邀请消息消失
+                    Task {
+                        await refreshMessagesForCurrentSession()
+                    }
+                    
+                    // 发送通知，触发刷新
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("CoffeeChatInvitationCancelled"),
+                        object: nil,
+                        userInfo: [
+                            "sessionId": sessionId,
+                            "invitationId": invitationId,
+                            "cancelledByName": currentUser.name
+                        ]
+                    )
+                    
+                    print("✅ [取消邀请] 邀请已取消，b那边的消息已删除")
+                }
+            } catch {
+                print("❌ [取消邀请] 失败: \(error.localizedDescription)")
+                // 即使失败也确保UI更新
+                await MainActor.run {
+                    // 确保邀请信息已移除（即使删除失败，UI也应该更新）
+                    currentInvitationInfo.removeValue(forKey: sessionId)
+                }
+            }
+        }
+    }
+    
+    // 取消已接受的coffee chat
+    private func cancelAcceptedCoffeeChat(invitationId: String, session: ChatSession) {
+        let sessionId = session.id.uuidString
+        guard let currentUser = authManager.currentUser,
+              let receiverUserId = session.user.userId else { return }
+        
+        // 立即移除邀请信息，避免UI闪烁
+        currentInvitationInfo.removeValue(forKey: sessionId)
+        // 标记为已取消，防止重新加载（持久化保存）
+        cancelledInvitationIds.insert(invitationId)
+        saveCancelledInvitationIds()
+        
+        Task {
+            do {
+                // receiverUserId就是对方用户ID（session中的对方）
+                // 在数据库中保存系统消息给对方："谁取消了这个约定"
+                let cancelMessageContent = "\(currentUser.name) cancelled this coffee chat"
+                
+                // 发送给对方（系统消息会显示在双方的聊天记录中）
+                let _ = try await supabaseService.sendMessage(
+                    senderId: currentUser.id,
+                    receiverId: receiverUserId,
+                    content: cancelMessageContent,
+                    messageType: "system"
+                )
+                
+                // 删除邀请和日程记录
+                try await supabaseService.cancelAcceptedCoffeeChat(invitationId: invitationId)
+                
+                await MainActor.run {
+                    // 确保邀请信息已移除
+                    currentInvitationInfo.removeValue(forKey: sessionId)
+                    
+                    // 发送通知触发消息刷新
+                    NotificationCenter.default.post(name: NSNotification.Name("RefreshMessages"), object: nil)
+                    
+                    // 发送通知，触发刷新（通知对方也更新）
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("CoffeeChatInvitationCancelled"),
+                        object: nil,
+                        userInfo: [
+                            "sessionId": sessionId,
+                            "invitationId": invitationId,
+                            "cancelledByName": currentUser.name
+                        ]
+                    )
+                    NotificationCenter.default.post(name: NSNotification.Name("CoffeeChatScheduleUpdated"), object: nil)
+                    
+                    print("✅ [取消已接受的coffee chat] 已取消，系统消息已保存到数据库")
+                }
+                print("✅ [取消已接受的coffee chat] 数据库删除成功")
+            } catch {
+                print("❌ [取消已接受的coffee chat] 失败: \(error.localizedDescription)")
+                // 即使失败也确保UI更新
+                await MainActor.run {
+                    // 确保邀请信息已移除（即使删除失败，UI也应该更新）
+                    currentInvitationInfo.removeValue(forKey: sessionId)
+                }
+            }
+        }
+    }
+    
+    // 处理邀请被取消的通知
+    private func handleInvitationCancelled(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let sessionId = userInfo["sessionId"] as? String,
+              let invitationId = userInfo["invitationId"] as? String,
+              let cancelledByName = userInfo["cancelledByName"] as? String,
+              let session = chatSessions.first(where: { $0.id.uuidString == sessionId }),
+              let currentUser = authManager.currentUser else {
+            return
+        }
+        
+        // 标记为已取消（持久化保存）
+        cancelledInvitationIds.insert(invitationId)
+        saveCancelledInvitationIds()
+        
+        // 立即移除邀请信息
+        currentInvitationInfo.removeValue(forKey: sessionId)
+        
+        // 系统消息已经在cancelAcceptedCoffeeChat中保存到数据库
+        // 发送通知触发消息刷新
+        NotificationCenter.default.post(name: NSNotification.Name("RefreshMessages"), object: nil)
+        
+        // 不重新加载，因为已经标记为已取消
+    }
+    
+    // 处理邀请被拒绝的通知
+    private func handleInvitationRejected(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let senderId = userInfo["senderId"] as? String,
+              let receiverId = userInfo["receiverId"] as? String,
+              let receiverName = userInfo["receiverName"] as? String,
+              let currentUser = authManager.currentUser else {
+            return
+        }
+        
+        // 检查是否是自己发送的邀请被拒绝（自己是发送者）
+        if senderId == currentUser.id {
+            // 系统消息已经在rejectCoffeeChatInvitation中保存到数据库
+            // 发送通知触发消息刷新
+            NotificationCenter.default.post(name: NSNotification.Name("RefreshMessages"), object: nil)
+        }
+    }
+    
+    // 从 UserDefaults 加载已取消的邀请ID
+    private func loadCancelledInvitationIds() {
+        if let savedIds = UserDefaults.standard.array(forKey: cancelledInvitationIdsKey) as? [String] {
+            cancelledInvitationIds = Set(savedIds)
+            print("✅ [加载已取消邀请] 从 UserDefaults 加载了 \(cancelledInvitationIds.count) 个已取消的邀请ID")
+        }
+    }
+    
+    // 保存已取消的邀请ID到 UserDefaults
+    private func saveCancelledInvitationIds() {
+        UserDefaults.standard.set(Array(cancelledInvitationIds), forKey: cancelledInvitationIdsKey)
+        print("✅ [保存已取消邀请] 保存了 \(cancelledInvitationIds.count) 个已取消的邀请ID")
+    }
+    
+    // 处理邀请被接受的通知
+    private func handleInvitationAccepted(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let senderId = userInfo["senderId"] as? String,
+              let receiverId = userInfo["receiverId"] as? String,
+              let scheduledDate = userInfo["scheduledDate"] as? Date,
+              let location = userInfo["location"] as? String,
+              let currentUser = authManager.currentUser else {
+            return
+        }
+        
+        // 检查是否是自己的邀请被接受（自己是发送者）
+        if senderId == currentUser.id {
+            // 找到对应的会话
+            if let session = chatSessions.first(where: { $0.user.userId == receiverId }) {
+                let sessionId = session.id.uuidString
+                
+                // 更新邀请信息
+                currentInvitationInfo[sessionId] = (
+                    status: .accepted,
+                    scheduledDate: scheduledDate,
+                    location: location,
+                    invitationId: nil, // 需要重新加载获取
+                    isSentByMe: true
+                )
+                
+                // 重新加载邀请信息以获取invitationId
+                loadInvitationInfo(for: session)
+                
+                // 系统消息已经在acceptCoffeeChatInvitation中保存到数据库
+                // 发送通知触发消息刷新
+                NotificationCenter.default.post(name: NSNotification.Name("RefreshMessages"), object: nil)
+            }
+        } else if receiverId == currentUser.id {
+            // 自己接受了对方的邀请，更新邀请信息
+            if let session = chatSessions.first(where: { $0.user.userId == senderId }) {
+                let sessionId = session.id.uuidString
+                
+                // 更新邀请信息
+                currentInvitationInfo[sessionId] = (
+                    status: .accepted,
+                    scheduledDate: scheduledDate,
+                    location: location,
+                    invitationId: nil, // 需要重新加载获取
+                    isSentByMe: false
+                )
+                
+                // 延迟重新加载邀请信息以获取invitationId（确保数据库已更新）
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.loadInvitationInfo(for: session)
+                }
+            }
         }
     }
     
@@ -2493,15 +3364,27 @@ struct MessageBubbleView: View {
     @State private var locationText = ""
     @State private var notesText = ""
     @State private var isLoadingStatus = false
+    @State private var processedInvitationId: String? = nil // 记录已处理的邀请ID，防止被新邀请覆盖
     
     var body: some View {
-        HStack {
-            if message.isFromUser {
-                Spacer()
-                messageBubble
+        Group {
+            // 系统消息居中显示
+            if message.messageType == .system {
+                HStack {
+                    Spacer()
+                    messageBubble
+                    Spacer()
+                }
             } else {
-                messageBubble
-                Spacer()
+                HStack {
+                    if message.isFromUser {
+                        Spacer()
+                        messageBubble
+                    } else {
+                        messageBubble
+                        Spacer()
+                    }
+                }
             }
         }
         .onAppear {
@@ -2515,6 +3398,8 @@ struct MessageBubbleView: View {
         Group {
             if message.messageType == .coffeeChatInvitation {
                 coffeeChatInvitationBubble
+            } else if message.messageType == .system {
+                systemMessageBubble
             } else {
                 regularMessageBubble
             }
@@ -2549,113 +3434,111 @@ struct MessageBubbleView: View {
         }
     }
     
+    // System message bubble (更窄的确认消息框，居中显示，固定宽度)
+    private var systemMessageBubble: some View {
+        HStack(alignment: .center, spacing: 12) {
+            // 信封图标
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.9, green: 0.85, blue: 0.8),
+                                Color(red: 0.85, green: 0.8, blue: 0.75)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 32, height: 32)
+                    .shadow(color: Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.15), radius: 4, x: 0, y: 2)
+                
+                Image(systemName: "envelope.fill")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+            }
+            
+            // 文字（居中对齐）
+            Text(message.content)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(width: 280) // 固定宽度，确保所有系统消息大小一致
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.99, green: 0.98, blue: 0.97),
+                    Color(red: 0.98, green: 0.96, blue: 0.94)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .cornerRadius(16)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.95, green: 0.92, blue: 0.88).opacity(0.6),
+                            Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.3)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        )
+        .shadow(color: Color(red: 0.4, green: 0.3, blue: 0.2).opacity(0.1), radius: 6, x: 0, y: 3)
+    }
+    
     private var coffeeChatInvitationBubble: some View {
         Group {
             if !message.isFromUser {
-                // 接收者：两行布局
-                VStack(alignment: .leading, spacing: 14) {
-                    // 第一行：信封图标 + 文字
-                    HStack(alignment: .center, spacing: 12) {
-                        // 小信封图标
-                        ZStack {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            Color(red: 0.9, green: 0.85, blue: 0.8),
-                                            Color(red: 0.85, green: 0.8, blue: 0.75)
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 40, height: 40)
-                                .shadow(color: Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.15), radius: 4, x: 0, y: 2)
-                            
-                            Image(systemName: "envelope.fill")
-                                .font(.system(size: 18, weight: .medium))
-                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                        }
-                        
-                        // 邀请文字（显示发送者名字）
-                        Text("\(session.user.name) invited you to a coffee chat")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                            .lineLimit(2)
-                        
-                        Spacer()
-                    }
-                    
-                    // 第二行：根据状态显示按钮或状态图案
-                    // 只有当状态明确为 accepted 或 rejected 时才显示状态图案
-                    // 其他情况（nil 或 pending）都显示按钮
-                    if invitationStatus == .accepted || invitationStatus == .rejected {
-                        // 已处理状态：显示状态图案
-                        HStack(spacing: 8) {
-                            if invitationStatus == .accepted {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(Color(red: 0.6, green: 0.45, blue: 0.3))
-                                    
-                                    Text("Accepted")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundColor(Color(red: 0.6, green: 0.45, blue: 0.3))
-                                }
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 40)
-                                .background(
-                                    LinearGradient(
-                                        colors: [
-                                            Color(red: 0.98, green: 0.96, blue: 0.94),
-                                            Color(red: 0.95, green: 0.92, blue: 0.88)
-                                        ],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .cornerRadius(20)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 20)
-                                        .stroke(
-                                            Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.3),
-                                            lineWidth: 1.5
+                // 接收者：如果已接受或拒绝，直接消失（不显示邀请框）
+                if invitationStatus == .accepted || invitationStatus == .rejected {
+                    EmptyView()
+                } else {
+                    // 接收者：两行布局（只有pending状态才显示）
+                    VStack(alignment: .leading, spacing: 14) {
+                        // 第一行：信封图标 + 文字
+                        HStack(alignment: .center, spacing: 12) {
+                            // 小信封图标
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [
+                                                Color(red: 0.9, green: 0.85, blue: 0.8),
+                                                Color(red: 0.85, green: 0.8, blue: 0.75)
+                                            ],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
                                         )
-                                )
-                            } else if invitationStatus == .rejected {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(Color(red: 0.6, green: 0.45, blue: 0.3))
-                                    
-                                    Text("Declined")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundColor(Color(red: 0.6, green: 0.45, blue: 0.3))
-                                }
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 40)
-                                .background(
-                                    LinearGradient(
-                                        colors: [
-                                            Color(red: 0.98, green: 0.96, blue: 0.94),
-                                            Color(red: 0.95, green: 0.92, blue: 0.88)
-                                        ],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
                                     )
-                                )
-                                .cornerRadius(20)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 20)
-                                        .stroke(
-                                            Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.3),
-                                            lineWidth: 1.5
-                                        )
-                                )
+                                    .frame(width: 40, height: 40)
+                                    .shadow(color: Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.15), radius: 4, x: 0, y: 2)
+                                
+                                Image(systemName: "envelope.fill")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                             }
+                            
+                            // 邀请文字（显示发送者名字）
+                            Text("\(session.user.name) invited you to a coffee chat")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                .lineLimit(2)
+                            
+                            Spacer()
                         }
-                    } else {
-                        // 待处理状态（nil 或 pending）：显示 Accept 和 Decline 按钮
+                        
+                        // 第二行：显示 Accept 和 Decline 按钮（只有pending状态）
                         HStack(spacing: 10) {
                             Button(action: {
                                 showingAcceptSheet = true
@@ -2821,10 +3704,12 @@ struct MessageBubbleView: View {
                 locationText: $locationText,
                 notesText: $notesText,
                 onAccept: {
+                    // 验证已经在AcceptInvitationSheet中完成，这里直接执行
                     Task {
                         guard let invitationId = await getInvitationId() else {
                             print("❌ [接受邀请] 无法获取邀请ID")
                             await MainActor.run {
+                                showingAcceptSheet = false
                                 // 可以显示错误提示
                             }
                             return
@@ -2871,15 +3756,39 @@ struct MessageBubbleView: View {
                     notes: notesText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notesText.trimmingCharacters(in: .whitespacesAndNewlines)
                 )
                 
+                // 在数据库中保存系统消息给a："b accepted your coffee chat invitation"
+                let acceptMessageContent = "\(currentUser.name) accepted your coffee chat invitation"
+                let _ = try await supabaseService.sendMessage(
+                    senderId: receiverId, // b发送给a
+                    receiverId: senderId,
+                    content: acceptMessageContent,
+                    messageType: "system"
+                )
+                
                 await MainActor.run {
                     invitationStatus = .accepted
+                    processedInvitationId = invitationId // 记录已处理的邀请ID
                     // 更新缓存
                     invitationStatusCache[cacheKey] = .accepted
                     showingAcceptSheet = false
                     
-                    // 发送通知，触发日程列表刷新
+                    // 发送通知，触发日程列表刷新和邀请信息更新
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("CoffeeChatInvitationAccepted"),
+                        object: nil,
+                        userInfo: [
+                            "senderId": senderId,
+                            "receiverId": receiverId,
+                            "scheduledDate": selectedDate,
+                            "location": locationText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        ]
+                    )
                     NotificationCenter.default.post(name: NSNotification.Name("CoffeeChatScheduleUpdated"), object: nil)
-                    print("✅ [接受邀请] 已发送日程更新通知，已更新缓存")
+                    
+                    // 发送通知触发消息刷新
+                    NotificationCenter.default.post(name: NSNotification.Name("RefreshMessages"), object: nil)
+                    
+                    print("✅ [接受邀请] 已发送系统消息到数据库，已更新缓存")
                 }
                 
                 print("✅ [接受邀请] Coffee chat invitation accepted successfully")
@@ -2909,11 +3818,36 @@ struct MessageBubbleView: View {
         Task {
             do {
                 try await supabaseService.rejectCoffeeChatInvitation(invitationId: invitationId)
+                
+                // 在数据库中保存系统消息给a："b declined your coffee chat invitation"
+                let rejectMessageContent = "\(currentUser.name) declined your coffee chat invitation"
+                let _ = try await supabaseService.sendMessage(
+                    senderId: receiverId, // b发送给a
+                    receiverId: senderId,
+                    content: rejectMessageContent,
+                    messageType: "system"
+                )
+                
                 await MainActor.run {
                     invitationStatus = .rejected
+                    processedInvitationId = invitationId // 记录已处理的邀请ID
                     // 更新缓存
                     invitationStatusCache[cacheKey] = .rejected
-                    print("✅ [拒绝邀请] 已更新缓存")
+                    print("✅ [拒绝邀请] 已发送系统消息到数据库，已更新缓存")
+                    
+                    // 发送通知触发消息刷新
+                    NotificationCenter.default.post(name: NSNotification.Name("RefreshMessages"), object: nil)
+                    
+                    // 发送通知给邀请者，告知邀请被拒绝
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("CoffeeChatInvitationRejected"),
+                        object: nil,
+                        userInfo: [
+                            "senderId": senderId,
+                            "receiverId": receiverId,
+                            "receiverName": currentUser.name
+                        ]
+                    )
                 }
                 print("✅ Coffee chat invitation rejected")
             } catch {
@@ -2922,9 +3856,10 @@ struct MessageBubbleView: View {
         }
     }
     
-    // 获取缓存键
+    // 获取缓存键（使用消息ID确保每个消息有独立的状态）
     private func getCacheKey(senderId: String, receiverId: String) -> String {
-        return "\(senderId)-\(receiverId)"
+        // 使用消息ID作为缓存key的一部分，确保每个消息都有独立的状态
+        return "\(message.id.uuidString)-\(senderId)-\(receiverId)"
     }
     
     // 加载邀请状态（带缓存）
@@ -2957,11 +3892,38 @@ struct MessageBubbleView: View {
         
         let cacheKey = getCacheKey(senderId: senderId, receiverId: receiverId)
         
-        // 先从缓存读取
-        if let cachedStatus = invitationStatusCache[cacheKey] {
-            invitationStatus = cachedStatus
-            print("✅ [加载邀请状态] 从缓存读取: \(cachedStatus.rawValue)")
+        // 如果当前状态已经是 accepted 或 rejected，不再更新（保持原样）
+        // 这是最重要的检查：确保已经处理过的邀请消息不会被新的pending邀请覆盖
+        if let currentStatus = invitationStatus,
+           (currentStatus == .accepted || currentStatus == .rejected) {
+            print("✅ [加载邀请状态] 当前状态已是 \(currentStatus.rawValue)，保持原样（不查询数据库）")
             return
+        }
+        
+        // 先从缓存读取
+        // 注意：缓存键已经包含了消息ID，所以每个消息都有独立的缓存
+        // 但是，我们需要先查询数据库，确保缓存的状态与数据库一致
+        // 如果缓存中有状态，但数据库中没有匹配的邀请，说明可能是新邀请，应该重新查询
+        if let cachedStatus = invitationStatusCache[cacheKey] {
+            // 如果缓存的状态是accepted或rejected，且当前状态也是accepted或rejected，直接使用缓存
+            // 这是为了保持已处理状态（即使邀请已被取消）
+            if (cachedStatus == .accepted || cachedStatus == .rejected) &&
+               (invitationStatus == .accepted || invitationStatus == .rejected) {
+                invitationStatus = cachedStatus
+                print("✅ [加载邀请状态] 从缓存恢复已处理状态: \(cachedStatus.rawValue)（即使邀请已被取消也保持）")
+                return
+            }
+            // 如果缓存的状态是pending，且当前状态是nil，先查询数据库确认
+            // 不直接使用缓存，因为可能是新邀请
+            if cachedStatus == .pending && invitationStatus == nil {
+                print("🔄 [加载邀请状态] 缓存中有pending状态，但需要查询数据库确认")
+                // 继续执行，查询数据库
+            } else {
+                // 其他情况，使用缓存
+                invitationStatus = cachedStatus
+                print("✅ [加载邀请状态] 从缓存读取: \(cachedStatus.rawValue)")
+                return
+            }
         }
         
         // 缓存中没有，从数据库加载
@@ -2969,24 +3931,114 @@ struct MessageBubbleView: View {
         
         Task {
             do {
+                // 根据消息时间戳查找对应的邀请（而不是总是查询最新的）
+                let (matchedInvitationId, matchedStatus) = try await supabaseService.findInvitationByMessageTimestamp(
+                    senderId: senderId,
+                    receiverId: receiverId,
+                    messageTimestamp: message.timestamp
+                )
+                
+                // 如果找到了匹配的邀请
+                if let invitationId = matchedInvitationId, let status = matchedStatus {
+                    await MainActor.run {
+                        // 如果当前状态已经是 accepted 或 rejected，即使数据库返回其他状态，也保持原样
+                        // 这是关键：一旦接受或拒绝，状态就永远不变，即使后来被取消
+                        if let currentStatus = invitationStatus,
+                           (currentStatus == .accepted || currentStatus == .rejected) {
+                            print("✅ [加载邀请状态] 当前状态已是 \(currentStatus.rawValue)，保持原样（忽略数据库返回的状态）")
+                            isLoadingStatus = false
+                            return
+                        }
+                        
+                        // 更新状态和邀请ID
+                        invitationStatus = status
+                        invitationStatusCache[cacheKey] = status
+                        // 如果状态是accepted或rejected，记录邀请ID
+                        if status == .accepted || status == .rejected {
+                            processedInvitationId = invitationId
+                        }
+                        print("✅ [加载邀请状态] 已更新为: \(status.rawValue) (邀请ID: \(invitationId))")
+                        isLoadingStatus = false
+                    }
+                    return
+                }
+                
+                // 如果没有找到匹配的邀请（可能已被删除），但当前状态是 accepted 或 rejected，保持原样
+                await MainActor.run {
+                    if let currentStatus = invitationStatus,
+                       (currentStatus == .accepted || currentStatus == .rejected) {
+                        print("✅ [加载邀请状态] 未找到匹配的邀请，但当前状态已是 \(currentStatus.rawValue)，保持原样（邀请可能已被取消）")
+                        isLoadingStatus = false
+                        return
+                    }
+                }
+                
+                // 如果没有找到匹配的邀请，尝试查找最新的pending邀请（用于新消息）
+                let latestInvitationId = try await supabaseService.findPendingInvitationId(
+                    senderId: senderId,
+                    receiverId: receiverId
+                )
+                
+                // 如果当前消息已经处理过（有processedInvitationId），且新的邀请ID不同，说明是新邀请
+                // 此时不应该更新当前消息的状态，应该保持原样
+                if let processedId = processedInvitationId,
+                   let latestId = latestInvitationId,
+                   processedId != latestId {
+                    print("✅ [加载邀请状态] 检测到新邀请（\(latestId)），但当前消息已处理过（\(processedId)），保持原样")
+                    await MainActor.run {
+                        isLoadingStatus = false
+                    }
+                    return
+                }
+                
                 let status = try await supabaseService.getCoffeeChatInvitationStatus(
                     senderId: senderId,
                     receiverId: receiverId
                 )
                 
                 await MainActor.run {
-                    invitationStatus = status
-                    // 更新缓存
-                    if let status = status {
-                        invitationStatusCache[cacheKey] = status
-                        print("✅ [加载邀请状态] 已缓存: \(status.rawValue)")
+                    // 如果当前状态已经是 accepted 或 rejected，即使数据库返回 nil 或其他状态，也保持原样
+                    // 这是为了确保已经处理过的邀请消息不会被新的pending邀请覆盖
+                    if let currentStatus = invitationStatus,
+                       (currentStatus == .accepted || currentStatus == .rejected) {
+                        print("✅ [加载邀请状态] 当前状态已是 \(currentStatus.rawValue)，保持原样（忽略数据库返回的状态）")
+                        isLoadingStatus = false
+                        return
+                    }
+                    
+                    // 只有当状态是 nil 或 pending 时，才更新状态
+                    // 如果数据库返回的是 pending，说明有新的邀请，应该更新
+                    // 但如果当前消息已经处理过（accepted/rejected），不应该被新邀请覆盖
+                    if let newStatus = status {
+                        // 只有当新状态是 pending 时，才更新（说明有新的邀请）
+                        // 如果新状态是 accepted 或 rejected，也更新（可能是状态变化）
+                        invitationStatus = newStatus
+                        invitationStatusCache[cacheKey] = newStatus
+                        // 如果状态是accepted或rejected，记录邀请ID
+                        if newStatus == .accepted || newStatus == .rejected,
+                           let latestId = latestInvitationId {
+                            processedInvitationId = latestId
+                        }
+                        print("✅ [加载邀请状态] 已更新为: \(newStatus.rawValue)")
+                    } else {
+                        // 如果数据库返回 nil，说明没有pending的邀请
+                        // 但如果当前状态已经是 accepted 或 rejected，保持原样
+                        // 如果当前状态是 nil 或 pending，也保持 nil（没有邀请）
+                        if invitationStatus == nil {
+                            print("✅ [加载邀请状态] 没有找到邀请，保持 nil")
+                        }
                     }
                     isLoadingStatus = false
-                    print("✅ [加载邀请状态] 状态: \(status?.rawValue ?? "nil")")
+                    print("✅ [加载邀请状态] 最终状态: \(invitationStatus?.rawValue ?? "nil")")
                 }
             } catch {
                 print("❌ [加载邀请状态] 失败: \(error.localizedDescription)")
                 await MainActor.run {
+                    // 如果加载失败，但当前状态已经是 accepted 或 rejected，保持原样
+                    if let currentStatus = invitationStatus,
+                       (currentStatus == .accepted || currentStatus == .rejected) {
+                        print("✅ [加载邀请状态] 加载失败，但当前状态已是 \(currentStatus.rawValue)，保持原样")
+                    }
                     isLoadingStatus = false
                 }
             }
@@ -3034,6 +4086,7 @@ struct AcceptInvitationSheet: View {
     @Binding var notesText: String
     let onAccept: () -> Void
     let onCancel: () -> Void
+    @State private var showingLocationError = false
     
     var body: some View {
         NavigationView {
@@ -3230,11 +4283,21 @@ struct AcceptInvitationSheet: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Accept") {
-                        onAccept()
+                        // 验证必填字段
+                        if locationText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            showingLocationError = true
+                        } else {
+                            onAccept()
+                        }
                     }
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                 }
+            }
+            .alert("Notice", isPresented: $showingLocationError) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("Location cannot be empty. Please enter a location.")
             }
         }
     }
