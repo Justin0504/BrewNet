@@ -1279,11 +1279,11 @@ struct TokenCard: View {
                 
                 // 中间文本
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Buy Tokens")
+                    Text("BrewTokens")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundColor(.primary)
                     
-                    Text("Tokens let you invite mentors, start conversations, and show appreciation for their time.")
+                    Text("BrewTokens let you invite mentors, start conversations, and show appreciation for their time.")
                         .font(.system(size: 14))
                         .foregroundColor(.gray)
                         .lineLimit(3)
@@ -4413,7 +4413,7 @@ struct TokenPurchaseView: View {
             priceValue: 4.99,
             description: "Trial Pack",
             subtitle: "Perfect for first-time users",
-            unitPrice: "≈ $0.10 / Token",
+            unitPrice: "≈ $0.10 / BrewToken",
             bonus: nil
         ),
         TokenOption(
@@ -4422,7 +4422,7 @@ struct TokenPurchaseView: View {
             priceValue: 9.99,
             description: "Most Popular",
             subtitle: "Great for regular users",
-            unitPrice: "≈ $0.083 / Token",
+            unitPrice: "≈ $0.083 / BrewToken",
             bonus: "+20% Bonus"
         ),
         TokenOption(
@@ -4431,7 +4431,7 @@ struct TokenPurchaseView: View {
             priceValue: 19.99,
             description: "Best Value",
             subtitle: "Popular choice",
-            unitPrice: "≈ $0.077 / Token",
+            unitPrice: "≈ $0.077 / BrewToken",
             bonus: "+30% Bonus"
         ),
         TokenOption(
@@ -4440,7 +4440,7 @@ struct TokenPurchaseView: View {
             priceValue: 49.99,
             description: "Professional",
             subtitle: "For power users",
-            unitPrice: "≈ $0.071 / Token",
+            unitPrice: "≈ $0.071 / BrewToken",
             bonus: "+40% Bonus"
         ),
         TokenOption(
@@ -4449,7 +4449,7 @@ struct TokenPurchaseView: View {
             priceValue: 99.99,
             description: "Mentor Pack",
             subtitle: "For mentors & heavy users",
-            unitPrice: "≈ $0.066 / Token",
+            unitPrice: "≈ $0.066 / BrewToken",
             bonus: "+50% Bonus"
         )
     ]
@@ -4464,7 +4464,7 @@ struct TokenPurchaseView: View {
                         .foregroundColor(.gray)
                 }
                 Spacer()
-                Text("Buy Tokens")
+                Text("BrewTokens")
                     .font(.system(size: 20, weight: .bold))
                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 Spacer()
@@ -4499,7 +4499,7 @@ struct TokenPurchaseView: View {
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
                     } else {
-                        Text("Purchase \(tokenOptions[selectedTokenIndex].tokens) Tokens")
+                        Text("Purchase \(tokenOptions[selectedTokenIndex].tokens) BrewTokens")
                             .font(.system(size: 18, weight: .bold))
                     }
                 }
@@ -4526,7 +4526,7 @@ struct TokenPurchaseView: View {
                 dismiss()
             }
         } message: {
-            Text("You have received \(purchasedTokens) Tokens!\n\nYour new balance will be updated shortly.")
+            Text("You have received \(purchasedTokens) BrewTokens!\n\nYour new balance will be updated shortly.")
         }
     }
     
@@ -4652,7 +4652,7 @@ struct TokenOptionCard: View {
                 .padding(.top, option.bonus != nil ? 8 : 2)
                 
                 // Tokens Amount
-                Text("\(option.tokens) Tokens")
+                Text("\(option.tokens) BrewTokens")
                     .font(.system(size: 28, weight: .heavy))
                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 
