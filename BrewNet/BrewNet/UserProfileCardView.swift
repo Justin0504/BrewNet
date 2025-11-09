@@ -80,15 +80,24 @@ struct DistanceDisplayView: View {
             print("👁️ [DistanceDisplay] onAppear 触发")
             print("   - otherUserLocation: \(otherUserLocation ?? "nil")")
             print("   - currentUserLocation: \(currentUserLocation ?? "nil")")
-            calculateDistance()
+            DispatchQueue.main.async {
+                print("   - [onAppear] 在下一个 runloop 执行 calculateDistance")
+                calculateDistance()
+            }
         }
         .onChange(of: otherUserLocation) { newValue in
             print("🔄 [DistanceDisplay] otherUserLocation 变化: \(newValue ?? "nil")")
-            calculateDistance()
+            DispatchQueue.main.async {
+                print("   - [onChange-other] 在下一个 runloop 执行 calculateDistance")
+                calculateDistance()
+            }
         }
         .onChange(of: currentUserLocation) { newValue in
             print("🔄 [DistanceDisplay] currentUserLocation 变化: \(newValue ?? "nil")")
-            calculateDistance()
+            DispatchQueue.main.async {
+                print("   - [onChange-current] 当前 self.currentUserLocation: \(self.currentUserLocation ?? "nil")")
+                calculateDistance()
+            }
         }
     }
     
@@ -99,18 +108,21 @@ struct DistanceDisplayView: View {
         
         guard let otherLocation = otherUserLocation, !otherLocation.isEmpty else {
             print("⚠️ [DistanceDisplay] 对方地址为空")
+            isLoading = false
             distance = nil
             return
         }
         
         guard let currentLocation = currentUserLocation, !currentLocation.isEmpty else {
             print("⚠️ [DistanceDisplay] 当前用户地址为空，等待加载...")
+            isLoading = false
             distance = nil
             return
         }
         
         if otherLocation == currentLocation {
             print("✅ [DistanceDisplay] 两个地址相同，距离为 0")
+            isLoading = false
             distance = 0.0
             return
         }
