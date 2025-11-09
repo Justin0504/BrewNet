@@ -309,7 +309,7 @@ struct ProfileCardContentView: View {
         }
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.vertical, 28)
-        .padding(.horizontal, 24)
+        .padding(.horizontal, 20)
     }
     
     private var headerSection: some View {
@@ -750,51 +750,73 @@ struct ProfileCardContentView: View {
         
         private var carouselHeight: CGFloat {
             let screenWidth = UIScreen.main.bounds.width
-            let maxWidth = screenWidth - 96 // account for outer padding
-            return min(maxWidth, 320)
+            let horizontalPadding: CGFloat = 40 // account for outer padding
+            let maxWidth = screenWidth - horizontalPadding
+            return min(maxWidth, 380)
         }
+        
+        @State private var currentIndex: Int = 0
         
         var body: some View {
             let height = carouselHeight
-            TabView {
-                ForEach(photos) { photo in
-                    ZStack(alignment: .topLeading) {
-                        if let urlString = photo.imageUrl, let url = URL(string: urlString) {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .success(let image):
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                case .failure, .empty:
-                                    placeholder
-                                @unknown default:
-                                    placeholder
-                                }
-                            }
-                        } else {
-                            placeholder
-                        }
-                        
-                        if let caption = photo.caption, !caption.isEmpty {
-                            Text(caption)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(Color.black.opacity(0.35))
-                                .cornerRadius(12)
-                                .padding(12)
-                        }
+            
+            VStack(spacing: 16) {
+                TabView(selection: $currentIndex) {
+                    ForEach(Array(photos.enumerated()), id: \.element.id) { index, photo in
+                        photoView(for: photo, height: height)
+                            .tag(index)
                     }
-                    .frame(maxWidth: .infinity)
-                    .aspectRatio(1, contentMode: .fill)
-                    .frame(height: height)
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                }
+                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .always))
+                .indexViewStyle(
+                    PageIndexViewStyle(
+                        backgroundDisplayMode: .always
+                    )
+                )
+                .tint(Color(red: 0.35, green: 0.2, blue: 0.05))
+                .frame(height: height)
+                
+                if let caption = currentCaption, !caption.isEmpty {
+                    Text(caption)
+                        .font(.custom("SnellRoundhand-Bold", size: 22))
+                        .foregroundColor(accentColor)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .automatic))
-            .frame(height: height + 20)
+            .animation(.easeInOut, value: currentIndex)
+        }
+        
+        private var currentCaption: String? {
+            guard photos.indices.contains(currentIndex) else { return nil }
+            return photos[currentIndex].caption
+        }
+        
+        @ViewBuilder
+        private func photoView(for photo: Photo, height: CGFloat) -> some View {
+            Group {
+                if let urlString = photo.imageUrl, let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        case .failure, .empty:
+                            placeholder
+                        @unknown default:
+                            placeholder
+                        }
+                    }
+                } else {
+                    placeholder
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .clipped()
         }
         
         private var placeholder: some View {

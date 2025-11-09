@@ -22,8 +22,6 @@ struct UserTowerFeatures: Codable {
     // ========== 学习/教授配对 ==========
     let skillsToLearn: [String]
     let skillsToTeach: [String]
-    let functionsToLearn: [String]
-    let functionsToTeach: [String]
     
     // ========== 数值特征 ==========
     let yearsOfExperience: Double
@@ -44,8 +42,6 @@ struct UserTowerFeatures: Codable {
         case subIntentions = "sub_intentions"
         case skillsToLearn = "skills_to_learn"
         case skillsToTeach = "skills_to_teach"
-        case functionsToLearn = "functions_to_learn"
-        case functionsToTeach = "functions_to_teach"
         case yearsOfExperience = "years_of_experience"
         case profileCompletion = "profile_completion"
         case isVerified = "is_verified"
@@ -67,8 +63,6 @@ struct UserTowerFeatures: Codable {
             subIntentions: profile.networkingIntention.selectedSubIntentions.map { $0.rawValue },
             skillsToLearn: extractSkills(profile, mode: .learn),
             skillsToTeach: extractSkills(profile, mode: .teach),
-            functionsToLearn: extractFunctions(profile, mode: .learn),
-            functionsToTeach: extractFunctions(profile, mode: .teach),
             yearsOfExperience: profile.professionalBackground.yearsOfExperience ?? 0,
             profileCompletion: profile.completionPercentage,
             isVerified: profile.privacyTrust.verifiedStatus == .verifiedProfessional ? 1 : 0
@@ -87,20 +81,6 @@ struct UserTowerFeatures: Codable {
                 return skill.skillName
             default:
                 return nil
-            }
-        }
-    }
-    
-    private static func extractFunctions(_ profile: BrewNetProfile, mode: ExtractMode) -> [String] {
-        guard let functions = profile.networkingIntention.careerDirection?.functions else {
-            return []
-        }
-        return functions.compactMap { funcItem in
-            switch mode {
-            case .learn:
-                return funcItem.learnIn.first
-            case .teach:
-                return funcItem.guideIn.first
             }
         }
     }
@@ -181,6 +161,9 @@ struct FeatureVocabularies {
     static let allCareerStages = [
         "earlyCareer", "midLevel", "manager", "director", "executive"
     ]
+    
+    /// 所有子意图
+    static let allSubIntentions: [String] = SubIntentionType.allCases.map { $0.rawValue }
 }
 
 // MARK: - Verification

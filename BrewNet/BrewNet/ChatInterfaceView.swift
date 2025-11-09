@@ -602,11 +602,11 @@ struct ChatInterfaceView: View {
                 }
                 .scrollContentBackground(.hidden)
                 .listStyle(.plain)
-                .padding(.top, -20)
+                .padding(.top, -10)
                 .environment(\.defaultMinListHeaderHeight, 0)
             }
         }
-        .padding(.top, -20)
+        .padding(.top, -10)
     }
     
     // MARK: - 分类章节视图

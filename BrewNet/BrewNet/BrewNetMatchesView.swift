@@ -85,7 +85,7 @@ struct BrewNetMatchesView: View {
                         }
                     }
                     .padding(.leading, 20)
-                    .padding(.top, 60) // 避免状态栏重叠
+                    .padding(.top, 35) // 避免状态栏重叠
                     
                     Spacer()
                     
@@ -102,9 +102,9 @@ struct BrewNetMatchesView: View {
                             .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
                     }
                     .padding(.trailing, 20)
-                    .padding(.top, 60) // 避免状态栏重叠
+                    .padding(.top, 35) // 避免状态栏重叠
                 }
-                .padding(.bottom, 10) // 与卡片之间的间距
+                .padding(.bottom, 0) // 与卡片之间的间距
                 
                 // Loading indicator
                 if isLoading {
@@ -125,7 +125,7 @@ struct BrewNetMatchesView: View {
                                 isPro: proUsers.contains(profiles[currentIndex + 1].userId),
                                 isVerified: verifiedUsers.contains(profiles[currentIndex + 1].userId),
                                 showsOuterFrame: false,
-                                cardWidth: screenWidth - 20
+                                cardWidth: screenWidth - 4
                             )
                             .scaleEffect(isTransitioning ? 1.0 : 0.95)
                             .offset(y: isTransitioning ? 0 : 10)
@@ -146,7 +146,7 @@ struct BrewNetMatchesView: View {
                                 isPro: proUsers.contains(profiles[currentIndex].userId),
                                 isVerified: verifiedUsers.contains(profiles[currentIndex].userId),
                                 showsOuterFrame: false,
-                                cardWidth: screenWidth - 20
+                                cardWidth: screenWidth - 4
                             )
                             .opacity(1.0)
                         }

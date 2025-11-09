@@ -6,39 +6,39 @@ import Foundation
 struct RecommendationWeights {
     // ========== 互补匹配权重（高优先级） ==========
     /// 技能互补匹配权重：用户想学的技能 vs 对方会教的技能
-    static let skillComplementWeight: Double = 0.35
-    
-    /// 职能互补匹配权重：用户想学的职能 vs 对方会指导的职能
-    static let functionComplementWeight: Double = 0.25
+    static let skillComplementWeight: Double = 0.12
     
     // ========== 相似匹配权重（中等优先级） ==========
     /// 意图匹配权重：相同的 networking intention
-    static let intentionWeight: Double = 0.15
+    static let intentionWeight: Double = 0.24
+    
+    /// 子意图匹配权重：更细粒度的意图标签
+    static let subIntentionWeight: Double = 0.18
     
     /// 行业匹配权重：相同或相关行业
-    static let industryWeight: Double = 0.10
+    static let industryWeight: Double = 0.20
     
     /// 技能相似度权重：共同技能
-    static let skillSimilarityWeight: Double = 0.05
+    static let skillSimilarityWeight: Double = 0.035
     
     /// 价值观匹配权重：共同价值观
-    static let valuesWeight: Double = 0.05
+    static let valuesWeight: Double = 0.028
     
     /// 兴趣匹配权重：共同爱好
-    static let hobbiesWeight: Double = 0.03
+    static let hobbiesWeight: Double = 0.02
     
     // ========== 辅助权重（低优先级） ==========
     /// 经验水平匹配权重：相似的经验水平
-    static let experienceLevelWeight: Double = 0.01
+    static let experienceLevelWeight: Double = 0.12
     
     /// 职业阶段匹配权重：相似的职业阶段
-    static let careerStageWeight: Double = 0.01
+    static let careerStageWeight: Double = 0.02
     
     /// 资料完整度权重：鼓励完整资料
-    static let profileCompletionWeight: Double = 0.01
+    static let profileCompletionWeight: Double = 0.015
     
     /// 认证状态权重：优先推荐认证用户
-    static let verifiedWeight: Double = 0.01
+    static let verifiedWeight: Double = 0.015
     
     // ========== 多样性权重 ==========
     /// 多样性惩罚：避免过度推荐同一类型用户
@@ -89,6 +89,11 @@ class SimpleTwoTowerEncoder {
         vector += multiHotEncode(
             features.hobbies,
             allCategories: FeatureVocabularies.allHobbies
+        )
+        
+        vector += multiHotEncode(
+            features.subIntentions,
+            allCategories: FeatureVocabularies.allSubIntentions
         )
         
         vector += multiHotEncode(
@@ -156,28 +161,21 @@ class SimpleTwoTowerEncoder {
             candidateCanTeach: candidateFeatures.skillsToTeach
         )
         
-        let functionComplementScore = calculateFunctionComplement(
-            userWantToLearn: userFeatures.functionsToLearn,
-            candidateCanTeach: candidateFeatures.functionsToTeach
-        )
-        
         // 2. 反向互补匹配（候选用户想学 vs 用户会教）
         let reverseSkillComplement = calculateSkillComplement(
             userWantToLearn: candidateFeatures.skillsToLearn,
             candidateCanTeach: userFeatures.skillsToTeach
         )
         
-        let reverseFunctionComplement = calculateFunctionComplement(
-            userWantToLearn: candidateFeatures.functionsToLearn,
-            candidateCanTeach: userFeatures.functionsToTeach
-        )
-        
         // 双向互补取平均值
         let avgSkillComplement = (skillComplementScore + reverseSkillComplement) / 2.0
-        let avgFunctionComplement = (functionComplementScore + reverseFunctionComplement) / 2.0
         
         // 3. 相似匹配分数
         let intentionScore = userFeatures.mainIntention == candidateFeatures.mainIntention ? 1.0 : 0.0
+        let subIntentionScore = calculateSubIntentionSimilarity(
+            userSubIntentions: userFeatures.subIntentions,
+            candidateSubIntentions: candidateFeatures.subIntentions
+        )
         let industryScore = calculateIndustrySimilarity(
             userIndustry: userFeatures.industry,
             candidateIndustry: candidateFeatures.industry
@@ -211,8 +209,8 @@ class SimpleTwoTowerEncoder {
         // 7. 加权综合分数
         var finalScore = 0.0
         finalScore += avgSkillComplement * RecommendationWeights.skillComplementWeight
-        finalScore += avgFunctionComplement * RecommendationWeights.functionComplementWeight
         finalScore += intentionScore * RecommendationWeights.intentionWeight
+        finalScore += subIntentionScore * RecommendationWeights.subIntentionWeight
         finalScore += industryScore * RecommendationWeights.industryWeight
         finalScore += skillSimilarityScore * RecommendationWeights.skillSimilarityWeight
         finalScore += valuesScore * RecommendationWeights.valuesWeight
@@ -224,6 +222,21 @@ class SimpleTwoTowerEncoder {
         
         // 确保分数在 [0, 1] 范围内
         return min(max(finalScore, 0.0), 1.0)
+    }
+    
+    /// 计算子意图相似度（Jaccard）
+    private static func calculateSubIntentionSimilarity(
+        userSubIntentions: [String],
+        candidateSubIntentions: [String]
+    ) -> Double {
+        guard !userSubIntentions.isEmpty && !candidateSubIntentions.isEmpty else {
+            return 0.0
+        }
+        
+        let intersection = Set(userSubIntentions).intersection(Set(candidateSubIntentions))
+        let union = Set(userSubIntentions).union(Set(candidateSubIntentions))
+        guard !union.isEmpty else { return 0.0 }
+        return Double(intersection.count) / Double(union.count)
     }
     
     // MARK: - Complementary Matching Functions
@@ -241,22 +254,6 @@ class SimpleTwoTowerEncoder {
         let union = Set(userWantToLearn).union(Set(candidateCanTeach))
         
         // 使用 Jaccard 相似度
-        guard !union.isEmpty else { return 0.0 }
-        return Double(intersection.count) / Double(union.count)
-    }
-    
-    /// 计算职能互补分数
-    private static func calculateFunctionComplement(
-        userWantToLearn: [String],
-        candidateCanTeach: [String]
-    ) -> Double {
-        guard !userWantToLearn.isEmpty && !candidateCanTeach.isEmpty else {
-            return 0.0
-        }
-        
-        let intersection = Set(userWantToLearn).intersection(Set(candidateCanTeach))
-        let union = Set(userWantToLearn).union(Set(candidateCanTeach))
-        
         guard !union.isEmpty else { return 0.0 }
         return Double(intersection.count) / Double(union.count)
     }

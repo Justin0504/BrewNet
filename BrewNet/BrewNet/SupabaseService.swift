@@ -2522,6 +2522,34 @@ class SupabaseService: ObservableObject {
         return createdMessage
     }
     
+    /// 删除消息（根据消息ID）
+    func deleteMessage(messageId: String) async throws {
+        print("🗑️ Deleting message: \(messageId)")
+        
+        try await client
+            .from(SupabaseTable.messages.rawValue)
+            .delete()
+            .eq("id", value: messageId)
+            .execute()
+        
+        print("✅ Message deleted successfully: \(messageId)")
+    }
+    
+    /// 删除指定类型的消息（用于删除邀请消息等）
+    func deleteMessagesByType(senderId: String, receiverId: String, messageType: String) async throws {
+        print("🗑️ Deleting messages: senderId=\(senderId), receiverId=\(receiverId), messageType=\(messageType)")
+        
+        try await client
+            .from(SupabaseTable.messages.rawValue)
+            .delete()
+            .eq("sender_id", value: senderId)
+            .eq("receiver_id", value: receiverId)
+            .eq("message_type", value: messageType)
+            .execute()
+        
+        print("✅ Messages deleted successfully")
+    }
+    
     /// 获取两个用户之间的所有消息
     func getMessages(userId1: String, userId2: String) async throws -> [SupabaseMessage] {
         print("🔍 Fetching messages between \(userId1) and \(userId2)")
@@ -4032,6 +4060,44 @@ extension SupabaseService {
         return invitationId
     }
     
+    /// 根据消息时间戳查找对应的邀请ID和状态（用于匹配消息和邀请）
+    func findInvitationByMessageTimestamp(senderId: String, receiverId: String, messageTimestamp: Date) async throws -> (invitationId: String?, status: CoffeeChatInvitation.InvitationStatus?) {
+        print("🔍 [咖啡聊天] 根据消息时间戳查找邀请: senderId=\(senderId), receiverId=\(receiverId), messageTimestamp=\(messageTimestamp)")
+        
+        // 查找在消息时间戳前后5分钟内的邀请（允许一定的时间误差）
+        let timeWindow: TimeInterval = 5 * 60 // 5分钟
+        let beforeTime = messageTimestamp.addingTimeInterval(-timeWindow)
+        let afterTime = messageTimestamp.addingTimeInterval(timeWindow)
+        
+        let beforeTimeString = ISO8601DateFormatter().string(from: beforeTime)
+        let afterTimeString = ISO8601DateFormatter().string(from: afterTime)
+        
+        let response = try await client
+            .from("coffee_chat_invitations")
+            .select("id, status, created_at")
+            .eq("sender_id", value: senderId)
+            .eq("receiver_id", value: receiverId)
+            .gte("created_at", value: beforeTimeString)
+            .lte("created_at", value: afterTimeString)
+            .order("created_at", ascending: false)
+            .limit(1)
+            .execute()
+        
+        let data = response.data
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              let firstInvitation = jsonArray.first else {
+            print("⚠️ [咖啡聊天] 未找到匹配时间戳的邀请")
+            return (nil, nil)
+        }
+        
+        let invitationId = firstInvitation["id"] as? String
+        let statusString = firstInvitation["status"] as? String ?? "pending"
+        let status = CoffeeChatInvitation.InvitationStatus(rawValue: statusString)
+        
+        print("✅ [咖啡聊天] 找到匹配的邀请: invitationId=\(invitationId ?? "nil"), status=\(statusString)")
+        return (invitationId, status)
+    }
+    
     /// 获取邀请状态（用于显示邀请的当前状态）
     func getCoffeeChatInvitationStatus(senderId: String, receiverId: String) async throws -> CoffeeChatInvitation.InvitationStatus? {
         print("🔍 [咖啡聊天] 获取邀请状态: senderId=\(senderId), receiverId=\(receiverId)")
@@ -4056,6 +4122,231 @@ extension SupabaseService {
         let status = CoffeeChatInvitation.InvitationStatus(rawValue: statusString)
         print("✅ [咖啡聊天] 邀请状态: \(statusString)")
         return status
+    }
+    
+    /// 获取完整的邀请信息（包括状态、时间、地点等）
+    func getCoffeeChatInvitationInfo(senderId: String, receiverId: String) async throws -> (status: CoffeeChatInvitation.InvitationStatus?, scheduledDate: Date?, location: String?, invitationId: String?) {
+        print("🔍 [咖啡聊天] 获取完整邀请信息: senderId=\(senderId), receiverId=\(receiverId)")
+        
+        let response = try await client
+            .from("coffee_chat_invitations")
+            .select("id, status, scheduled_date, location")
+            .eq("sender_id", value: senderId)
+            .eq("receiver_id", value: receiverId)
+            .order("created_at", ascending: false)
+            .limit(1)
+            .execute()
+        
+        let data = response.data
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              let firstInvitation = jsonArray.first else {
+            print("⚠️ [咖啡聊天] 未找到邀请")
+            return (nil, nil, nil, nil)
+        }
+        
+        let statusString = firstInvitation["status"] as? String ?? "pending"
+        let status = CoffeeChatInvitation.InvitationStatus(rawValue: statusString)
+        let invitationId = firstInvitation["id"] as? String
+        
+        var scheduledDate: Date? = nil
+        if let dateString = firstInvitation["scheduled_date"] as? String {
+            let dateFormatter = ISO8601DateFormatter()
+            dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            scheduledDate = dateFormatter.date(from: dateString)
+            
+            if scheduledDate == nil {
+                dateFormatter.formatOptions = [.withInternetDateTime]
+                scheduledDate = dateFormatter.date(from: dateString)
+            }
+        }
+        
+        let location = firstInvitation["location"] as? String
+        
+        print("✅ [咖啡聊天] 邀请信息: status=\(statusString), scheduledDate=\(scheduledDate?.description ?? "nil"), location=\(location ?? "nil")")
+        return (status, scheduledDate, location, invitationId)
+    }
+    
+    /// 检查咖啡聊天日程是否已经 met（基于 scheduledDate 和 location）
+    func checkCoffeeChatScheduleMet(userId: String, participantId: String, scheduledDate: Date, location: String) async throws -> Bool {
+        print("🔍 [咖啡聊天] 检查 schedule met 状态: userId=\(userId), participantId=\(participantId), date=\(scheduledDate), location=\(location)")
+        
+        // 格式化日期为字符串用于查询
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let dateString = dateFormatter.string(from: scheduledDate)
+        
+        // 查询双方的 schedule 记录，检查是否有任何一方已经 met
+        let response1 = try await client
+            .from("coffee_chat_schedules")
+            .select("has_met")
+            .eq("user_id", value: userId)
+            .eq("participant_id", value: participantId)
+            .eq("scheduled_date", value: dateString)
+            .eq("location", value: location)
+            .limit(1)
+            .execute()
+        
+        let response2 = try await client
+            .from("coffee_chat_schedules")
+            .select("has_met")
+            .eq("user_id", value: participantId)
+            .eq("participant_id", value: userId)
+            .eq("scheduled_date", value: dateString)
+            .eq("location", value: location)
+            .limit(1)
+            .execute()
+        
+        // 检查第一方的记录
+        if let data1 = try? JSONSerialization.jsonObject(with: response1.data) as? [[String: Any]],
+           let record1 = data1.first,
+           let hasMet1 = record1["has_met"] as? Bool,
+           hasMet1 {
+            print("✅ [咖啡聊天] 第一方已 met")
+            return true
+        }
+        
+        // 检查第二方的记录
+        if let data2 = try? JSONSerialization.jsonObject(with: response2.data) as? [[String: Any]],
+           let record2 = data2.first,
+           let hasMet2 = record2["has_met"] as? Bool,
+           hasMet2 {
+            print("✅ [咖啡聊天] 第二方已 met")
+            return true
+        }
+        
+        print("❌ [咖啡聊天] 双方都未 met")
+        return false
+    }
+    
+    /// 取消咖啡聊天邀请（删除邀请）
+    func cancelCoffeeChatInvitation(invitationId: String) async throws {
+        print("🗑️ [咖啡聊天] 取消邀请: \(invitationId)")
+        
+        let deleteResponse = try await client
+            .from("coffee_chat_invitations")
+            .delete()
+            .eq("id", value: invitationId)
+            .execute()
+        
+        // 验证删除是否成功
+        let deleteData = deleteResponse.data
+        if let deleteString = String(data: deleteData, encoding: .utf8) {
+            print("🔍 [咖啡聊天] 删除邀请响应: \(deleteString)")
+            if deleteString == "[]" || deleteString.trimmingCharacters(in: .whitespacesAndNewlines) == "[]" {
+                print("⚠️ [咖啡聊天] 警告：删除邀请记录时返回空数组，可能删除失败")
+            }
+        }
+        
+        // 再次验证邀请是否真的被删除
+        let verifyResponse = try await client
+            .from("coffee_chat_invitations")
+            .select("id")
+            .eq("id", value: invitationId)
+            .execute()
+        
+        let verifyData = verifyResponse.data
+        if let verifyString = String(data: verifyData, encoding: .utf8),
+           verifyString != "[]" && verifyString.trimmingCharacters(in: .whitespacesAndNewlines) != "[]" {
+            print("❌ [咖啡聊天] 错误：邀请记录仍然存在，删除可能失败")
+            throw ProfileError.fetchFailed("Failed to delete invitation")
+        }
+        
+        print("✅ [咖啡聊天] 邀请已取消")
+    }
+    
+    /// 取消已接受的咖啡聊天（删除日程和邀请）
+    func cancelAcceptedCoffeeChat(invitationId: String) async throws {
+        print("🗑️ [咖啡聊天] 取消已接受的coffee chat: \(invitationId)")
+        
+        // 首先获取邀请信息，获取sender_id和receiver_id
+        let response = try await client
+            .from("coffee_chat_invitations")
+            .select("sender_id, receiver_id, scheduled_date, location")
+            .eq("id", value: invitationId)
+            .single()
+            .execute()
+        
+        let data = response.data
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let senderId = json["sender_id"] as? String,
+              let receiverId = json["receiver_id"] as? String else {
+            throw ProfileError.fetchFailed("Failed to fetch invitation")
+        }
+        
+        // 获取scheduled_date和location用于匹配日程记录
+        let scheduledDateString = json["scheduled_date"] as? String
+        let location = json["location"] as? String
+        
+        // 删除双方的日程记录
+        // 删除发送者的日程记录
+        if let scheduledDate = scheduledDateString, let location = location {
+            try await client
+                .from("coffee_chat_schedules")
+                .delete()
+                .eq("user_id", value: senderId)
+                .eq("participant_id", value: receiverId)
+                .eq("scheduled_date", value: scheduledDate)
+                .eq("location", value: location)
+                .execute()
+            
+            // 删除接收者的日程记录
+            try await client
+                .from("coffee_chat_schedules")
+                .delete()
+                .eq("user_id", value: receiverId)
+                .eq("participant_id", value: senderId)
+                .eq("scheduled_date", value: scheduledDate)
+                .eq("location", value: location)
+                .execute()
+        } else {
+            // 如果没有scheduled_date和location，则删除所有相关的日程记录
+            // 删除发送者的日程记录（user_id或participant_id匹配）
+            try await client
+                .from("coffee_chat_schedules")
+                .delete()
+                .eq("user_id", value: senderId)
+                .eq("participant_id", value: receiverId)
+                .execute()
+            
+            try await client
+                .from("coffee_chat_schedules")
+                .delete()
+                .eq("user_id", value: receiverId)
+                .eq("participant_id", value: senderId)
+                .execute()
+        }
+        
+        // 删除邀请记录
+        let deleteResponse = try await client
+            .from("coffee_chat_invitations")
+            .delete()
+            .eq("id", value: invitationId)
+            .execute()
+        
+        // 验证删除是否成功
+        let deleteData = deleteResponse.data
+        if let deleteString = String(data: deleteData, encoding: .utf8) {
+            print("🔍 [咖啡聊天] 删除邀请响应: \(deleteString)")
+            if deleteString == "[]" || deleteString.trimmingCharacters(in: .whitespacesAndNewlines) == "[]" {
+                print("⚠️ [咖啡聊天] 警告：删除邀请记录时返回空数组，可能删除失败")
+            }
+        }
+        
+        // 再次验证邀请是否真的被删除
+        let verifyResponse = try await client
+            .from("coffee_chat_invitations")
+            .select("id")
+            .eq("id", value: invitationId)
+            .execute()
+        
+        let verifyData = verifyResponse.data
+        if let verifyString = String(data: verifyData, encoding: .utf8),
+           verifyString != "[]" && verifyString.trimmingCharacters(in: .whitespacesAndNewlines) != "[]" {
+            print("❌ [咖啡聊天] 错误：邀请记录仍然存在，删除可能失败")
+            throw ProfileError.fetchFailed("Failed to delete invitation")
+        }
+        
+        print("✅ [咖啡聊天] 已接受的coffee chat已取消")
     }
     
     /// 获取用户的咖啡聊天日程列表
