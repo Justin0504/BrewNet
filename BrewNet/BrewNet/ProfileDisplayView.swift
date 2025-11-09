@@ -208,6 +208,7 @@ struct ProfileDisplayView: View {
     @State private var showingRedemptionSystem = false
     @State private var showingCoffeeChatSchedule = false
     @State private var showingBoostPurchase = false
+    @State private var showingTokenPurchase = false // ⭐ 新增：Token 充值
     
     // 头像同步定时器
     @State private var avatarSyncTimer: Timer?
@@ -304,6 +305,13 @@ struct ProfileDisplayView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
+                    
+                    // ⭐ Token 充值卡片
+                    TokenCard {
+                        showingTokenPurchase = true
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
                 }
             }
             .padding(.bottom, 20)
@@ -366,6 +374,13 @@ struct ProfileDisplayView: View {
                 .environmentObject(authManager)
                 .environmentObject(supabaseService)
                 .presentationDetents([.height(600)])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showingTokenPurchase) {
+            TokenPurchaseView()
+                .environmentObject(authManager)
+                .environmentObject(supabaseService)
+                .presentationDetents([.height(700)])
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingRedemptionSystem) {
@@ -1083,6 +1098,61 @@ struct BoostCard: View {
                         .foregroundColor(.primary)
                     
                     Text("Get seen by 11X more people")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                }
+                
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color.white)
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// MARK: - Token Card
+struct TokenCard: View {
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                // 左侧圆形图标
+                ZStack {
+                    Circle()
+                        .fill(Color(red: 0.9, green: 0.7, blue: 0.2))
+                        .frame(width: 56, height: 56)
+                    
+                    Image(systemName: "creditcard.fill")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundColor(.white)
+                    
+                    // 小圆圈显示数量（可选）
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 20, height: 20)
+                        .overlay(
+                            Text("0")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(Color(red: 0.9, green: 0.7, blue: 0.2))
+                        )
+                        .offset(x: 18, y: -18)
+                }
+                
+                // 中间文本
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Buy Tokens")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.primary)
+                    
+                    Text("For Coffee Chats and Premium Features")
                         .font(.system(size: 14))
                         .foregroundColor(.gray)
                 }
@@ -4191,6 +4261,277 @@ struct StatusBadge: View {
 }
 
 // MARK: - Preview
+// MARK: - Token Purchase View
+struct TokenPurchaseView: View {
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    @State private var selectedTokenIndex: Int = 1 // 默认选择第二个档位（最常用）
+    @State private var isProcessing = false
+    @State private var showError = false
+    @State private var errorMessage = ""
+    
+    let tokenOptions = [
+        TokenOption(
+            tokens: 50,
+            price: "$4.99",
+            priceValue: 4.99,
+            description: "Trial Pack",
+            subtitle: "Perfect for first-time users",
+            unitPrice: "≈ $0.10 / Token",
+            bonus: nil
+        ),
+        TokenOption(
+            tokens: 120,
+            price: "$9.99",
+            priceValue: 9.99,
+            description: "Most Popular",
+            subtitle: "Great for regular users",
+            unitPrice: "≈ $0.083 / Token",
+            bonus: "+20% Bonus"
+        ),
+        TokenOption(
+            tokens: 260,
+            price: "$19.99",
+            priceValue: 19.99,
+            description: "Best Value",
+            subtitle: "Popular choice",
+            unitPrice: "≈ $0.077 / Token",
+            bonus: "+30% Bonus"
+        ),
+        TokenOption(
+            tokens: 700,
+            price: "$49.99",
+            priceValue: 49.99,
+            description: "Professional",
+            subtitle: "For power users",
+            unitPrice: "≈ $0.071 / Token",
+            bonus: "+40% Bonus"
+        ),
+        TokenOption(
+            tokens: 1500,
+            price: "$99.99",
+            priceValue: 99.99,
+            description: "Mentor Pack",
+            subtitle: "For mentors & heavy users",
+            unitPrice: "≈ $0.066 / Token",
+            bonus: "+50% Bonus"
+        )
+    ]
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Button(action: { dismiss() }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.gray)
+                }
+                Spacer()
+                Text("Buy Tokens")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                Spacer()
+                // Placeholder for symmetry
+                Color.clear.frame(width: 44, height: 44)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 4)
+            
+            // Token Options Carousel
+            TabView(selection: $selectedTokenIndex) {
+                ForEach(0..<tokenOptions.count, id: \.self) { index in
+                    TokenOptionCard(option: tokenOptions[index])
+                        .tag(index)
+                        .padding(.horizontal, 28)
+                        .padding(.top, 12)
+                }
+            }
+            .tabViewStyle(.page)
+            .indexViewStyle(.page(backgroundDisplayMode: .always))
+            .frame(height: 420)
+            
+            Spacer().frame(height: 8)
+            
+            // Purchase Button
+            Button(action: {
+                handlePurchase(option: tokenOptions[selectedTokenIndex])
+            }) {
+                HStack {
+                    if isProcessing {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    } else {
+                        Text("Purchase \(tokenOptions[selectedTokenIndex].tokens) Tokens")
+                            .font(.system(size: 18, weight: .bold))
+                    }
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 56)
+                .background(Color(red: 0.9, green: 0.7, blue: 0.2))
+                .cornerRadius(16)
+            }
+            .disabled(isProcessing)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 24)
+            
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea(edges: .bottom)
+        }
+        .alert("Error", isPresented: $showError) {
+            Button("OK") { }
+        } message: {
+            Text(errorMessage)
+        }
+    }
+    
+    private func handlePurchase(option: TokenOption) {
+        guard let userId = authManager.currentUser?.id else {
+            errorMessage = "User not authenticated"
+            showError = true
+            return
+        }
+        
+        isProcessing = true
+        
+        Task {
+            do {
+                // TODO: 实际的支付逻辑（集成 Stripe/Apple Pay）
+                // 这里先模拟购买成功，直接增加 tokens
+                
+                print("💳 [Token Purchase] 用户 \(userId) 购买 \(option.tokens) tokens，价格 \(option.price)")
+                
+                // 模拟网络延迟
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+                
+                // TODO: 调用后端 API 记录交易并增加 tokens
+                // 现在先直接在数据库中增加 tokens
+                
+                await MainActor.run {
+                    isProcessing = false
+                    dismiss()
+                }
+                
+                print("✅ [Token Purchase] 购买成功")
+                
+            } catch {
+                await MainActor.run {
+                    isProcessing = false
+                    errorMessage = "Purchase failed: \(error.localizedDescription)"
+                    showError = true
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Token Option Model
+struct TokenOption {
+    let tokens: Int
+    let price: String
+    let priceValue: Double
+    let description: String
+    let subtitle: String
+    let unitPrice: String
+    var bonus: String? = nil
+}
+
+// MARK: - Token Option Card
+struct TokenOptionCard: View {
+    let option: TokenOption
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Bonus Badge (if applicable)
+            if let bonus = option.bonus {
+                HStack {
+                    Spacer()
+                    Text(bonus)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color(red: 1.0, green: 0.6, blue: 0.0))
+                        .cornerRadius(12)
+                        .offset(y: 8)
+                    Spacer()
+                }
+                .zIndex(1)
+            }
+            
+            // Main Card
+            VStack(spacing: 8) {
+                // Icon
+                Image(systemName: "dollarsign.circle.fill")
+                    .font(.system(size: 36))
+                    .foregroundColor(Color(red: 0.9, green: 0.7, blue: 0.2))
+                    .padding(.top, option.bonus != nil ? 8 : 2)
+                
+                // Tokens Amount
+                Text("\(option.tokens) Tokens")
+                    .font(.system(size: 28, weight: .heavy))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                
+                // Description
+                Text(option.description)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                
+                // Subtitle
+                Text(option.subtitle)
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+                    .padding(.top, 2)
+                
+                Divider()
+                    .padding(.vertical, 8)
+                
+                // Price Details
+                VStack(spacing: 6) {
+                    HStack {
+                        Text("Total Price:")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(option.price)
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    
+                    HStack {
+                        Text("Unit Price:")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(option.unitPrice)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.horizontal, 12)
+                
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 360)
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.white)
+                    .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 4)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(Color(red: 0.9, green: 0.7, blue: 0.2).opacity(0.3), lineWidth: 2)
+            )
+        }
+    }
+}
+
 struct ProfileDisplayView_Previews: PreviewProvider {
     static var previews: some View {
         NavigationView {
