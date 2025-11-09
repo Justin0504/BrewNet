@@ -54,10 +54,6 @@ struct LoginView: View {
                                 Text("Brew Your Rise.")
                                     .font(.system(size: 18, weight: .bold))
                                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                                
-                                Text("Realize!")
-                                    .font(.system(size: 18, weight: .bold))
-                                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                             }
                         }
                         

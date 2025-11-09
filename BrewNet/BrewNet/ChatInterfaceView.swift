@@ -3397,39 +3397,30 @@ struct ProfileCardSheetView: View {
     
     // Since this is shown in chat, the users are connected/matched
     private let isConnection = true
-    
-    // Verify privacy settings are loaded from database
-    private var privacySettings: VisibilitySettings {
-        let settings = profile.privacyTrust.visibilitySettings
-        // Log privacy settings for debugging
-        print("🔒 Chat Profile Privacy Settings for \(profile.coreIdentity.name):")
-        print("   - company: \(settings.company.rawValue) -> visible: \(settings.company.isVisible(isConnection: true))")
-        print("   - skills: \(settings.skills.rawValue) -> visible: \(settings.skills.isVisible(isConnection: true))")
-        print("   - interests: \(settings.interests.rawValue) -> visible: \(settings.interests.isVisible(isConnection: true))")
-        print("   - location: \(settings.location.rawValue) -> visible: \(settings.location.isVisible(isConnection: true))")
-        print("   - timeslot: \(settings.timeslot.rawValue) -> visible: \(settings.timeslot.isVisible(isConnection: true))")
-        return settings
-    }
+    @State private var resolvedProStatus: Bool?
+    @State private var resolvedVerifiedStatus: Bool?
     
     var body: some View {
         NavigationView {
             ZStack {
-                // Background
                 Color(red: 0.98, green: 0.97, blue: 0.95)
                     .ignoresSafeArea()
                 
-                // Profile Card Content (non-swipeable version)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        // Level 1: Core Information Area
-                        level1CoreInfoView
-                        
-                        // Level 2: Matching Clues
-                        level2MatchingCluesView
-                        
-                        // Level 3: Deep Understanding
-                        level3DeepUnderstandingView
-                    }
+                ScrollView(.vertical, showsIndicators: false) {
+                    ProfileCardContentView(
+                        profile: profile,
+                        isConnection: isConnection,
+                        isProUser: resolvedProStatus ?? false,
+                    isVerified: resolvedVerifiedStatus,
+                        currentUserLocation: currentUserLocation,
+                        showDistance: true,
+                        onWorkExperienceTap: nil
+                    )
+                    .background(Color.white)
+                    .cornerRadius(28)
+                    .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 24)
                 }
             }
             .navigationTitle(profile.coreIdentity.name)
@@ -3445,6 +3436,8 @@ struct ProfileCardSheetView: View {
         }
         .onAppear {
             loadCurrentUserLocation()
+            resolveProStatusIfNeeded()
+            resolveVerifiedStatusIfNeeded()
         }
     }
     
@@ -3477,6 +3470,36 @@ struct ProfileCardSheetView: View {
                 }
             } catch {
                 print("⚠️ [ChatProfileCard] 加载当前用户位置失败: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    private func resolveProStatusIfNeeded() {
+        guard resolvedProStatus == nil else { return }
+        
+        Task {
+            do {
+                let proIds = try await supabaseService.getProUserIds(from: [profile.userId])
+                await MainActor.run {
+                    resolvedProStatus = proIds.contains(profile.userId)
+                }
+            } catch {
+                print("⚠️ [ChatProfileCard] Failed to load Pro status: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    private func resolveVerifiedStatusIfNeeded() {
+        guard resolvedVerifiedStatus == nil else { return }
+        
+        Task {
+            do {
+                let verifiedIds = try await supabaseService.getVerifiedUserIds(from: [profile.userId])
+                await MainActor.run {
+                    resolvedVerifiedStatus = verifiedIds.contains(profile.userId)
+                }
+            } catch {
+                print("⚠️ [ChatProfileCard] Failed to load verification status: \(error.localizedDescription)")
             }
         }
     }
@@ -3834,6 +3857,10 @@ struct ProfileCardSheetView: View {
     }
     
     // MARK: - Privacy Visibility Checks (strictly follows database privacy_trust.visibility_settings)
+    private var privacySettings: VisibilitySettings {
+        profile.privacyTrust.visibilitySettings
+    }
+    
     // Shows fields marked as "public" or "connections_only" when isConnection is true
     private var shouldShowCompany: Bool {
         let settings = privacySettings

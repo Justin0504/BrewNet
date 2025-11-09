@@ -38,6 +38,7 @@ struct BrewNetMatchesView: View {
     @State private var currentFilter: MatchFilter? = nil
     @State private var showSubscriptionPayment = false
     @State private var proUsers: Set<String> = []
+    @State private var verifiedUsers: Set<String> = []
     @State private var isProcessingLike = false
     @State private var isTransitioning = false // 标记是否正在过渡
     @State private var nextProfileOffset: CGFloat = 0 // 下一个 profile 的偏移量
@@ -121,7 +122,10 @@ struct BrewNetMatchesView: View {
                                 rotationAngle: .constant(0),
                                 onSwipe: { _ in },
                                 isConnection: isConnection,
-                                isPro: proUsers.contains(profiles[currentIndex + 1].userId)
+                                isPro: proUsers.contains(profiles[currentIndex + 1].userId),
+                                isVerified: verifiedUsers.contains(profiles[currentIndex + 1].userId),
+                                showsOuterFrame: false,
+                                cardWidth: screenWidth - 20
                             )
                             .scaleEffect(isTransitioning ? 1.0 : 0.95)
                             .offset(y: isTransitioning ? 0 : 10)
@@ -139,7 +143,10 @@ struct BrewNetMatchesView: View {
                                 rotationAngle: $rotationAngle,
                                 onSwipe: handleSwipe,
                                 isConnection: isConnection,
-                                isPro: proUsers.contains(profiles[currentIndex].userId)
+                                isPro: proUsers.contains(profiles[currentIndex].userId),
+                                isVerified: verifiedUsers.contains(profiles[currentIndex].userId),
+                                showsOuterFrame: false,
+                                cardWidth: screenWidth - 20
                             )
                             .opacity(1.0)
                         }
@@ -610,6 +617,8 @@ struct BrewNetMatchesView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             // 从列表中移除已拒绝的 profile
             // 注意：移除后，后面的元素会自动前移，所以当前索引会指向下一个 profile
+            proUsers.remove(profile.userId)
+            verifiedUsers.remove(profile.userId)
             profiles.remove(at: currentIndex)
             
             // 同时从缓存中移除，确保切换 tab 后不会再次显示
@@ -738,6 +747,7 @@ struct BrewNetMatchesView: View {
                     
                     cachedProfiles.removeAll { $0.userId == profile.userId }
                     proUsers.remove(profile.userId)
+                    verifiedUsers.remove(profile.userId)
 
                     if !cachedProfiles.isEmpty {
                         saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
@@ -886,6 +896,8 @@ struct BrewNetMatchesView: View {
         // 这里直接显示加载状态，然后从推荐系统加载
         isLoading = true
         profiles.removeAll()
+        proUsers.removeAll()
+        verifiedUsers.removeAll()
         totalFetched = 0
         totalFiltered = 0
         
@@ -1496,8 +1508,9 @@ struct BrewNetMatchesView: View {
                 }
             }
             
-            // Load Pro status from users table for all loaded profiles
+            // Load Pro and verification status from Supabase for all loaded profiles
             await loadProStatusForProfiles()
+            await loadVerifiedStatusForProfiles()
             
         } catch {
             print("❌ Failed to load profiles: \(error.localizedDescription)")
@@ -1555,6 +1568,23 @@ struct BrewNetMatchesView: View {
         }
     }
     
+    private func loadVerifiedStatusForProfiles() async {
+        guard !profiles.isEmpty else { return }
+        
+        let userIds = profiles.map { $0.userId }
+        print("🔍 [Verify] Loading verification status for \(userIds.count) profiles...")
+        
+        do {
+            let verifiedIds = try await supabaseService.getVerifiedUserIds(from: userIds)
+            await MainActor.run {
+                self.verifiedUsers = verifiedIds
+                print("✅ [Verify] Loaded verification status: \(verifiedIds.count) verified users")
+            }
+        } catch {
+            print("⚠️ [Verify] Failed to load verification status: \(error.localizedDescription)")
+        }
+    }
+    
     private func refreshProfiles() {
         print("🔄 Refreshing profiles - clearing all caches...")
         
@@ -1570,6 +1600,8 @@ struct BrewNetMatchesView: View {
         likedProfiles.removeAll()
         passedProfiles.removeAll()
         profiles.removeAll()
+        proUsers.removeAll()
+        verifiedUsers.removeAll()
         cachedProfiles.removeAll()
         isCacheFromRecommendation = false
         lastLoadTime = nil
