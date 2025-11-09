@@ -153,11 +153,31 @@ class RecommendationService: ObservableObject {
         // 9. 构建结果，保持推荐分数顺序
         var results: [(userId: String, score: Double, profile: BrewNetProfile)] = []
         var missingProfiles: [String] = []
+        var decodingErrors: [String] = []
+        
         for item in topK {
             if let supabaseProfile = profilesDict[item.userId] {
                 do {
-                let brewNetProfile = supabaseProfile.toBrewNetProfile()
-                results.append((item.userId, item.score, brewNetProfile))
+                    let brewNetProfile = supabaseProfile.toBrewNetProfile()
+                    results.append((item.userId, item.score, brewNetProfile))
+                } catch let error as DecodingError {
+                    print("⚠️ Decoding error for user \(item.userId):")
+                    switch error {
+                    case .keyNotFound(let key, let context):
+                        print("   - Missing key: \(key.stringValue)")
+                        print("   - Path: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+                    case .valueNotFound(let type, let context):
+                        print("   - Missing value of type: \(type)")
+                        print("   - Path: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+                    case .typeMismatch(let type, let context):
+                        print("   - Type mismatch: expected \(type)")
+                        print("   - Path: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+                    case .dataCorrupted(let context):
+                        print("   - Data corrupted: \(context.debugDescription)")
+                    @unknown default:
+                        print("   - Unknown decoding error")
+                    }
+                    decodingErrors.append(item.userId)
                 } catch {
                     print("⚠️ Failed to convert profile for user \(item.userId): \(error.localizedDescription)")
                     missingProfiles.append(item.userId)
@@ -169,7 +189,12 @@ class RecommendationService: ObservableObject {
         }
         
         if !missingProfiles.isEmpty {
-            print("⚠️ \(missingProfiles.count) profiles failed to load: \(missingProfiles.prefix(5).joined(separator: ", "))")
+            print("⚠️ \(missingProfiles.count) profiles not found: \(missingProfiles.prefix(5).joined(separator: ", "))")
+        }
+        
+        if !decodingErrors.isEmpty {
+            print("⚠️ \(decodingErrors.count) profiles failed to decode: \(decodingErrors.prefix(5).joined(separator: ", "))")
+            print("   These profiles may have incomplete or corrupted data in the database")
         }
         
         // 10. 缓存结果（确保只缓存推荐系统的结果）
@@ -191,14 +216,28 @@ class RecommendationService: ObservableObject {
         
         print("💾 Cached \(userIds.count) recommendations from Two-Tower system")
         
-        print("✅ Recommendations generated: \(results.count) profiles")
+        print("✅ Recommendations generated: \(results.count) profiles (requested: \(limit))")
+        
+        // 如果成功获取的profiles数量太少，给出警告
+        if results.count < limit / 2 && results.count > 0 {
+            print("⚠️ WARNING: Only \(results.count)/\(limit) profiles successfully loaded")
+            print("   - Missing profiles: \(missingProfiles.count)")
+            print("   - Decoding errors: \(decodingErrors.count)")
+        }
+        
         if results.isEmpty {
             print("⚠️ WARNING: Recommendation system returned 0 profiles!")
-            print("   - This should not happen if there are valid candidates")
+            print("   - Requested: \(limit) profiles")
+            print("   - Candidates available: \(candidates.count)")
+            print("   - Profiles fetched from DB: \(profilesDict.count)")
+            print("   - Missing profiles: \(missingProfiles.count)")
+            print("   - Decoding errors: \(decodingErrors.count)")
             print("   - Possible causes:")
             print("     1. All top-K profiles failed to load from database")
             print("     2. Profile decoding failed for all recommended users")
+            print("     3. All profiles have incomplete/corrupted data in database")
         }
+        
         return results
     }
     

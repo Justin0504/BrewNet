@@ -1514,6 +1514,7 @@ struct BrewNetMatchesView: View {
             
         } catch {
             print("❌ Failed to load profiles: \(error.localizedDescription)")
+            print("🔍 Error type: \(type(of: error))")
             
             // 检查是否是 noCandidates 错误（通过错误描述判断）
             let errorString = error.localizedDescription.lowercased()
@@ -1536,9 +1537,34 @@ struct BrewNetMatchesView: View {
                 return
             }
             
+            // 检查是否是数据解码错误
+            if let decodingError = error as? DecodingError {
+                print("🔍 DecodingError detected:")
+                switch decodingError {
+                case .keyNotFound(let key, let context):
+                    print("   - Missing key: \(key.stringValue)")
+                    print("   - Path: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+                case .valueNotFound(let type, let context):
+                    print("   - Missing value of type: \(type)")
+                    print("   - Path: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+                case .typeMismatch(let type, let context):
+                    print("   - Type mismatch: expected \(type)")
+                    print("   - Path: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+                case .dataCorrupted(let context):
+                    print("   - Data corrupted: \(context.debugDescription)")
+                @unknown default:
+                    print("   - Unknown decoding error")
+                }
+            }
+            
             await MainActor.run {
                 if isInitial {
-                    errorMessage = "Failed to load profiles: \(error.localizedDescription)"
+                    // 更友好的错误提示
+                    if errorString.contains("couldn't be read") || errorString.contains("missing") {
+                        errorMessage = "Some profile data is incomplete. Please refresh to try again."
+                    } else {
+                        errorMessage = "Failed to load profiles. Please try refreshing."
+                    }
                     isLoading = false
                 } else {
                     isLoadingMore = false
