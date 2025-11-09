@@ -693,20 +693,20 @@ struct ProfileHeaderView: View {
                                 .scaleEffect(0.8)
                         } else {
                             Image(systemName: "camera.fill")
-                                .font(.system(size: 14))
+                                .font(.system(size: 30))
                                 .foregroundColor(.blue)
                         }
                     }
-                    .frame(width: 24, height: 24)
+                    .frame(width: 50, height: 50)
                     .background(Color.blue.opacity(0.1))
                     .clipShape(Circle())
                 }
                 
                 // Verification icon (grey)
                 Image(systemName: "person.badge.shield.checkmark.fill")
-                    .font(.system(size: 14))
+                    .font(.system(size: 30))
                     .foregroundColor(.gray)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 50, height: 50)
                     .background(Color.gray.opacity(0.1))
                     .clipShape(Circle())
             }
@@ -773,7 +773,7 @@ struct ProfileHeaderView: View {
                     
                     VStack(alignment: .leading, spacing: 8) {
                         nameAndIconsView
-                        companyTitleView
+                        //companyTitleView
                     }
                     
                     Spacer()
