@@ -47,6 +47,70 @@ struct UserTowerFeatures: Codable {
         case isVerified = "is_verified"
     }
     
+    // 自定义解码器，为profileCompletion提供默认值
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // 稀疏特征（可选）
+        location = try container.decodeIfPresent(String.self, forKey: .location)
+        timeZone = try container.decodeIfPresent(String.self, forKey: .timeZone)
+        industry = try container.decodeIfPresent(String.self, forKey: .industry)
+        experienceLevel = try container.decodeIfPresent(String.self, forKey: .experienceLevel)
+        careerStage = try container.decodeIfPresent(String.self, forKey: .careerStage)
+        mainIntention = try container.decodeIfPresent(String.self, forKey: .mainIntention)
+        
+        // 多值特征（数组）
+        skills = try container.decodeIfPresent([String].self, forKey: .skills) ?? []
+        hobbies = try container.decodeIfPresent([String].self, forKey: .hobbies) ?? []
+        values = try container.decodeIfPresent([String].self, forKey: .values) ?? []
+        languages = try container.decodeIfPresent([String].self, forKey: .languages) ?? []
+        subIntentions = try container.decodeIfPresent([String].self, forKey: .subIntentions) ?? []
+        skillsToLearn = try container.decodeIfPresent([String].self, forKey: .skillsToLearn) ?? []
+        skillsToTeach = try container.decodeIfPresent([String].self, forKey: .skillsToTeach) ?? []
+        
+        // 数值特征（提供默认值）
+        yearsOfExperience = try container.decodeIfPresent(Double.self, forKey: .yearsOfExperience) ?? 0.0
+        profileCompletion = try container.decodeIfPresent(Double.self, forKey: .profileCompletion) ?? 0.5 // 默认50%
+        isVerified = try container.decodeIfPresent(Int.self, forKey: .isVerified) ?? 0
+    }
+    
+    // 标准初始化器（用于从BrewNetProfile创建）
+    init(
+        location: String?,
+        timeZone: String?,
+        industry: String?,
+        experienceLevel: String?,
+        careerStage: String?,
+        mainIntention: String?,
+        skills: [String],
+        hobbies: [String],
+        values: [String],
+        languages: [String],
+        subIntentions: [String],
+        skillsToLearn: [String],
+        skillsToTeach: [String],
+        yearsOfExperience: Double,
+        profileCompletion: Double,
+        isVerified: Int
+    ) {
+        self.location = location
+        self.timeZone = timeZone
+        self.industry = industry
+        self.experienceLevel = experienceLevel
+        self.careerStage = careerStage
+        self.mainIntention = mainIntention
+        self.skills = skills
+        self.hobbies = hobbies
+        self.values = values
+        self.languages = languages
+        self.subIntentions = subIntentions
+        self.skillsToLearn = skillsToLearn
+        self.skillsToTeach = skillsToTeach
+        self.yearsOfExperience = yearsOfExperience
+        self.profileCompletion = profileCompletion
+        self.isVerified = isVerified
+    }
+    
     /// 从 BrewNetProfile 转换为 UserTowerFeatures
     static func from(_ profile: BrewNetProfile) -> UserTowerFeatures {
         UserTowerFeatures(
