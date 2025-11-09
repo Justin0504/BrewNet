@@ -511,14 +511,14 @@ class SupabaseService: ObservableObject {
     
     /// 上传 Moments 图片
     func uploadMomentImage(userId: String, imageData: Data, fileName: String) async throws -> String {
-        print("📤 Uploading moment image for user: \(userId), fileName: \(fileName)")
+        print("📤 Uploading photo for user: \(userId), fileName: \(fileName)")
         
-        let filePath = "\(userId)/moments/\(fileName)"
+        let filePath = "\(userId)/photos/\(fileName)"
         
         do {
             // 上传图片到 storage bucket
             try await client.storage
-                .from("avatars") // 使用现有的 avatars bucket，或者可以创建新的 moments bucket
+                .from("avatars") // 使用现有的 avatars bucket 用于存储工作照片和生活照片
                 .upload(
                     path: filePath,
                     file: imageData,
@@ -528,7 +528,7 @@ class SupabaseService: ObservableObject {
                     )
                 )
             
-            print("✅ Moment image uploaded successfully")
+            print("✅ Photo uploaded successfully")
             
             // 获取公共 URL
             let publicURL = try client.storage
@@ -539,7 +539,7 @@ class SupabaseService: ObservableObject {
             return publicURL.absoluteString
             
         } catch {
-            print("❌ Failed to upload moment image: \(error.localizedDescription)")
+            print("❌ Failed to upload photo: \(error.localizedDescription)")
             throw error
         }
     }
@@ -582,12 +582,21 @@ class SupabaseService: ObservableObject {
                 throw ProfileError.creationFailed("Failed to encode profile fields")
             }
             
-            // 处理 moments（可选字段）
-            var momentsDict: [String: AnyCodableValue]? = nil
-            if let moments = profile.moments {
-                let momentsData = try encoder.encode(moments)
-                if let momentsJson = try? JSONSerialization.jsonObject(with: momentsData) as? [String: Any] {
-                    momentsDict = momentsJson.mapValues { AnyCodableValue($0) }
+            // 处理 work_photos（可选字段）
+            var workPhotosDict: [String: AnyCodableValue]? = nil
+            if let workPhotos = profile.workPhotos {
+                let workPhotosData = try encoder.encode(workPhotos)
+                if let workPhotosJson = try? JSONSerialization.jsonObject(with: workPhotosData) as? [String: Any] {
+                    workPhotosDict = workPhotosJson.mapValues { AnyCodableValue($0) }
+                }
+            }
+            
+            // 处理 lifestyle_photos（可选字段）
+            var lifestylePhotosDict: [String: AnyCodableValue]? = nil
+            if let lifestylePhotos = profile.lifestylePhotos {
+                let lifestylePhotosData = try encoder.encode(lifestylePhotos)
+                if let lifestylePhotosJson = try? JSONSerialization.jsonObject(with: lifestylePhotosData) as? [String: Any] {
+                    lifestylePhotosDict = lifestylePhotosJson.mapValues { AnyCodableValue($0) }
                 }
             }
             
@@ -599,7 +608,8 @@ class SupabaseService: ObservableObject {
                 let networking_intention: [String: AnyCodableValue]
                 let networking_preferences: [String: AnyCodableValue]
                 let personality_social: [String: AnyCodableValue]
-                let moments: [String: AnyCodableValue]?
+                let work_photos: [String: AnyCodableValue]?
+                let lifestyle_photos: [String: AnyCodableValue]?
                 let privacy_trust: [String: AnyCodableValue]
             }
             
@@ -681,7 +691,8 @@ class SupabaseService: ObservableObject {
                 networking_intention: convertDict(networkingIntention),
                 networking_preferences: convertDict(networkingPreferences),
                 personality_social: convertDict(personalitySocial),
-                moments: momentsDict,
+                work_photos: workPhotosDict,
+                lifestyle_photos: lifestylePhotosDict,
                 privacy_trust: convertDict(privacyTrust)
             )
             
@@ -963,13 +974,40 @@ class SupabaseService: ObservableObject {
                 throw ProfileError.updateFailed("Failed to encode profile fields")
             }
             
-            // 处理 moments（可选字段）
-            var momentsDict: [String: AnyCodableValue]? = nil
-            if let moments = profile.moments {
-                let momentsData = try encoder.encode(moments)
-                if let momentsJson = try? JSONSerialization.jsonObject(with: momentsData) as? [String: Any] {
-                    momentsDict = momentsJson.mapValues { AnyCodableValue($0) }
+            // 处理 work_photos（可选字段）
+            var workPhotosDict: [String: AnyCodableValue]? = nil
+            if let workPhotos = profile.workPhotos {
+                print("📸 [updateProfile] 准备保存 Work Photos: \(workPhotos.photos.count) 张")
+                workPhotos.photos.enumerated().forEach { index, photo in
+                    print("   [\(index)] id=\(photo.id), url=\(photo.imageUrl ?? "nil"), caption=\(photo.caption ?? "nil")")
                 }
+                let workPhotosData = try encoder.encode(workPhotos)
+                if let workPhotosJson = try? JSONSerialization.jsonObject(with: workPhotosData) as? [String: Any] {
+                    workPhotosDict = workPhotosJson.mapValues { AnyCodableValue($0) }
+                    print("📸 Work Photos 转换为字典成功")
+                } else {
+                    print("⚠️ Work Photos 转换为字典失败")
+                }
+            } else {
+                print("📸 [updateProfile] 没有 Work Photos 需要保存")
+            }
+            
+            // 处理 lifestyle_photos（可选字段）
+            var lifestylePhotosDict: [String: AnyCodableValue]? = nil
+            if let lifestylePhotos = profile.lifestylePhotos {
+                print("📸 [updateProfile] 准备保存 Lifestyle Photos: \(lifestylePhotos.photos.count) 张")
+                lifestylePhotos.photos.enumerated().forEach { index, photo in
+                    print("   [\(index)] id=\(photo.id), url=\(photo.imageUrl ?? "nil"), caption=\(photo.caption ?? "nil")")
+                }
+                let lifestylePhotosData = try encoder.encode(lifestylePhotos)
+                if let lifestylePhotosJson = try? JSONSerialization.jsonObject(with: lifestylePhotosData) as? [String: Any] {
+                    lifestylePhotosDict = lifestylePhotosJson.mapValues { AnyCodableValue($0) }
+                    print("📸 Lifestyle Photos 转换为字典成功")
+                } else {
+                    print("⚠️ Lifestyle Photos 转换为字典失败")
+                }
+            } else {
+                print("📸 [updateProfile] 没有 Lifestyle Photos 需要保存")
             }
             
             // 创建一个符合 Codable 的结构体来包装更新数据（与 createProfile 完全相同的结构）
@@ -980,7 +1018,8 @@ class SupabaseService: ObservableObject {
                 let networking_intention: [String: AnyCodableValue]
                 let networking_preferences: [String: AnyCodableValue]
                 let personality_social: [String: AnyCodableValue]
-                let moments: [String: AnyCodableValue]?
+                let work_photos: [String: AnyCodableValue]?
+                let lifestyle_photos: [String: AnyCodableValue]?
                 let privacy_trust: [String: AnyCodableValue]
             }
             
@@ -1012,6 +1051,49 @@ class SupabaseService: ObservableObject {
                         self = .null
                     }
                 }
+                
+                // ⭐ 关键修复：正确编码为原始值，而不是枚举结构
+                func encode(to encoder: Encoder) throws {
+                    var container = encoder.singleValueContainer()
+                    switch self {
+                    case .string(let value):
+                        try container.encode(value)
+                    case .int(let value):
+                        try container.encode(value)
+                    case .double(let value):
+                        try container.encode(value)
+                    case .bool(let value):
+                        try container.encode(value)
+                    case .array(let value):
+                        try container.encode(value)
+                    case .object(let value):
+                        try container.encode(value)
+                    case .null:
+                        try container.encodeNil()
+                    }
+                }
+                
+                // ⭐ 添加解码方法以保持完整性
+                init(from decoder: Decoder) throws {
+                    let container = try decoder.singleValueContainer()
+                    if container.decodeNil() {
+                        self = .null
+                    } else if let string = try? container.decode(String.self) {
+                        self = .string(string)
+                    } else if let int = try? container.decode(Int.self) {
+                        self = .int(int)
+                    } else if let double = try? container.decode(Double.self) {
+                        self = .double(double)
+                    } else if let bool = try? container.decode(Bool.self) {
+                        self = .bool(bool)
+                    } else if let array = try? container.decode([AnyCodableValue].self) {
+                        self = .array(array)
+                    } else if let object = try? container.decode([String: AnyCodableValue].self) {
+                        self = .object(object)
+                    } else {
+                        self = .null
+                    }
+                }
             }
             
             // 转换字典值
@@ -1026,7 +1108,8 @@ class SupabaseService: ObservableObject {
                 networking_intention: convertDict(networkingIntention),
                 networking_preferences: convertDict(networkingPreferences),
                 personality_social: convertDict(personalitySocial),
-                moments: momentsDict,
+                work_photos: workPhotosDict,
+                lifestyle_photos: lifestylePhotosDict,
                 privacy_trust: convertDict(privacyTrust)
             )
             
