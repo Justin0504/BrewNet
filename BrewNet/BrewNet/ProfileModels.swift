@@ -886,7 +886,7 @@ extension VisibilitySettings {
             location: .public_,
             skills: .public_,
             interests: .public_,
-            timeslot: .private_
+            timeslot: .connectionsOnly
         )
     }
 }
