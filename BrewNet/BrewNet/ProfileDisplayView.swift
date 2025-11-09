@@ -396,6 +396,7 @@ struct ProfileDisplayView: View {
     @State private var showingRedemptionSystem = false
     @State private var showingCoffeeChatSchedule = false
     @State private var showingBoostPurchase = false
+    @State private var showingTokenPurchase = false // ⭐ 新增：Token 充值
     
     // 头像同步定时器
     @State private var avatarSyncTimer: Timer?
@@ -506,6 +507,13 @@ struct ProfileDisplayView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
+                    
+                    // ⭐ Token 充值卡片
+                    TokenCard {
+                        showingTokenPurchase = true
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
                 }
             }
             .padding(.bottom, 20)
@@ -579,6 +587,13 @@ struct ProfileDisplayView: View {
                 .environmentObject(authManager)
                 .environmentObject(supabaseService)
                 .presentationDetents([.height(600)])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showingTokenPurchase) {
+            TokenPurchaseView()
+                .environmentObject(authManager)
+                .environmentObject(supabaseService)
+                .presentationDetents([.height(700)])
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingRedemptionSystem) {
@@ -821,6 +836,14 @@ struct ProfileHeaderView: View {
     @State private var errorMessage = ""
     @State private var showSuccessAlert = false
     
+    // ⭐ 资源数量
+    @State private var credits: Int = 0
+    @State private var boosts: Int = 0
+    @State private var superboosts: Int = 0
+    @State private var tokens: Int = 0
+    @State private var isLoadingResources = true
+    @State private var isResourcesExpanded = false // 资源展开/收起状态
+    
     // 计算资料完成度百分比
     private var profileCompletionPercentage: Int {
         var completedFields = 0
@@ -904,11 +927,14 @@ struct ProfileHeaderView: View {
                 Text(profile.coreIdentity.name)
                     .font(.system(size: 30, weight: .bold))
                     .foregroundColor(.black)
+                    .lineLimit(1)
                 
                 if authManager.currentUser?.isPro == true {
                     ProBadge(size: .medium)
+                        .fixedSize()
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
             
             // Icons row
             HStack(spacing: 12) {
@@ -939,6 +965,79 @@ struct ProfileHeaderView: View {
                     .clipShape(Circle())
             }
         }
+    }
+    
+    @ViewBuilder
+    private var resourcesView: some View {
+        Button(action: {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                isResourcesExpanded.toggle()
+            }
+        }) {
+            VStack(alignment: .leading, spacing: 6) {
+                // Credits (always visible)
+                HStack(spacing: 4) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.yellow)
+                        .frame(width: 20, alignment: .center)
+                    Text("\(credits)")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.black)
+                        .frame(minWidth: 30, alignment: .leading)
+                    
+                    // 展开/收起图标
+                    Image(systemName: isResourcesExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.gray)
+                }
+                
+                if isResourcesExpanded {
+                    // Boost
+                    HStack(spacing: 4) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(Color(red: 0.4, green: 0.5, blue: 0.5))
+                            .frame(width: 20, alignment: .center)
+                        Text("\(boosts)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.black)
+                            .frame(minWidth: 30, alignment: .leading)
+                    }
+                    
+                    // Superboost
+                    HStack(spacing: 4) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.yellow)
+                            .frame(width: 20, alignment: .center)
+                        Text("\(superboosts)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.black)
+                            .frame(minWidth: 30, alignment: .leading)
+                    }
+                    
+                    // BrewToken
+                    HStack(spacing: 4) {
+                        ZStack {
+                            Circle()
+                                .fill(Color(red: 0.9, green: 0.7, blue: 0.2))
+                                .frame(width: 18, height: 18)
+                            
+                            Text("B")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                        .frame(width: 20, alignment: .center)
+                        Text("\(tokens)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.black)
+                            .frame(minWidth: 30, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
     }
     
     @ViewBuilder
@@ -996,7 +1095,7 @@ struct ProfileHeaderView: View {
             Button(action: {
                 onShowProfileCard?()
             }) {
-                HStack(alignment: .top, spacing: 16) {
+                HStack(alignment: .top, spacing: 12) {
                     avatarWithProgressView
                     
                     VStack(alignment: .leading, spacing: 8) {
@@ -1004,13 +1103,31 @@ struct ProfileHeaderView: View {
                         //companyTitleView
                     }
                     
-                    Spacer()
+                    Spacer(minLength: 8)
+                    
+                    // ⭐ 资源显示
+                    if isLoadingResources {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                            .scaleEffect(0.8)
+                            .frame(width: 60)
+                    } else {
+                        resourcesView
+                            .frame(width: 60)
+                    }
                 }
             }
             .buttonStyle(PlainButtonStyle())
         }
         .padding(20)
         .background(Color.white)
+        .onAppear {
+            loadResources()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ResourcesUpdated"))) { _ in
+            print("📨 [ProfileHeaderView] 收到资源更新通知，重新加载...")
+            loadResources()
+        }
         .onChange(of: selectedPhotoItem) { newItem in
             Task {
                 guard let newItem = newItem else { return }
@@ -1155,6 +1272,57 @@ struct ProfileHeaderView: View {
         
         return nil
     }
+    
+    // ⭐ 加载用户资源数量
+    private func loadResources() {
+        guard let userId = authManager.currentUser?.id else {
+            isLoadingResources = false
+            return
+        }
+        
+        Task {
+            do {
+                // 从 users 表查询资源数量
+                struct UserResources: Codable {
+                    let credits: Int?
+                    let boost_count: Int?
+                    let superboost_count: Int?
+                    let tokens: Int?
+                    
+                    enum CodingKeys: String, CodingKey {
+                        case credits
+                        case boost_count
+                        case superboost_count
+                        case tokens
+                    }
+                }
+                
+                let response: UserResources = try await SupabaseConfig.shared.client
+                    .from("users")
+                    .select("credits, boost_count, superboost_count, tokens")
+                    .eq("id", value: userId)
+                    .single()
+                    .execute()
+                    .value
+                
+                await MainActor.run {
+                    self.credits = response.credits ?? 0
+                    self.boosts = response.boost_count ?? 0
+                    self.superboosts = response.superboost_count ?? 0
+                    self.tokens = response.tokens ?? 0
+                    self.isLoadingResources = false
+                    
+                    print("✅ [Resources] 加载成功 - Credits: \(credits), Boosts: \(boosts), Superboosts: \(superboosts), Tokens: \(tokens)")
+                }
+                
+            } catch {
+                print("❌ [Resources] 加载失败: \(error)")
+                await MainActor.run {
+                    self.isLoadingResources = false
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Profile Section Container
@@ -1291,17 +1459,6 @@ struct BoostCard: View {
                     Image(systemName: "bolt.fill")
                         .font(.system(size: 24, weight: .semibold))
                         .foregroundColor(.white)
-                    
-                    // 小圆圈显示数量（可选）
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: 20, height: 20)
-                        .overlay(
-                            Text("0")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundColor(Color(red: 0.4, green: 0.5, blue: 0.5))
-                        )
-                        .offset(x: 18, y: -18)
                 }
                 
                 // 中间文本
@@ -1313,6 +1470,51 @@ struct BoostCard: View {
                     Text("Get seen by 11X more people")
                         .font(.system(size: 14))
                         .foregroundColor(.gray)
+                }
+                
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color.white)
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// MARK: - Token Card
+struct TokenCard: View {
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                // 左侧圆形图标
+                ZStack {
+                    Circle()
+                        .fill(Color(red: 0.9, green: 0.7, blue: 0.2))
+                        .frame(width: 56, height: 56)
+                    
+                    Text("B")
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundColor(.white)
+                }
+                
+                // 中间文本
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("BrewTokens")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.primary)
+                    
+                    Text("BrewTokens are a way to show respect for someone's time and insight.")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                        .lineLimit(3)
                 }
                 
                 Spacer()
@@ -4367,6 +4569,325 @@ struct StatusBadge: View {
 }
 
 // MARK: - Preview
+// MARK: - Token Purchase View
+struct TokenPurchaseView: View {
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
+    
+    @State private var selectedTokenIndex: Int = 1 // 默认选择第二个档位（最常用）
+    @State private var isProcessing = false
+    @State private var showError = false
+    @State private var errorMessage = ""
+    @State private var showSuccess = false // ⭐ 成功提示
+    @State private var purchasedTokens = 0 // ⭐ 购买的 Token 数量
+    
+    let tokenOptions = [
+        TokenOption(
+            tokens: 50,
+            price: "$4.99",
+            priceValue: 4.99,
+            description: "Trial Pack",
+            subtitle: "Perfect for first-time users",
+            unitPrice: "≈ $0.10 / BrewToken",
+            bonus: nil
+        ),
+        TokenOption(
+            tokens: 120,
+            price: "$9.99",
+            priceValue: 9.99,
+            description: "Most Popular",
+            subtitle: "Great for regular users",
+            unitPrice: "≈ $0.083 / BrewToken",
+            bonus: "+20% Bonus"
+        ),
+        TokenOption(
+            tokens: 260,
+            price: "$19.99",
+            priceValue: 19.99,
+            description: "Best Value",
+            subtitle: "Popular choice",
+            unitPrice: "≈ $0.077 / BrewToken",
+            bonus: "+30% Bonus"
+        ),
+        TokenOption(
+            tokens: 700,
+            price: "$49.99",
+            priceValue: 49.99,
+            description: "Professional",
+            subtitle: "For power users",
+            unitPrice: "≈ $0.071 / BrewToken",
+            bonus: "+40% Bonus"
+        ),
+        TokenOption(
+            tokens: 1500,
+            price: "$99.99",
+            priceValue: 99.99,
+            description: "Mentor Pack",
+            subtitle: "For mentors & heavy users",
+            unitPrice: "≈ $0.066 / BrewToken",
+            bonus: "+50% Bonus"
+        )
+    ]
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Button(action: { dismiss() }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.gray)
+                }
+                Spacer()
+                Text("BrewTokens")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                Spacer()
+                // Placeholder for symmetry
+                Color.clear.frame(width: 44, height: 44)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 4)
+            
+            // Token Options Carousel
+            TabView(selection: $selectedTokenIndex) {
+                ForEach(0..<tokenOptions.count, id: \.self) { index in
+                    TokenOptionCard(option: tokenOptions[index])
+                        .tag(index)
+                        .padding(.horizontal, 28)
+                        .padding(.top, 12)
+                }
+            }
+            .tabViewStyle(.page)
+            .indexViewStyle(.page(backgroundDisplayMode: .always))
+            .frame(height: 420)
+            
+            Spacer().frame(height: 8)
+            
+            // Purchase Button
+            Button(action: {
+                handlePurchase(option: tokenOptions[selectedTokenIndex])
+            }) {
+                HStack {
+                    if isProcessing {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    } else {
+                        Text("Purchase \(tokenOptions[selectedTokenIndex].tokens) BrewTokens")
+                            .font(.system(size: 18, weight: .bold))
+                    }
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 56)
+                .background(Color(red: 0.9, green: 0.7, blue: 0.2))
+                .cornerRadius(16)
+            }
+            .disabled(isProcessing)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 24)
+            
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea(edges: .bottom)
+        }
+        .alert("Error", isPresented: $showError) {
+            Button("OK") { }
+        } message: {
+            Text(errorMessage)
+        }
+        .alert("Purchase Successful! 🎉", isPresented: $showSuccess) {
+            Button("OK") {
+                dismiss()
+            }
+        } message: {
+            Text("You have received \(purchasedTokens) BrewTokens!\n\nYour new balance will be updated shortly.")
+        }
+    }
+    
+    private func handlePurchase(option: TokenOption) {
+        guard let userId = authManager.currentUser?.id else {
+            errorMessage = "User not authenticated"
+            showError = true
+            return
+        }
+        
+        isProcessing = true
+        
+        Task {
+            do {
+                print("💳 [Token Purchase] 用户 \(userId) 购买 \(option.tokens) tokens，价格 \(option.price)")
+                
+                // TODO: 实际的支付逻辑（集成 Stripe/Apple Pay）
+                // 这里先模拟支付成功，直接增加 tokens
+                
+                // 1. 查询当前 token 余额
+                struct UserTokens: Codable {
+                    let tokens: Int?
+                }
+                
+                let currentData: UserTokens = try await SupabaseConfig.shared.client
+                    .from("users")
+                    .select("tokens")
+                    .eq("id", value: userId)
+                    .single()
+                    .execute()
+                    .value
+                
+                let currentTokens = currentData.tokens ?? 0
+                let newTokens = currentTokens + option.tokens
+                
+                print("💰 [Token Purchase] 当前: \(currentTokens), 购买: \(option.tokens), 新余额: \(newTokens)")
+                
+                // 2. 更新数据库中的 token 数量
+                struct TokenUpdate: Codable {
+                    let tokens: Int
+                }
+                
+                try await SupabaseConfig.shared.client
+                    .from("users")
+                    .update(TokenUpdate(tokens: newTokens))
+                    .eq("id", value: userId)
+                    .execute()
+                
+                print("✅ [Token Purchase] 数据库更新成功，新余额: \(newTokens)")
+                
+                // 3. 发送通知刷新资源显示
+                await MainActor.run {
+                    NotificationCenter.default.post(name: NSNotification.Name("ResourcesUpdated"), object: nil)
+                }
+                
+                // 4. 显示成功提示
+                await MainActor.run {
+                    isProcessing = false
+                    purchasedTokens = option.tokens
+                    showSuccess = true
+                }
+                
+                print("🎉 [Token Purchase] 购买完成，获得 \(option.tokens) Tokens")
+                
+            } catch {
+                print("❌ [Token Purchase] 购买失败: \(error)")
+                await MainActor.run {
+                    isProcessing = false
+                    errorMessage = "Purchase failed: \(error.localizedDescription)"
+                    showError = true
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Token Option Model
+struct TokenOption {
+    let tokens: Int
+    let price: String
+    let priceValue: Double
+    let description: String
+    let subtitle: String
+    let unitPrice: String
+    var bonus: String? = nil
+}
+
+// MARK: - Token Option Card
+struct TokenOptionCard: View {
+    let option: TokenOption
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Bonus Badge (if applicable)
+            if let bonus = option.bonus {
+                HStack {
+                    Spacer()
+                    Text(bonus)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color(red: 1.0, green: 0.6, blue: 0.0))
+                        .cornerRadius(12)
+                        .offset(y: 8)
+                    Spacer()
+                }
+                .zIndex(1)
+            }
+            
+            // Main Card
+            VStack(spacing: 8) {
+                // Icon
+                ZStack {
+                    Circle()
+                        .fill(Color(red: 0.9, green: 0.7, blue: 0.2))
+                        .frame(width: 50, height: 50)
+                    
+                    Text("B")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.white)
+                }
+                .padding(.top, option.bonus != nil ? 8 : 2)
+                
+                // Tokens Amount
+                Text("\(option.tokens) BrewTokens")
+                    .font(.system(size: 28, weight: .heavy))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                
+                // Description
+                Text(option.description)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                
+                // Subtitle
+                Text(option.subtitle)
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+                    .padding(.top, 2)
+                
+                Divider()
+                    .padding(.vertical, 8)
+                
+                // Price Details
+                VStack(spacing: 6) {
+                    HStack {
+                        Text("Total Price:")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(option.price)
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    }
+                    
+                    HStack {
+                        Text("Unit Price:")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(option.unitPrice)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.horizontal, 12)
+                
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 360)
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.white)
+                    .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 4)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(Color(red: 0.9, green: 0.7, blue: 0.2).opacity(0.3), lineWidth: 2)
+            )
+        }
+    }
+}
+
 struct ProfileDisplayView_Previews: PreviewProvider {
     static var previews: some View {
         NavigationView {
