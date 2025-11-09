@@ -614,6 +614,7 @@ struct ProfileHeaderView: View {
     @State private var superboosts: Int = 0
     @State private var tokens: Int = 0
     @State private var isLoadingResources = true
+    @State private var isResourcesExpanded = false // 资源展开/收起状态
     
     // 计算资料完成度百分比
     private var profileCompletionPercentage: Int {
@@ -740,61 +741,75 @@ struct ProfileHeaderView: View {
     
     @ViewBuilder
     private var resourcesView: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Credits
-            HStack(spacing: 4) {
-                Image(systemName: "star.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(.yellow)
-                    .frame(width: 20, alignment: .center)
-                Text("\(credits)")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.black)
-                    .frame(minWidth: 30, alignment: .leading)
+        Button(action: {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                isResourcesExpanded.toggle()
             }
-            
-            // Boost
-            HStack(spacing: 4) {
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(Color(red: 0.4, green: 0.5, blue: 0.5))
-                    .frame(width: 20, alignment: .center)
-                Text("\(boosts)")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.black)
-                    .frame(minWidth: 30, alignment: .leading)
-            }
-            
-            // Superboost
-            HStack(spacing: 4) {
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(.yellow)
-                    .frame(width: 20, alignment: .center)
-                Text("\(superboosts)")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.black)
-                    .frame(minWidth: 30, alignment: .leading)
-            }
-            
-            // BrewToken
-            HStack(spacing: 4) {
-                ZStack {
-                    Circle()
-                        .fill(Color(red: 0.9, green: 0.7, blue: 0.2))
-                        .frame(width: 18, height: 18)
+        }) {
+            VStack(alignment: .leading, spacing: 6) {
+                // Credits (always visible)
+                HStack(spacing: 4) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.yellow)
+                        .frame(width: 20, alignment: .center)
+                    Text("\(credits)")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.black)
+                        .frame(minWidth: 30, alignment: .leading)
                     
-                    Text("B")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.white)
+                    // 展开/收起图标
+                    Image(systemName: isResourcesExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.gray)
                 }
-                .frame(width: 20, alignment: .center)
-                Text("\(tokens)")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.black)
-                    .frame(minWidth: 30, alignment: .leading)
+                
+                if isResourcesExpanded {
+                    // Boost
+                    HStack(spacing: 4) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(Color(red: 0.4, green: 0.5, blue: 0.5))
+                            .frame(width: 20, alignment: .center)
+                        Text("\(boosts)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.black)
+                            .frame(minWidth: 30, alignment: .leading)
+                    }
+                    
+                    // Superboost
+                    HStack(spacing: 4) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.yellow)
+                            .frame(width: 20, alignment: .center)
+                        Text("\(superboosts)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.black)
+                            .frame(minWidth: 30, alignment: .leading)
+                    }
+                    
+                    // BrewToken
+                    HStack(spacing: 4) {
+                        ZStack {
+                            Circle()
+                                .fill(Color(red: 0.9, green: 0.7, blue: 0.2))
+                                .frame(width: 18, height: 18)
+                            
+                            Text("B")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                        .frame(width: 20, alignment: .center)
+                        Text("\(tokens)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.black)
+                            .frame(minWidth: 30, alignment: .leading)
+                    }
+                }
             }
         }
+        .buttonStyle(PlainButtonStyle())
     }
     
     @ViewBuilder
