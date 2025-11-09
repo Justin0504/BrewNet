@@ -2779,6 +2779,7 @@ struct UserProfileCardSheetView: View {
     @EnvironmentObject var supabaseService: SupabaseService
     @State private var selectedWorkExperience: WorkExperience?
     @State private var resolvedVerifiedStatus: Bool?
+    @State private var currentUserLocation: String?
     
     private var displayIsPro: Bool {
         if let currentUser = authManager.currentUser, currentUser.id == profile.userId {
@@ -2799,8 +2800,8 @@ struct UserProfileCardSheetView: View {
                         isConnection: isConnection,
                         isProUser: displayIsPro,
                     isVerified: resolvedVerifiedStatus,
-                        currentUserLocation: nil,
-                        showDistance: false,
+                        currentUserLocation: currentUserLocation,
+                        showDistance: true,
                         onWorkExperienceTap: { workExp in
                             selectedWorkExperience = workExp
                         }
@@ -2820,6 +2821,10 @@ struct UserProfileCardSheetView: View {
                         dismiss()
                     }
                 }
+            }
+            .onAppear {
+                loadCurrentUserLocation()
+                resolveVerifiedStatusIfNeeded()
             }
         }
         .sheet(item: $selectedWorkExperience) { workExp in
@@ -2873,6 +2878,39 @@ struct UserProfileCardSheetView: View {
                 }
             } catch {
                 print("⚠️ [UserProfileCardSheet] Failed to load verification status: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    // MARK: - Load Current User Location
+    private func loadCurrentUserLocation() {
+        guard let currentUser = authManager.currentUser else {
+            print("⚠️ [UserProfileCardSheet] 没有当前用户，无法加载位置")
+            return
+        }
+        
+        print("📍 [UserProfileCardSheet] 开始加载当前用户位置...")
+        print("   - 当前用户 ID: \(currentUser.id)")
+        
+        Task {
+            do {
+                if let currentProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                    let rawLocation = currentProfile.coreIdentity.location
+                    print("   - [原始数据] coreIdentity.location: \(rawLocation ?? "nil")")
+                    
+                    let brewNetProfile = currentProfile.toBrewNetProfile()
+                    await MainActor.run {
+                        currentUserLocation = brewNetProfile.coreIdentity.location
+                        print("✅ [UserProfileCardSheet] 已加载当前用户位置: \(brewNetProfile.coreIdentity.location ?? "nil")")
+                        if brewNetProfile.coreIdentity.location == nil || brewNetProfile.coreIdentity.location?.isEmpty == true {
+                            print("⚠️ [UserProfileCardSheet] 当前用户没有设置位置信息")
+                        }
+                    }
+                } else {
+                    print("⚠️ [UserProfileCardSheet] 无法获取当前用户 profile")
+                }
+            } catch {
+                print("⚠️ [UserProfileCardSheet] 加载当前用户位置失败: \(error.localizedDescription)")
             }
         }
     }
