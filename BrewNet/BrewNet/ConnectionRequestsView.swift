@@ -665,7 +665,7 @@ struct CompactRequestCard: View {
                 // Name
                 HStack(spacing: 6) {
                     Text(request.requesterProfile.name)
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: 20, weight: .bold))
                         .foregroundColor(themeBrown)
                     
                     if request.isRequesterPro {
@@ -695,22 +695,22 @@ struct CompactRequestCard: View {
                 // Company and Location
                 HStack(spacing: 4) {
                     Image(systemName: "building.2")
-                        .font(.system(size: 11))
+                        .font(.system(size: 13))
                         .foregroundColor(.gray)
                     Text(request.requesterProfile.company)
-                        .font(.system(size: 13))
+                        .font(.system(size: 16))
                         .foregroundColor(.gray)
                 }
                 
                 // Time ago
-                HStack(spacing: 4) {
-                    Image(systemName: "clock")
-                        .font(.system(size: 11))
-                        .foregroundColor(.gray)
-                    Text(request.timeAgo)
-                        .font(.system(size: 13))
-                        .foregroundColor(.gray)
-                }
+                // HStack(spacing: 4) {
+                //     Image(systemName: "clock")
+                //         .font(.system(size: 11))
+                //         .foregroundColor(.gray)
+                //     Text(request.timeAgo)
+                //         .font(.system(size: 13))
+                //         .foregroundColor(.gray)
+                // }
             }
             
             Spacer()

@@ -1559,11 +1559,27 @@ struct BrewNetMatchesView: View {
             
             await MainActor.run {
                 if isInitial {
-                    // 更友好的错误提示
-                    if errorString.contains("couldn't be read") || errorString.contains("missing") {
+                    // 更详细的错误提示，帮助诊断问题
+                    if let decodingError = error as? DecodingError {
+                        var detailMessage = "Data format issue: "
+                        switch decodingError {
+                        case .keyNotFound(let key, let context):
+                            detailMessage += "Missing '\(key.stringValue)' at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))"
+                        case .valueNotFound(let type, let context):
+                            detailMessage += "Missing value of type \(type) at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))"
+                        case .typeMismatch(let type, let context):
+                            detailMessage += "Type mismatch for \(type) at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))"
+                        case .dataCorrupted(let context):
+                            detailMessage += "Corrupted data at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))"
+                        @unknown default:
+                            detailMessage += "Unknown decoding error"
+                        }
+                        print("🔍 详细错误: \(detailMessage)")
+                        errorMessage = "Profile data error. Please check console for details."
+                    } else if errorString.contains("couldn't be read") || errorString.contains("missing") {
                         errorMessage = "Some profile data is incomplete. Please refresh to try again."
                     } else {
-                        errorMessage = "Failed to load profiles. Please try refreshing."
+                        errorMessage = "Failed to load profiles: \(error.localizedDescription)"
                     }
                     isLoading = false
                 } else {
