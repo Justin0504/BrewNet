@@ -178,10 +178,10 @@ struct ProfileCardView: View {
                         }
                     }
                 }
-                .padding(20)
+                .padding(32)
             }
         }
-        .frame(width: screenWidth - 40, height: screenHeight * 0.8)
+        .frame(width: screenWidth - 8, height: screenHeight * 0.8)
         .offset(dragOffset)
         .rotationEffect(.degrees(rotationAngle))
         .gesture(
