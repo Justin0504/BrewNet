@@ -415,6 +415,7 @@ struct ProfileCardContentView: View {
                             font: .system(size: 12, weight: .medium),
                             loadingText: "Locating..."
                         )
+                        .id("distance-\(location)-\(currentUserLocation ?? "nil")")
                     }
                 }
             }
