@@ -1078,17 +1078,6 @@ struct BoostCard: View {
                     Image(systemName: "bolt.fill")
                         .font(.system(size: 24, weight: .semibold))
                         .foregroundColor(.white)
-                    
-                    // 小圆圈显示数量（可选）
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: 20, height: 20)
-                        .overlay(
-                            Text("0")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundColor(Color(red: 0.4, green: 0.5, blue: 0.5))
-                        )
-                        .offset(x: 18, y: -18)
                 }
                 
                 // 中间文本
@@ -1130,20 +1119,9 @@ struct TokenCard: View {
                         .fill(Color(red: 0.9, green: 0.7, blue: 0.2))
                         .frame(width: 56, height: 56)
                     
-                    Image(systemName: "creditcard.fill")
-                        .font(.system(size: 24, weight: .semibold))
+                    Text("B")
+                        .font(.system(size: 32, weight: .bold))
                         .foregroundColor(.white)
-                    
-                    // 小圆圈显示数量（可选）
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: 20, height: 20)
-                        .overlay(
-                            Text("0")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundColor(Color(red: 0.9, green: 0.7, blue: 0.2))
-                        )
-                        .offset(x: 18, y: -18)
                 }
                 
                 // 中间文本
@@ -1152,9 +1130,10 @@ struct TokenCard: View {
                         .font(.system(size: 18, weight: .bold))
                         .foregroundColor(.primary)
                     
-                    Text("For Coffee Chats and Premium Features")
+                    Text("Tokens let you invite mentors, start conversations, and show appreciation for their time.")
                         .font(.system(size: 14))
                         .foregroundColor(.gray)
+                        .lineLimit(3)
                 }
                 
                 Spacer()
@@ -4466,10 +4445,16 @@ struct TokenOptionCard: View {
             // Main Card
             VStack(spacing: 8) {
                 // Icon
-                Image(systemName: "dollarsign.circle.fill")
-                    .font(.system(size: 36))
-                    .foregroundColor(Color(red: 0.9, green: 0.7, blue: 0.2))
-                    .padding(.top, option.bonus != nil ? 8 : 2)
+                ZStack {
+                    Circle()
+                        .fill(Color(red: 0.9, green: 0.7, blue: 0.2))
+                        .frame(width: 50, height: 50)
+                    
+                    Text("B")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.white)
+                }
+                .padding(.top, option.bonus != nil ? 8 : 2)
                 
                 // Tokens Amount
                 Text("\(option.tokens) Tokens")
