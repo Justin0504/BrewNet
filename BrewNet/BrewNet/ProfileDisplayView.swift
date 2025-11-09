@@ -608,6 +608,13 @@ struct ProfileHeaderView: View {
     @State private var errorMessage = ""
     @State private var showSuccessAlert = false
     
+    // ⭐ 资源数量
+    @State private var credits: Int = 0
+    @State private var boosts: Int = 0
+    @State private var superboosts: Int = 0
+    @State private var tokens: Int = 0
+    @State private var isLoadingResources = true
+    
     // 计算资料完成度百分比
     private var profileCompletionPercentage: Int {
         var completedFields = 0
@@ -729,6 +736,57 @@ struct ProfileHeaderView: View {
     }
     
     @ViewBuilder
+    private var resourcesView: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            // Credits
+            HStack(spacing: 6) {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.yellow)
+                Text("\(credits)")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.black)
+            }
+            
+            // Boost
+            HStack(spacing: 6) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(Color(red: 0.4, green: 0.5, blue: 0.5))
+                Text("\(boosts)")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.black)
+            }
+            
+            // Superboost
+            HStack(spacing: 6) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.yellow)
+                Text("\(superboosts)")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.black)
+            }
+            
+            // BrewToken
+            HStack(spacing: 6) {
+                ZStack {
+                    Circle()
+                        .fill(Color(red: 0.9, green: 0.7, blue: 0.2))
+                        .frame(width: 18, height: 18)
+                    
+                    Text("B")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                }
+                Text("\(tokens)")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.black)
+            }
+        }
+    }
+    
+    @ViewBuilder
     private var companyTitleView: some View {
         HStack {
             // 优先显示公司，如果没有则显示学校
@@ -792,12 +850,24 @@ struct ProfileHeaderView: View {
                     }
                     
                     Spacer()
+                    
+                    // ⭐ 资源显示
+                    if isLoadingResources {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                            .scaleEffect(0.8)
+                    } else {
+                        resourcesView
+                    }
                 }
             }
             .buttonStyle(PlainButtonStyle())
         }
         .padding(20)
         .background(Color.white)
+        .onAppear {
+            loadResources()
+        }
         .onChange(of: selectedPhotoItem) { newItem in
             Task {
                 guard let newItem = newItem else { return }
@@ -941,6 +1011,57 @@ struct ProfileHeaderView: View {
         }
         
         return nil
+    }
+    
+    // ⭐ 加载用户资源数量
+    private func loadResources() {
+        guard let userId = authManager.currentUser?.id else {
+            isLoadingResources = false
+            return
+        }
+        
+        Task {
+            do {
+                // 从 users 表查询资源数量
+                struct UserResources: Codable {
+                    let credits: Int?
+                    let boost_count: Int?
+                    let superboost_count: Int?
+                    let tokens: Int?
+                    
+                    enum CodingKeys: String, CodingKey {
+                        case credits
+                        case boost_count
+                        case superboost_count
+                        case tokens
+                    }
+                }
+                
+                let response: UserResources = try await SupabaseConfig.shared.client
+                    .from("users")
+                    .select("credits, boost_count, superboost_count, tokens")
+                    .eq("id", value: userId)
+                    .single()
+                    .execute()
+                    .value
+                
+                await MainActor.run {
+                    self.credits = response.credits ?? 0
+                    self.boosts = response.boost_count ?? 0
+                    self.superboosts = response.superboost_count ?? 0
+                    self.tokens = response.tokens ?? 0
+                    self.isLoadingResources = false
+                    
+                    print("✅ [Resources] 加载成功 - Credits: \(credits), Boosts: \(boosts), Superboosts: \(superboosts), Tokens: \(tokens)")
+                }
+                
+            } catch {
+                print("❌ [Resources] 加载失败: \(error)")
+                await MainActor.run {
+                    self.isLoadingResources = false
+                }
+            }
+        }
     }
 }
 
