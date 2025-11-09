@@ -48,13 +48,18 @@ struct MinimalProfileHeaderView: View {
             }
 
             VStack(spacing: 8) {
-                HStack(spacing: 10) {
+                ZStack {
                     Text(profile.coreIdentity.name)
                         .font(.system(size: 24, weight: .bold))
                         .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-
+                        .frame(maxWidth: .infinity)
+                    
                     if showProBadge {
-                        ProBadge(size: .medium)
+                        HStack {
+                            Spacer()
+                            ProBadge(size: .medium)
+                                .offset(x: -20)
+                        }
                     }
                 }
 
@@ -433,7 +438,11 @@ struct ProfileDisplayView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(Color.clear)
+                        .background(Color.white)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.3), lineWidth: 1.5)
+                        )
                         .cornerRadius(12)
                     }
                     
@@ -451,7 +460,11 @@ struct ProfileDisplayView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(Color.clear)
+                        .background(Color.white)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.3), lineWidth: 1.5)
+                        )
                         .cornerRadius(12)
                     }
                     
@@ -469,7 +482,11 @@ struct ProfileDisplayView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(Color.clear)
+                        .background(Color.white)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.3), lineWidth: 1.5)
+                        )
                         .cornerRadius(12)
                     }
                 }
