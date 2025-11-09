@@ -5064,6 +5064,55 @@ extension SupabaseService {
         print("✅ [Pro] Found \(proUserIds.count) active Pro users")
         return proUserIds
     }
+    
+    /// Get Verified user IDs from user_features table
+    func getVerifiedUserIds(from userIds: [String]) async throws -> Set<String> {
+        guard !userIds.isEmpty else { return Set() }
+        
+        print("🔍 [Verify] Checking verification status for \(userIds.count) users...")
+        var verifiedUserIds = Set<String>()
+        
+        let chunkSize = 100
+        let chunks = stride(from: 0, to: userIds.count, by: chunkSize).map { index -> [String] in
+            let end = min(index + chunkSize, userIds.count)
+            return Array(userIds[index..<end])
+        }
+        
+        for chunk in chunks {
+            let response = try await client
+                .from("user_features")
+                .select("user_id, is_verified")
+                .in("user_id", values: chunk)
+                .execute()
+            
+            let data = response.data
+            guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                continue
+            }
+            
+            for json in jsonArray {
+                guard let userId = json["user_id"] as? String else { continue }
+                
+                let verified: Bool
+                if let boolValue = json["is_verified"] as? Bool {
+                    verified = boolValue
+                } else if let intValue = json["is_verified"] as? Int {
+                    verified = intValue != 0
+                } else if let stringValue = json["is_verified"] as? String {
+                    verified = ["1", "true", "t", "yes"].contains(stringValue.lowercased())
+                } else {
+                    verified = false
+                }
+                
+                if verified {
+                    verifiedUserIds.insert(userId)
+                }
+            }
+        }
+        
+        print("✅ [Verify] Found \(verifiedUserIds.count) verified users")
+        return verifiedUserIds
+    }
 }
 
 // MARK: - DatabaseManager Extensions

@@ -793,7 +793,12 @@ struct ConnectionRequestDetailView: View {
                         }
                         
                         // Use unified PublicProfileCardView
-                        PublicProfileCardView(profile: profile)
+                        PublicProfileCardView(
+                            profile: profile,
+                            isConnection: false,
+                            isProUser: request.isRequesterPro,
+                            showDistance: true
+                        )
                             .padding(.top, request.reasonForInterest != nil ? 16 : 0)
                         
                         // Add padding at bottom for action buttons
