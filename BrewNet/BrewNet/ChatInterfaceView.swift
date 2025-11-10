@@ -126,38 +126,38 @@ struct ChatInterfaceView: View {
                 NotificationCenter.default.removeObserver(self, name: NSNotification.Name("CoffeeChatInvitationCancelled"), object: nil)
                 NotificationCenter.default.removeObserver(self, name: NSNotification.Name("CoffeeChatInvitationRejected"), object: nil)
                 NotificationCenter.default.removeObserver(self, name: NSNotification.Name("RefreshMessages"), object: nil)
-                stopMessageRefreshTimer()
-                // 先尝试从持久化缓存加载
-                loadCachedChatSessionsFromStorage()
-                
-                // 如果有缓存数据且距离上次加载不到5分钟，先显示缓存，然后后台刷新
-                if !cachedChatSessions.isEmpty, let lastLoad = lastChatLoadTime, Date().timeIntervalSince(lastLoad) < 300 {
-                    // 验证缓存数据：过滤掉可能有问题的会话
-                    guard let currentUser = authManager.currentUser else {
-                        loadChatSessions()
-                        return
-                    }
-                    
-                    let validCachedSessions = cachedChatSessions.filter { session in
-                        // 确保不是自己的会话
-                        if let userId = session.user.userId, userId == currentUser.id {
-                            return false
-                        }
-                        return true
-                    }
-                    
-                    // 显示缓存数据（立即显示，无延迟）
-                    chatSessions = validCachedSessions
-                    isLoadingMatches = false
-                    print("✅ Using cached chat sessions: \(validCachedSessions.count) valid sessions (filtered from \(cachedChatSessions.count))")
-                    // 后台静默刷新
-                    Task {
-                        await refreshChatSessionsSilently()
-                    }
-                } else {
-                    // 首次加载或缓存过期，正常加载
+            stopMessageRefreshTimer()
+            // 先尝试从持久化缓存加载
+            loadCachedChatSessionsFromStorage()
+            
+            // 如果有缓存数据且距离上次加载不到5分钟，先显示缓存，然后后台刷新
+            if !cachedChatSessions.isEmpty, let lastLoad = lastChatLoadTime, Date().timeIntervalSince(lastLoad) < 300 {
+                // 验证缓存数据：过滤掉可能有问题的会话
+                guard let currentUser = authManager.currentUser else {
                     loadChatSessions()
+                    return
                 }
+                
+                let validCachedSessions = cachedChatSessions.filter { session in
+                    // 确保不是自己的会话
+                    if let userId = session.user.userId, userId == currentUser.id {
+                        return false
+                    }
+                    return true
+                }
+                
+                // 显示缓存数据（立即显示，无延迟）
+                chatSessions = validCachedSessions
+                isLoadingMatches = false
+                print("✅ Using cached chat sessions: \(validCachedSessions.count) valid sessions (filtered from \(cachedChatSessions.count))")
+                // 后台静默刷新
+                Task {
+                    await refreshChatSessionsSilently()
+                }
+            } else {
+                // 首次加载或缓存过期，正常加载
+                loadChatSessions()
+            }
         }
         .refreshable {
             // 下拉刷新时，保持现有聊天列表显示，后台更新数据
@@ -663,11 +663,11 @@ struct ChatInterfaceView: View {
                 }
                 .scrollContentBackground(.hidden)
                 .listStyle(.plain)
-                .padding(.top, -20)
+                .padding(.top, -8)
                 .environment(\.defaultMinListHeaderHeight, 0)
             }
         }
-        .padding(.top, -20)
+        .padding(.top, 0)
     }
     
     // MARK: - 分类章节视图
@@ -830,7 +830,7 @@ struct ChatInterfaceView: View {
                         if let lastMessage = filteredMessages.last {
                             // 延迟滚动，确保所有消息（包括邀请消息）都已渲染
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                                proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
                             }
                             // 设置初始状态为在底部
                             isAtBottom = true
@@ -3376,13 +3376,13 @@ struct MessageBubbleView: View {
                     Spacer()
                 }
             } else {
-                HStack {
-                    if message.isFromUser {
-                        Spacer()
-                        messageBubble
-                    } else {
-                        messageBubble
-                        Spacer()
+        HStack {
+            if message.isFromUser {
+                Spacer()
+                messageBubble
+            } else {
+                messageBubble
+                Spacer()
                     }
                 }
             }
@@ -3436,53 +3436,53 @@ struct MessageBubbleView: View {
     
     // System message bubble (更窄的确认消息框，居中显示，固定宽度)
     private var systemMessageBubble: some View {
-        HStack(alignment: .center, spacing: 12) {
+                    HStack(alignment: .center, spacing: 12) {
             // 信封图标
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.9, green: 0.85, blue: 0.8),
-                                Color(red: 0.85, green: 0.8, blue: 0.75)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 0.9, green: 0.85, blue: 0.8),
+                                            Color(red: 0.85, green: 0.8, blue: 0.75)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
                     .frame(width: 32, height: 32)
-                    .shadow(color: Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.15), radius: 4, x: 0, y: 2)
-                
-                Image(systemName: "envelope.fill")
+                                .shadow(color: Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.15), radius: 4, x: 0, y: 2)
+                            
+                            Image(systemName: "envelope.fill")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-            }
-            
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        }
+                        
             // 文字（居中对齐）
             Text(message.content)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                .lineLimit(2)
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .lineLimit(2)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
+                                .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .frame(width: 280) // 固定宽度，确保所有系统消息大小一致
-        .background(
-            LinearGradient(
-                colors: [
+                                .background(
+                                    LinearGradient(
+                                        colors: [
                     Color(red: 0.99, green: 0.98, blue: 0.97),
                     Color(red: 0.98, green: 0.96, blue: 0.94)
-                ],
+                                        ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
-            )
-        )
+                                    )
+                                )
         .cornerRadius(16)
-        .overlay(
+                                .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(
+                                        .stroke(
                     LinearGradient(
                         colors: [
                             Color(red: 0.95, green: 0.92, blue: 0.88).opacity(0.6),
@@ -3512,8 +3512,8 @@ struct MessageBubbleView: View {
                             ZStack {
                                 Circle()
                                     .fill(
-                                        LinearGradient(
-                                            colors: [
+                                    LinearGradient(
+                                        colors: [
                                                 Color(red: 0.9, green: 0.85, blue: 0.8),
                                                 Color(red: 0.85, green: 0.8, blue: 0.75)
                                             ],
@@ -3920,9 +3920,9 @@ struct MessageBubbleView: View {
                 // 继续执行，查询数据库
             } else {
                 // 其他情况，使用缓存
-                invitationStatus = cachedStatus
-                print("✅ [加载邀请状态] 从缓存读取: \(cachedStatus.rawValue)")
-                return
+            invitationStatus = cachedStatus
+            print("✅ [加载邀请状态] 从缓存读取: \(cachedStatus.rawValue)")
+            return
             }
         }
         
@@ -3940,7 +3940,7 @@ struct MessageBubbleView: View {
                 
                 // 如果找到了匹配的邀请
                 if let invitationId = matchedInvitationId, let status = matchedStatus {
-                    await MainActor.run {
+                await MainActor.run {
                         // 如果当前状态已经是 accepted 或 rejected，即使数据库返回其他状态，也保持原样
                         // 这是关键：一旦接受或拒绝，状态就永远不变，即使后来被取消
                         if let currentStatus = invitationStatus,
@@ -3951,14 +3951,14 @@ struct MessageBubbleView: View {
                         }
                         
                         // 更新状态和邀请ID
-                        invitationStatus = status
+                    invitationStatus = status
                         invitationStatusCache[cacheKey] = status
                         // 如果状态是accepted或rejected，记录邀请ID
                         if status == .accepted || status == .rejected {
                             processedInvitationId = invitationId
-                        }
+                    }
                         print("✅ [加载邀请状态] 已更新为: \(status.rawValue) (邀请ID: \(invitationId))")
-                        isLoadingStatus = false
+                    isLoadingStatus = false
                     }
                     return
                 }
@@ -4287,7 +4287,7 @@ struct AcceptInvitationSheet: View {
                         if locationText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             showingLocationError = true
                         } else {
-                            onAccept()
+                        onAccept()
                         }
                     }
                     .font(.system(size: 16, weight: .semibold))
