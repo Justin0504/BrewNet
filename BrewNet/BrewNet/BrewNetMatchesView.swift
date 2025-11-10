@@ -1420,8 +1420,7 @@ struct BrewNetMatchesView: View {
                     isValidProfileName(profile.coreIdentity.name)
                 }
                 
-                // 应用用户设置的filter
-                let filter = await MainActor.run { currentFilter }
+                // 应用用户设置的filter（非距离过滤，距离过滤已在推荐系统中处理）
                 if let filter = filter {
                     finalValidProfiles = finalValidProfiles.filter { filter.matches($0) }
                     print("📊 Applied filter: \(finalValidProfiles.count) profiles remain (from \(brewNetProfiles.count))")
