@@ -457,22 +457,26 @@ struct ConnectionRequestsView: View {
                     convertedRequests.append(connectionRequest)
                 }
                 
-                // Load Pro status and prioritize
+                // 加载 Pro 状态并对结果排序：Pro 永远排在普通用户之前，其次按时间倒序
                 let requesterIds = convertedRequests.map { $0.requesterId }
+                let sortedRequests: [ConnectionRequest]
                 do {
                     let proUserIds = try await supabaseService.getProUserIds(from: requesterIds)
-                    for idx in convertedRequests.indices {
-                        convertedRequests[idx].isRequesterPro = proUserIds.contains(convertedRequests[idx].requesterId)
+                    let requestsWithProFlag = convertedRequests.map { request -> ConnectionRequest in
+                        var updatedRequest = request
+                        updatedRequest.isRequesterPro = proUserIds.contains(request.requesterId)
+                        return updatedRequest
+                    }
+                    
+                    sortedRequests = requestsWithProFlag.sorted { lhs, rhs in
+                        if lhs.isRequesterPro != rhs.isRequesterPro {
+                            return lhs.isRequesterPro && !rhs.isRequesterPro
+                        }
+                        return lhs.createdAt > rhs.createdAt
                     }
                 } catch {
                     print("⚠️ Failed to load Pro status for requests: \(error.localizedDescription)")
-                }
-                
-                let sortedRequests = convertedRequests.sorted { lhs, rhs in
-                    if lhs.isRequesterPro != rhs.isRequesterPro {
-                        return lhs.isRequesterPro && !rhs.isRequesterPro
-                    }
-                    return lhs.createdAt > rhs.createdAt
+                    sortedRequests = convertedRequests.sorted(by: { $0.createdAt > $1.createdAt })
                 }
                 
                 await MainActor.run {
