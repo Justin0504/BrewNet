@@ -2663,9 +2663,9 @@ struct IndustryTransitionForm: View {
     var onUpdate: (() -> Void)? = nil
     
     private let industryOptions = [
-        "Technology (Software, Data, AI, IT)",
-        "Finance (Banking, Investment, FinTech)",
-        "Marketing & Media (Advertising, PR, Content)",
+        "Technology",
+        "Finance",
+        "Marketing & Media",
         "Consulting & Strategy",
         "Education & Research",
         "Healthcare & Biotech",

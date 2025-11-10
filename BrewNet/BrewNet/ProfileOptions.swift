@@ -2,9 +2,9 @@ import Foundation
 
 // MARK: - Industry Options
 enum IndustryOption: String, CaseIterable, Codable {
-    case technology = "Technology (Software, Data, AI, IT)"
-    case finance = "Finance (Banking, Investment, FinTech)"
-    case marketing = "Marketing & Media (Advertising, PR, Content)"
+    case technology = "Technology"
+    case finance = "Finance"
+    case marketing = "Marketing & Media"
     case consulting = "Consulting & Strategy"
     case education = "Education & Research"
     case healthcare = "Healthcare & Biotech"
