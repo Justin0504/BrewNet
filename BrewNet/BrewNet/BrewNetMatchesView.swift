@@ -938,12 +938,22 @@ struct BrewNetMatchesView: View {
             // 增加推荐数量，提高过滤后仍有足够用户的概率
             // 静默刷新时也强制刷新，确保获取最新推荐
             let filter = await MainActor.run { currentFilter }
+            
+            // 获取当前用户的位置信息（用于距离过滤）
+            var userLocation: String? = nil
+            if let filter = filter, filter.maxDistance != nil {
+                // 只有在设置了距离过滤时才获取位置
+                if let userProfile = try? await supabaseService.getProfile(userId: currentUser.id) {
+                    userLocation = userProfile.coreIdentity["location"] as? String
+                }
+            }
+            
             let recommendations = try await recommendationService.getRecommendations(
                 for: currentUser.id,
                 limit: 50,  // 从 20 增加到 50，增加成功率
                 forceRefresh: true,  // 静默刷新时也强制刷新
                 maxDistance: filter?.maxDistance,
-                userLocation: currentUser.location
+                userLocation: userLocation
             )
             
             // 获取需要排除的用户ID集合
@@ -960,8 +970,7 @@ struct BrewNetMatchesView: View {
                 isValidProfileName(rec.profile.coreIdentity.name) // 排除无效测试用户
             }
             
-            // 应用用户设置的filter
-            let filter = await MainActor.run { currentFilter }
+            // 应用用户设置的filter（非距离过滤，距离过滤已在推荐系统中处理）
             if let filter = filter {
                 validRecommendations = validRecommendations.filter { filter.matches($0.profile) }
             }
@@ -1350,12 +1359,22 @@ struct BrewNetMatchesView: View {
                 // 如果 shouldForceRefresh 为 true，强制刷新忽略缓存
                 let forceRefresh = await MainActor.run { shouldForceRefresh }
                 let filter = await MainActor.run { currentFilter }
+                
+                // 获取当前用户的位置信息（用于距离过滤）
+                var userLocation: String? = nil
+                if let filter = filter, filter.maxDistance != nil {
+                    // 只有在设置了距离过滤时才获取位置
+                    if let userProfile = try? await supabaseService.getProfile(userId: currentUser.id) {
+                        userLocation = userProfile.coreIdentity["location"] as? String
+                    }
+                }
+                
                 let recommendations = try await recommendationService.getRecommendations(
                     for: currentUser.id,
                     limit: 50,  // 从 20 增加到 50，增加成功率
                     forceRefresh: forceRefresh,
                     maxDistance: filter?.maxDistance,
-                    userLocation: currentUser.location
+                    userLocation: userLocation
                 )
                 
                 // 重置强制刷新标志
