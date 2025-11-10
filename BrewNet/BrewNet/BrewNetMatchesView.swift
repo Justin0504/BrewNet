@@ -37,6 +37,7 @@ struct BrewNetMatchesView: View {
     @State private var showingIncreaseExposure = false
     @State private var currentFilter: MatchFilter? = nil
     @State private var showSubscriptionPayment = false
+    @State private var showInviteLimitAlert = false
     @State private var proUsers: Set<String> = []
     @State private var verifiedUsers: Set<String> = []
     @State private var isProcessingLike = false
@@ -234,6 +235,17 @@ struct BrewNetMatchesView: View {
                     }
                 }
             }
+        }
+        .alert("No Connects Left", isPresented: $showInviteLimitAlert) {
+            Button("Subscribe to Pro") {
+                showInviteLimitAlert = false
+                showSubscriptionPayment = true
+            }
+            Button("Cancel", role: .cancel) {
+                showInviteLimitAlert = false
+            }
+        } message: {
+            Text("You've used all 10 connects for today. Upgrade to BrewNet Pro for unlimited connections and more exclusive features.")
         }
         .onAppear {
             // 加载保存的filter
@@ -527,6 +539,15 @@ struct BrewNetMatchesView: View {
         // 发送临时消息并创建 connection request
         Task {
             do {
+                // Check invitation quota first
+                let canInvite = try await supabaseService.decrementUserLikes(userId: currentUser.id)
+                if !canInvite {
+                    await MainActor.run {
+                        showInviteLimitAlert = true
+                    }
+                    return
+                }
+                
                 // 1. 发送临时消息
                 let _ = try await supabaseService.sendMessage(
                     senderId: currentUser.id,
@@ -675,8 +696,8 @@ struct BrewNetMatchesView: View {
             let canLike = try await supabaseService.decrementUserLikes(userId: currentUser.id)
             if !canLike {
                 await MainActor.run {
-                    print("⚠️ No likes remaining, showing payment page")
-                    showSubscriptionPayment = true
+                    print("⚠️ No likes remaining, showing alert")
+                    showInviteLimitAlert = true
                     withAnimation(.spring()) {
                         dragOffset = .zero
                         rotationAngle = 0
