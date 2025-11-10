@@ -26,6 +26,7 @@ struct CategoryRecommendationsView: View {
     @State private var proUsers: Set<String> = []
     @State private var verifiedUsers: Set<String> = []
     @State private var showSubscriptionPayment = false
+    @State private var showInviteLimitAlert = false
     @State private var isTransitioning = false // 标记是否正在过渡
     @State private var nextProfileOffset: CGFloat = 0 // 下一个 profile 的偏移量
     
@@ -163,6 +164,26 @@ struct CategoryRecommendationsView: View {
                 .environmentObject(authManager)
                 .environmentObject(supabaseService)
             }
+        }
+        .sheet(isPresented: $showSubscriptionPayment) {
+            if let userId = authManager.currentUser?.id {
+                SubscriptionPaymentView(currentUserId: userId) {
+                    Task {
+                        await authManager.refreshUser()
+                    }
+                }
+            }
+        }
+        .alert("No Connects Left", isPresented: $showInviteLimitAlert) {
+            Button("Subscribe to Pro") {
+                showInviteLimitAlert = false
+                showSubscriptionPayment = true
+            }
+            Button("Cancel", role: .cancel) {
+                showInviteLimitAlert = false
+            }
+        } message: {
+            Text("You've used all 10 connects for today. Upgrade to BrewNet Pro for unlimited connections and more exclusive features.")
         }
     }
     
@@ -324,6 +345,15 @@ struct CategoryRecommendationsView: View {
         // 发送临时消息并创建 connection request
         Task {
             do {
+                // Check invitation quota first
+                let canInvite = try await supabaseService.decrementUserLikes(userId: currentUser.id)
+                if !canInvite {
+                    await MainActor.run {
+                        showInviteLimitAlert = true
+                    }
+                    return
+                }
+                
                 // 1. 发送临时消息
                 let _ = try await supabaseService.sendMessage(
                     senderId: currentUser.id,
@@ -463,11 +493,27 @@ struct CategoryRecommendationsView: View {
         }
         
         let profile = profiles[currentIndex]
-        likedProfiles.append(profile)
         
         // 发送邀请到 Supabase
         Task {
             do {
+                // Check invitation quota first
+                let canLike = try await supabaseService.decrementUserLikes(userId: currentUser.id)
+                if !canLike {
+                    await MainActor.run {
+                        showInviteLimitAlert = true
+                        withAnimation(.spring()) {
+                            dragOffset = .zero
+                            rotationAngle = 0
+                        }
+                    }
+                    return
+                }
+                
+                await MainActor.run {
+                    likedProfiles.append(profile)
+                }
+                
                 // 获取当前用户的 profile 信息用于 senderProfile
                 var senderProfile: InvitationProfile? = nil
                 if let currentUserProfile = try await supabaseService.getProfile(userId: currentUser.id) {

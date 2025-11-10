@@ -2663,9 +2663,9 @@ struct IndustryTransitionForm: View {
     var onUpdate: (() -> Void)? = nil
     
     private let industryOptions = [
-        "Technology (Software, Data, AI, IT)",
-        "Finance (Banking, Investment, FinTech)",
-        "Marketing & Media (Advertising, PR, Content)",
+        "Technology",
+        "Finance",
+        "Marketing & Media",
         "Consulting & Strategy",
         "Education & Research",
         "Healthcare & Biotech",
@@ -2940,6 +2940,20 @@ struct WorkAndLifestylePhotosStep: View {
     @State private var isUploading: [Int: Bool] = [:]
     @State private var uploadedImageURLs: [Int: String] = [:]
     @State private var currentPageIndex: Int = 0
+    @State private var previousPhotoType: PhotoType = .work
+    
+    private struct PhotoUIState {
+        var selectedItems: [PhotosPickerItem?] = Array(repeating: nil, count: 10)
+        var imageData: [Data?] = Array(repeating: nil, count: 10)
+        var captions: [String] = Array(repeating: "", count: 10)
+        var isUploading: [Int: Bool] = [:]
+        var uploadedURLs: [Int: String] = [:]
+    }
+    
+    @State private var storedUIStates: [PhotoType: PhotoUIState] = [
+        .work: PhotoUIState(),
+        .lifestyle: PhotoUIState()
+    ]
     
     enum PhotoType: String, CaseIterable {
         case work = "Work Photos"
@@ -2967,6 +2981,34 @@ struct WorkAndLifestylePhotosStep: View {
         return hasImage && isNotLastPage && hasMoreSpace
     }
     
+    private func saveCurrentUIState(for type: PhotoType? = nil) {
+        let targetType = type ?? selectedPhotoType
+        let state = PhotoUIState(
+            selectedItems: selectedPhotoItems,
+            imageData: imageDataArray,
+            captions: captions,
+            isUploading: isUploading,
+            uploadedURLs: uploadedImageURLs
+        )
+        storedUIStates[targetType] = state
+    }
+    
+    private func restoreUIState(for type: PhotoType) {
+        if let state = storedUIStates[type] {
+            selectedPhotoItems = state.selectedItems
+            imageDataArray = state.imageData
+            captions = state.captions
+            isUploading = state.isUploading
+            uploadedImageURLs = state.uploadedURLs
+        } else {
+            selectedPhotoItems = Array(repeating: nil, count: 10)
+            imageDataArray = Array(repeating: nil, count: 10)
+            captions = Array(repeating: "", count: 10)
+            isUploading = [:]
+            uploadedImageURLs = [:]
+        }
+    }
+    
     var body: some View {
         VStack(spacing: 24) {
             // Photo type selector
@@ -2979,9 +3021,12 @@ struct WorkAndLifestylePhotosStep: View {
             .padding(.horizontal, 20)
             .onChange(of: selectedPhotoType) { newType in
                 print("🔄 切换照片类型到: \(newType.rawValue)")
+                saveCurrentUIState(for: previousPhotoType)
+                restoreUIState(for: newType)
                 // 加载新类型的数据（旧类型的数据已经在上传和编辑时自动保存了）
                 loadExistingPhotos()
                 currentPageIndex = 0
+                previousPhotoType = newType
             }
             
             // 始终使用 TabView 显示，支持翻页
@@ -3063,6 +3108,7 @@ struct WorkAndLifestylePhotosStep: View {
             }
         }
         .onAppear {
+            restoreUIState(for: selectedPhotoType)
             loadExistingPhotos()
         }
         .onChange(of: profileData.workPhotos) { _ in
@@ -3146,6 +3192,7 @@ struct WorkAndLifestylePhotosStep: View {
         }
         
         print("📥 loadExistingPhotos() 完成，uploadedImageURLs 数量: \(uploadedImageURLs.count)")
+        saveCurrentUIState()
     }
     
     private func loadImageData(for index: Int, item: PhotosPickerItem?) {
@@ -3158,6 +3205,7 @@ struct WorkAndLifestylePhotosStep: View {
                         imageDataArray[index] = data
                         // 自动上传
                         uploadImage(for: index)
+                        saveCurrentUIState()
                     }
                 }
             } catch {
@@ -3211,6 +3259,7 @@ struct WorkAndLifestylePhotosStep: View {
                     }
                     
                     updateProfileData()
+                    saveCurrentUIState()
                     
                     print("✅ [\(photoType)] 图片上传成功，URL: \(imageURL)")
                     print("✅ [\(photoType)] 当前 uploadedImageURLs[\(index)]: \(uploadedImageURLs[index] ?? "nil")")
@@ -3247,6 +3296,7 @@ struct WorkAndLifestylePhotosStep: View {
         isUploading[index] = false
         
         updateProfileData()
+        saveCurrentUIState()
     }
     
     private func updateProfileData() {
@@ -3335,6 +3385,9 @@ struct HighlightUploadCard: View {
                             .frame(height: 280)
                             .clipped()
                             .cornerRadius(16)
+                            .overlay(alignment: .bottom) {
+                                deleteButton
+                            }
                         
                         // 如果正在上传，显示上传进度覆盖层
                         if isUploading {
@@ -3360,6 +3413,9 @@ struct HighlightUploadCard: View {
                                 .frame(height: 280)
                                 .clipped()
                                 .cornerRadius(16)
+                                .overlay(alignment: .bottom) {
+                                    deleteButton
+                                }
                         case .failure:
                             Image(systemName: "photo.fill")
                                 .font(.system(size: 60))
@@ -3394,24 +3450,6 @@ struct HighlightUploadCard: View {
                     .padding(.vertical, 20)
                 }
                 
-                // 删除按钮（如果有图片）
-                if uploadedImageURL != nil || imageData != nil {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            Button(action: onRemove) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 28))
-                                    .foregroundColor(.white)
-                                    .background(Color.black.opacity(0.5))
-                                    .clipShape(Circle())
-                            }
-                            .padding(12)
-                        }
-                        Spacer()
-                    }
-                }
-                
                 // 图片选择器覆盖层 - 只在图片区域，不延伸到文本框
                 if uploadedImageURL == nil && imageData == nil {
                     PhotosPicker(
@@ -3444,6 +3482,20 @@ struct HighlightUploadCard: View {
                 }
         }
         .padding(.horizontal)
+    }
+    
+    @ViewBuilder
+    private var deleteButton: some View {
+        if uploadedImageURL != nil || imageData != nil {
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundColor(.white)
+                    .background(Color.black.opacity(0.5))
+                    .clipShape(Circle())
+            }
+            .padding(.bottom, 18)
+        }
     }
 }
 

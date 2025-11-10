@@ -37,6 +37,7 @@ struct BrewNetMatchesView: View {
     @State private var showingIncreaseExposure = false
     @State private var currentFilter: MatchFilter? = nil
     @State private var showSubscriptionPayment = false
+    @State private var showInviteLimitAlert = false
     @State private var proUsers: Set<String> = []
     @State private var verifiedUsers: Set<String> = []
     @State private var isProcessingLike = false
@@ -234,6 +235,17 @@ struct BrewNetMatchesView: View {
                     }
                 }
             }
+        }
+        .alert("No Connects Left", isPresented: $showInviteLimitAlert) {
+            Button("Subscribe to Pro") {
+                showInviteLimitAlert = false
+                showSubscriptionPayment = true
+            }
+            Button("Cancel", role: .cancel) {
+                showInviteLimitAlert = false
+            }
+        } message: {
+            Text("You've used all 10 connects for today. Upgrade to BrewNet Pro for unlimited connections and more exclusive features.")
         }
         .onAppear {
             // 加载保存的filter
@@ -527,6 +539,15 @@ struct BrewNetMatchesView: View {
         // 发送临时消息并创建 connection request
         Task {
             do {
+                // Check invitation quota first
+                let canInvite = try await supabaseService.decrementUserLikes(userId: currentUser.id)
+                if !canInvite {
+                    await MainActor.run {
+                        showInviteLimitAlert = true
+                    }
+                    return
+                }
+                
                 // 1. 发送临时消息
                 let _ = try await supabaseService.sendMessage(
                     senderId: currentUser.id,
@@ -675,8 +696,8 @@ struct BrewNetMatchesView: View {
             let canLike = try await supabaseService.decrementUserLikes(userId: currentUser.id)
             if !canLike {
                 await MainActor.run {
-                    print("⚠️ No likes remaining, showing payment page")
-                    showSubscriptionPayment = true
+                    print("⚠️ No likes remaining, showing alert")
+                    showInviteLimitAlert = true
                     withAnimation(.spring()) {
                         dragOffset = .zero
                         rotationAngle = 0
@@ -916,10 +937,23 @@ struct BrewNetMatchesView: View {
             // 只使用推荐系统刷新，确保数据一致性
             // 增加推荐数量，提高过滤后仍有足够用户的概率
             // 静默刷新时也强制刷新，确保获取最新推荐
+            let filter = await MainActor.run { currentFilter }
+            
+            // 获取当前用户的位置信息（用于距离过滤）
+            var userLocation: String? = nil
+            if let filter = filter, filter.maxDistance != nil {
+                // 只有在设置了距离过滤时才获取位置
+                if let userProfile = try? await supabaseService.getProfile(userId: currentUser.id) {
+                    userLocation = userProfile.coreIdentity.location
+                }
+            }
+            
             let recommendations = try await recommendationService.getRecommendations(
                 for: currentUser.id,
                 limit: 50,  // 从 20 增加到 50，增加成功率
-                forceRefresh: true  // 静默刷新时也强制刷新
+                forceRefresh: true,  // 静默刷新时也强制刷新
+                maxDistance: filter?.maxDistance,
+                userLocation: userLocation
             )
             
             // 获取需要排除的用户ID集合
@@ -936,8 +970,7 @@ struct BrewNetMatchesView: View {
                 isValidProfileName(rec.profile.coreIdentity.name) // 排除无效测试用户
             }
             
-            // 应用用户设置的filter
-            let filter = await MainActor.run { currentFilter }
+            // 应用用户设置的filter（非距离过滤，距离过滤已在推荐系统中处理）
             if let filter = filter {
                 validRecommendations = validRecommendations.filter { filter.matches($0.profile) }
             }
@@ -1325,10 +1358,23 @@ struct BrewNetMatchesView: View {
                 // 增加推荐数量，提高过滤后仍有足够用户的概率
                 // 如果 shouldForceRefresh 为 true，强制刷新忽略缓存
                 let forceRefresh = await MainActor.run { shouldForceRefresh }
+                let filter = await MainActor.run { currentFilter }
+                
+                // 获取当前用户的位置信息（用于距离过滤）
+                var userLocation: String? = nil
+                if let filter = filter, filter.maxDistance != nil {
+                    // 只有在设置了距离过滤时才获取位置
+                    if let userProfile = try? await supabaseService.getProfile(userId: currentUser.id) {
+                        userLocation = userProfile.coreIdentity.location
+                    }
+                }
+                
                 let recommendations = try await recommendationService.getRecommendations(
                     for: currentUser.id,
                     limit: 50,  // 从 20 增加到 50，增加成功率
-                    forceRefresh: forceRefresh
+                    forceRefresh: forceRefresh,
+                    maxDistance: filter?.maxDistance,
+                    userLocation: userLocation
                 )
                 
                 // 重置强制刷新标志
@@ -1374,8 +1420,7 @@ struct BrewNetMatchesView: View {
                     isValidProfileName(profile.coreIdentity.name)
                 }
                 
-                // 应用用户设置的filter
-                let filter = await MainActor.run { currentFilter }
+                // 应用用户设置的filter（非距离过滤，距离过滤已在推荐系统中处理）
                 if let filter = filter {
                     finalValidProfiles = finalValidProfiles.filter { filter.matches($0) }
                     print("📊 Applied filter: \(finalValidProfiles.count) profiles remain (from \(brewNetProfiles.count))")

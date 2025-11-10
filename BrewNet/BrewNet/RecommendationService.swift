@@ -17,11 +17,15 @@ class RecommendationService: ObservableObject {
     ///   - userId: 当前用户ID
     ///   - limit: 返回的推荐数量
     ///   - forceRefresh: 是否强制刷新，忽略缓存
+    ///   - maxDistance: 最大距离限制（公里），nil表示不限制
+    ///   - userLocation: 当前用户的位置字符串
     /// - Returns: 推荐结果列表（包含 userId, score 和用户资料）
     func getRecommendations(
         for userId: String,
         limit: Int = 20,
-        forceRefresh: Bool = false
+        forceRefresh: Bool = false,
+        maxDistance: Double? = nil,
+        userLocation: String? = nil
     ) async throws -> [(userId: String, score: Double, profile: BrewNetProfile)] {
         
         print("🔍 Getting recommendations for user: \(userId), limit: \(limit), forceRefresh: \(forceRefresh)")
@@ -195,6 +199,53 @@ class RecommendationService: ObservableObject {
         if !decodingErrors.isEmpty {
             print("⚠️ \(decodingErrors.count) profiles failed to decode: \(decodingErrors.prefix(5).joined(separator: ", "))")
             print("   These profiles may have incomplete or corrupted data in the database")
+        }
+        
+        // 9.5. 应用距离过滤（如果设置了 maxDistance）
+        if let maxDistance = maxDistance, let userLocation = userLocation, !userLocation.isEmpty {
+            print("📍 Applying distance filter: max \(maxDistance) km from '\(userLocation)'")
+            let locationService = LocationService.shared
+            var filteredResults: [(userId: String, score: Double, profile: BrewNetProfile)] = []
+            
+            for result in results {
+                let candidateLocation = result.profile.coreIdentity.location
+                
+                // 如果候选人没有位置信息（nil或空字符串），则过滤掉
+                guard let candidateLocation = candidateLocation, !candidateLocation.isEmpty else {
+                    print("   ❌ Filtered out \(result.profile.coreIdentity.name): no location")
+                    continue
+                }
+                
+                // 使用信号量等待距离计算完成
+                let semaphore = DispatchSemaphore(value: 0)
+                var calculatedDistance: Double? = nil
+                
+                locationService.calculateDistanceBetweenAddresses(
+                    address1: userLocation,
+                    address2: candidateLocation
+                ) { distance in
+                    calculatedDistance = distance
+                    semaphore.signal()
+                }
+                
+                // 等待计算完成（最多5秒）
+                _ = semaphore.wait(timeout: .now() + 5.0)
+                
+                if let distance = calculatedDistance {
+                    if distance <= maxDistance {
+                        print("   ✅ \(result.profile.coreIdentity.name): \(String(format: "%.1f", distance)) km (within \(maxDistance) km)")
+                        filteredResults.append(result)
+                    } else {
+                        print("   ❌ Filtered out \(result.profile.coreIdentity.name): \(String(format: "%.1f", distance)) km (exceeds \(maxDistance) km)")
+                    }
+                } else {
+                    // 无法计算距离的用户也过滤掉
+                    print("   ❌ Filtered out \(result.profile.coreIdentity.name): unable to calculate distance")
+                }
+            }
+            
+            print("📍 Distance filter result: \(filteredResults.count)/\(results.count) profiles within \(maxDistance) km")
+            results = filteredResults
         }
         
         // 10. 缓存结果（确保只缓存推荐系统的结果）

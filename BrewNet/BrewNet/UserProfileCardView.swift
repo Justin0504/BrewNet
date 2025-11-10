@@ -265,8 +265,8 @@ struct ProfileCardContentView: View {
         }
     }
     
-    private var careerStageDisplay: String? {
-        profile.professionalBackground.careerStage.displayName
+    private var experienceLevelDisplay: String? {
+        profile.professionalBackground.experienceLevel.displayName
     }
     
     @State private var measuredNameWidth: CGFloat = 0
@@ -314,7 +314,7 @@ struct ProfileCardContentView: View {
     
     private var headerSection: some View {
         VStack(spacing: 16) {
-            ZStack(alignment: .bottomTrailing) {
+            ZStack(alignment: .topLeading) {
                 profileImageView
                 
                 Image(systemName: "person.badge.shield.checkmark.fill")
@@ -325,6 +325,26 @@ struct ProfileCardContentView: View {
                     .clipShape(Circle())
                     .offset(x: 6, y: 6)
             }
+            .overlay(alignment: .bottomTrailing) {
+                if isProUser {
+                    ProBadge(size: .small)
+                        .padding(6)
+                        .offset(x: 28, y: 16)
+                }
+            }
+            .overlay(alignment: .bottomLeading) {
+                if let pronouns = profile.coreIdentity.pronouns, !pronouns.isEmpty {
+                    Text(pronouns)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(accentBrown)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.white.opacity(0.9))
+                        .cornerRadius(14)
+                        .shadow(color: Color.black.opacity(0.08), radius: 3, x: 0, y: 1)
+                        .offset(x: -28, y: 16)
+                }
+            }
             
             VStack(spacing: 12) {
                 ZStack {
@@ -334,26 +354,9 @@ struct ProfileCardContentView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                         .background(widthMeasurer($measuredNameWidth))
-                    
-                    if isProUser {
-                        ProBadge(size: .medium)
-                            .background(widthMeasurer($measuredBadgeWidth))
-                            .offset(x: (measuredNameWidth / 2) + (measuredBadgeWidth / 2) + headerSpacing)
-                    }
                 }
                 .frame(maxWidth: .infinity)
                 .frame(maxWidth: .infinity)
-                
-                if let pronouns = profile.coreIdentity.pronouns, !pronouns.isEmpty {
-                    Text(pronouns)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(accentBrown)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(accentBrown.opacity(0.12))
-                        .cornerRadius(16)
-                        .frame(maxWidth: .infinity)
-                }
                 
                 if let bio = profile.coreIdentity.bio, !bio.isEmpty {
                     Text(bio)
@@ -377,16 +380,16 @@ struct ProfileCardContentView: View {
     
     private var titleSection: some View {
         VStack(spacing: 8) {
-            if let industry = profile.professionalBackground.industry, !industry.isEmpty || careerStageDisplay != nil {
+            if let industry = profile.professionalBackground.industry, !industry.isEmpty || experienceLevelDisplay != nil {
                 HStack(spacing: 6) {
                     if let industry = profile.professionalBackground.industry, !industry.isEmpty {
                         Text(industry)
                     }
-                    if let careerStage = careerStageDisplay, !careerStage.isEmpty {
+                    if let experienceLevel = experienceLevelDisplay, !experienceLevel.isEmpty {
                         if profile.professionalBackground.industry?.isEmpty == false {
                             Text("•")
                         }
-                        Text(careerStage)
+                        Text(experienceLevel)
                     }
                 }
                 .font(.system(size: 17, weight: .semibold))
