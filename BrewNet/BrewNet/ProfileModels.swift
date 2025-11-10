@@ -532,6 +532,7 @@ struct DayTimeslots: Codable, Equatable {
 
 // Enums
 enum ExperienceLevel: String, CaseIterable, Codable {
+    case student = "Student"
     case intern = "Intern"
     case entry = "Entry"
     case mid = "Mid"
