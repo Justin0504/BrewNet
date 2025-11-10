@@ -944,7 +944,7 @@ struct BrewNetMatchesView: View {
             if let filter = filter, filter.maxDistance != nil {
                 // 只有在设置了距离过滤时才获取位置
                 if let userProfile = try? await supabaseService.getProfile(userId: currentUser.id) {
-                    userLocation = userProfile.coreIdentity["location"] as? String
+                    userLocation = userProfile.coreIdentity.location
                 }
             }
             
@@ -1365,7 +1365,7 @@ struct BrewNetMatchesView: View {
                 if let filter = filter, filter.maxDistance != nil {
                     // 只有在设置了距离过滤时才获取位置
                     if let userProfile = try? await supabaseService.getProfile(userId: currentUser.id) {
-                        userLocation = userProfile.coreIdentity["location"] as? String
+                        userLocation = userProfile.coreIdentity.location
                     }
                 }
                 
