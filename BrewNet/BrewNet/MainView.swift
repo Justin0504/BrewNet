@@ -26,10 +26,10 @@ struct MainView: View {
                 }
                 .tag(0)
             
-            // Explore
+            // Headhunting
             ExploreView()
                 .tabItem {
-                    Image(systemName: "safari.fill")
+                    Image(systemName: "person.crop.rectangle.stack.fill")
                 }
                 .tag(1)
             
