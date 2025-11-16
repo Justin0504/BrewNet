@@ -248,35 +248,45 @@ class RecommendationService: ObservableObject {
             results = filteredResults
         }
         
-        // 10. 缓存结果（确保只缓存推荐系统的结果）
-        let userIds = results.map { $0.userId }
-        let scores = results.map { $0.score }
-        
+        // 10. 应用行为量化重排序
+        let behaviorallyRankedResults = SimpleTwoTowerEncoder.applyBehavioralReRanking(
+            results,
+            beta1: 0.4, // 活跃度权重
+            beta2: 0.4, // 连接意愿权重
+            beta3: 0.2  // 导师潜力权重
+        )
+
+        print("✅ Applied behavioral re-ranking: \(results.count) -> \(behaviorallyRankedResults.count) recommendations")
+
+        // 11. 缓存结果（确保只缓存推荐系统的结果）
+        let userIds = behaviorallyRankedResults.map { $0.userId }
+        let scores = behaviorallyRankedResults.map { $0.score }
+
         // 验证结果：确保每个结果都有有效的分数和用户ID
         guard userIds.count == scores.count, !userIds.isEmpty else {
             print("⚠️ Invalid results for caching, skipping cache")
-            return results
+            return behaviorallyRankedResults
         }
         
         try await supabaseService.cacheRecommendations(
             userId: userId,
             recommendations: userIds,
             scores: scores,
-            modelVersion: "two_tower_enhanced_v1" // 更新版本号以标识新算法
+            modelVersion: "two_tower_behavioral_v1" // 更新版本号以标识包含行为指标的新算法
         )
-        
-        print("💾 Cached \(userIds.count) recommendations from Two-Tower system")
-        
-        print("✅ Recommendations generated: \(results.count) profiles (requested: \(limit))")
-        
+
+        print("💾 Cached \(userIds.count) behaviorally-ranked recommendations from Two-Tower system")
+
+        print("✅ Recommendations generated: \(behaviorallyRankedResults.count) profiles (requested: \(limit))")
+
         // 如果成功获取的profiles数量太少，给出警告
-        if results.count < limit / 2 && results.count > 0 {
-            print("⚠️ WARNING: Only \(results.count)/\(limit) profiles successfully loaded")
+        if behaviorallyRankedResults.count < limit / 2 && behaviorallyRankedResults.count > 0 {
+            print("⚠️ WARNING: Only \(behaviorallyRankedResults.count)/\(limit) profiles successfully loaded")
             print("   - Missing profiles: \(missingProfiles.count)")
             print("   - Decoding errors: \(decodingErrors.count)")
         }
-        
-        if results.isEmpty {
+
+        if behaviorallyRankedResults.isEmpty {
             print("⚠️ WARNING: Recommendation system returned 0 profiles!")
             print("   - Requested: \(limit) profiles")
             print("   - Candidates available: \(candidates.count)")
@@ -288,8 +298,8 @@ class RecommendationService: ObservableObject {
             print("     2. Profile decoding failed for all recommended users")
             print("     3. All profiles have incomplete/corrupted data in database")
         }
-        
-        return results
+
+        return behaviorallyRankedResults
     }
     
     /// 从缓存加载推荐结果（优化版：批量获取，确保只使用推荐系统中的用户）
