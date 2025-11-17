@@ -126,6 +126,13 @@ struct ProfileSetupView: View {
                 // Save Button
                 Button(action: {
                     guard !isNavigating && !isLoading else { return }
+                    
+                    // Validate current step before saving
+                    if let errorMessage = validateCurrentStep() {
+                        showAlert(message: errorMessage)
+                        return
+                    }
+                    
                     saveCurrentStep()
                 }) {
                     Text("Save")
@@ -152,6 +159,12 @@ struct ProfileSetupView: View {
                 Button(action: {
                     guard !isNavigating && !isLoading else {
                         print("⚠️ Button clicked but isNavigating=\(isNavigating) or isLoading=\(isLoading)")
+                        return
+                    }
+                    
+                    // Validate current step before proceeding
+                    if let errorMessage = validateCurrentStep() {
+                        showAlert(message: errorMessage)
                         return
                     }
                     
@@ -394,6 +407,72 @@ struct ProfileSetupView: View {
         case 6: return "Share your work and lifestyle - up to 10 photos each"
         case 7: return "Control your privacy and how others can discover you"
         default: return ""
+        }
+    }
+    
+    // MARK: - Validation
+    private func validateCurrentStep() -> String? {
+        switch currentStep {
+        case 1: // Core Identity
+            guard let coreIdentity = profileData.coreIdentity else {
+                return "Please fill in all required fields: Name and Email are required."
+            }
+            if coreIdentity.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "Name is required. Please enter your full name."
+            }
+            if coreIdentity.email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "Email is required. Please enter your email address."
+            }
+            // Basic email validation
+            let emailRegex = "[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,64}"
+            let emailPredicate = NSPredicate(format:"SELF MATCHES %@", emailRegex)
+            if !emailPredicate.evaluate(with: coreIdentity.email) {
+                return "Please enter a valid email address."
+            }
+            return nil
+            
+        case 2: // Professional Background
+            guard let professionalBackground = profileData.professionalBackground else {
+                return "Please select your Industry (required field)."
+            }
+            if professionalBackground.industry == nil || professionalBackground.industry!.isEmpty {
+                return "Industry is required. Please select your industry."
+            }
+            return nil
+            
+        case 3: // Networking Intention
+            guard let networkingIntention = profileData.networkingIntention else {
+                return "Please select at least one networking intention."
+            }
+            // Check if at least one intention is selected (primary or additional)
+            let hasIntention = !networkingIntention.additionalIntentions.isEmpty || networkingIntention.selectedIntention != nil
+            if !hasIntention {
+                return "Please select at least one networking intention."
+            }
+            return nil
+            
+        case 4: // Networking Preferences
+            guard let networkingPreferences = profileData.networkingPreferences else {
+                return "Please set your networking preferences."
+            }
+            // Check if available timeslot is set
+            // This might not be required, but we can add validation if needed
+            return nil
+            
+        case 5: // Personality & Social
+            // No required fields
+            return nil
+            
+        case 6: // Work & Lifestyle Photos
+            // No required fields
+            return nil
+            
+        case 7: // Privacy & Trust
+            // No required fields
+            return nil
+            
+        default:
+            return nil
         }
     }
     
@@ -1299,7 +1378,7 @@ struct ProfessionalBackgroundStep: View {
     @State private var selectedIndustry: IndustryOption? = nil
     @State private var experienceLevel = ExperienceLevel.entry
     @State private var education = ""
-    @State private var yearsOfExperience = ""
+    @State private var yearsOfExperience: Int? = nil
     @State private var careerStage = CareerStage.earlyCareer
     @State private var skills: [String] = []
     @State private var newSkill = ""
@@ -1386,16 +1465,21 @@ struct ProfessionalBackgroundStep: View {
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 
-                TextField("e.g., 3.5", text: $yearsOfExperience)
-                    .textFieldStyle(CustomTextFieldStyle())
-                    .keyboardType(.decimalPad)
-                    .onChange(of: yearsOfExperience) { newValue in
-                        // Only allow numbers and decimal point
-                        let filtered = newValue.filter { $0.isNumber || $0 == "." }
-                        if filtered != newValue {
-                            yearsOfExperience = filtered
-                        }
+                Picker("Years of Experience", selection: Binding(
+                    get: { yearsOfExperience ?? 0 },
+                    set: { yearsOfExperience = $0 == 0 ? nil : $0 }
+                )) {
+                    Text("0 year").tag(0)
+                    ForEach(YearOptions.yearsOfExperienceOptions.filter { $0 > 0 }, id: \.self) { years in
+                        Text("\(years) year\(years == 1 ? "" : "s")").tag(years)
                     }
+                }
+                .pickerStyle(MenuPickerStyle())
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(8)
             }
             
             // Education
@@ -1521,7 +1605,11 @@ struct ProfessionalBackgroundStep: View {
                 selectedIndustry = IndustryOption.allCases.first { $0.rawValue == professionalBackground.industry }
                 experienceLevel = professionalBackground.experienceLevel
                 education = professionalBackground.education ?? ""
-                yearsOfExperience = professionalBackground.yearsOfExperience?.description ?? ""
+                if let years = professionalBackground.yearsOfExperience {
+                    yearsOfExperience = Int(years)
+                } else {
+                    yearsOfExperience = nil
+                }
                 careerStage = professionalBackground.careerStage
                 skills = professionalBackground.skills
                 certifications = professionalBackground.certifications
@@ -1562,7 +1650,7 @@ struct ProfessionalBackgroundStep: View {
             experienceLevel: experienceLevel,
             education: education.isEmpty ? nil : education,
             educations: educations.isEmpty ? nil : educations,
-            yearsOfExperience: Double(yearsOfExperience),
+            yearsOfExperience: yearsOfExperience != nil && yearsOfExperience! > 0 ? Double(yearsOfExperience!) : nil,
             careerStage: careerStage,
             skills: skills,
             certifications: certifications,
@@ -1579,6 +1667,7 @@ struct NetworkingPreferencesStep: View {
     @State private var preferredChatFormat = ChatFormat.virtual
     @State private var preferredChatDuration = ""
     @State private var availableTimeslot = AvailableTimeslot.createDefault()
+    @State private var timeslotTimezone = TimeZone.current.identifier // 默认使用当前位置时区
     
     var body: some View {
         VStack(spacing: 24) {
@@ -1605,6 +1694,19 @@ struct NetworkingPreferencesStep: View {
                 }
             }
             
+            // Timezone Selection
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Timezone")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                
+                Text("Select the timezone for your available timeslots")
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+                
+                TimezonePicker(selectedTimezone: $timeslotTimezone)
+            }
+            
             // Available Timeslot Matrix
             VStack(alignment: .leading, spacing: 16) {
                 Text("Available Timeslots")
@@ -1624,6 +1726,7 @@ struct NetworkingPreferencesStep: View {
         .onChange(of: preferredChatFormat) { _ in updateProfileData() }
         .onChange(of: preferredChatDuration) { _ in updateProfileData() }
         .onChange(of: availableTimeslot) { _ in updateProfileData() }
+        .onChange(of: timeslotTimezone) { _ in updateProfileData() }
     }
     
     private func loadExistingData() {
@@ -1631,6 +1734,7 @@ struct NetworkingPreferencesStep: View {
             preferredChatFormat = networkingPreferences.preferredChatFormat
             preferredChatDuration = networkingPreferences.preferredChatDuration ?? ""
             availableTimeslot = networkingPreferences.availableTimeslot
+            timeslotTimezone = networkingPreferences.timeslotTimezone ?? TimeZone.current.identifier
         }
     }
     
@@ -1638,7 +1742,8 @@ struct NetworkingPreferencesStep: View {
         let networkingPreferences = NetworkingPreferences(
             preferredChatFormat: preferredChatFormat,
             availableTimeslot: availableTimeslot,
-            preferredChatDuration: preferredChatDuration.isEmpty ? nil : preferredChatDuration
+            preferredChatDuration: preferredChatDuration.isEmpty ? nil : preferredChatDuration,
+            timeslotTimezone: timeslotTimezone
         )
         profileData.networkingPreferences = networkingPreferences
     }
@@ -1887,6 +1992,161 @@ struct TimeslotCell: View {
                 )
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Timezone Picker
+struct TimezonePicker: View {
+    @Binding var selectedTimezone: String
+    @State private var searchText = ""
+    @State private var showingPicker = false
+    
+    private var commonTimezones: [(identifier: String, displayName: String)] {
+        let timezoneData: [(identifier: String, name: String)] = [
+            ("America/New_York", "Eastern Time (ET)"),
+            ("America/Chicago", "Central Time (CT)"),
+            ("America/Denver", "Mountain Time (MT)"),
+            ("America/Los_Angeles", "Pacific Time (PT)"),
+            ("America/Phoenix", "Arizona Time (MST)"),
+            ("America/Anchorage", "Alaska Time (AKT)"),
+            ("Pacific/Honolulu", "Hawaii Time (HST)"),
+            ("Europe/London", "London (GMT)"),
+            ("Europe/Paris", "Paris (CET)"),
+            ("Europe/Berlin", "Berlin (CET)"),
+            ("Asia/Shanghai", "Shanghai (CST)"),
+            ("Asia/Tokyo", "Tokyo (JST)"),
+            ("Asia/Hong_Kong", "Hong Kong (HKT)"),
+            ("Asia/Singapore", "Singapore (SGT)"),
+            ("Australia/Sydney", "Sydney (AEST)"),
+            ("America/Toronto", "Toronto (EST)"),
+            ("America/Vancouver", "Vancouver (PST)"),
+            ("America/Mexico_City", "Mexico City (CST)"),
+            ("America/Sao_Paulo", "São Paulo (BRT)"),
+            ("Asia/Dubai", "Dubai (GST)"),
+            ("Asia/Mumbai", "Mumbai (IST)"),
+            ("Asia/Seoul", "Seoul (KST)"),
+        ]
+        
+        return timezoneData.compactMap { (identifier, name) -> (identifier: String, displayName: String)? in
+            guard let tz = TimeZone(identifier: identifier) else { return nil }
+            let offset = tz.secondsFromGMT()
+            let hours = offset / 3600
+            let minutes = abs(offset % 3600) / 60
+            let sign = hours >= 0 ? "+" : "-"
+            let offsetString = String(format: "%@%02d:%02d", sign, abs(hours), minutes)
+            return (identifier: identifier, displayName: "\(name) (GMT\(offsetString))")
+        }
+    }
+    
+    private var allTimezones: [(identifier: String, displayName: String)] {
+        let common = commonTimezones
+        let all = TimeZone.knownTimeZoneIdentifiers.compactMap { identifier -> (identifier: String, displayName: String)? in
+            guard let tz = TimeZone(identifier: identifier) else { return nil }
+            let offset = tz.secondsFromGMT()
+            let hours = offset / 3600
+            let minutes = abs(offset % 3600) / 60
+            let sign = hours >= 0 ? "+" : "-"
+            let offsetString = String(format: "%@%02d:%02d", sign, abs(hours), minutes)
+            return (identifier: identifier, displayName: "\(identifier.replacingOccurrences(of: "_", with: " ")) (GMT\(offsetString))")
+        }
+        return common + all.filter { tz in !common.contains { $0.identifier == tz.identifier } }
+    }
+    
+    private var filteredTimezones: [(identifier: String, displayName: String)] {
+        if searchText.isEmpty {
+            return commonTimezones
+        }
+        return allTimezones.filter { $0.displayName.localizedCaseInsensitiveContains(searchText) || $0.identifier.localizedCaseInsensitiveContains(searchText) }
+    }
+    
+    private var currentDisplayName: String {
+        if let tz = TimeZone(identifier: selectedTimezone) {
+            let abbreviation = tz.abbreviation() ?? ""
+            let offset = tz.secondsFromGMT()
+            let hours = offset / 3600
+            let minutes = abs(offset % 3600) / 60
+            let sign = hours >= 0 ? "+" : "-"
+            let offsetString = String(format: "%@%02d:%02d", sign, abs(hours), minutes)
+            return "\(selectedTimezone.replacingOccurrences(of: "_", with: " ")) (GMT\(offsetString))"
+        }
+        return selectedTimezone
+    }
+    
+    var body: some View {
+        Button(action: {
+            showingPicker = true
+        }) {
+            HStack {
+                Text(currentDisplayName)
+                    .font(.system(size: 15))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                
+                Spacer()
+                
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color.gray.opacity(0.05))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+            )
+        }
+        .sheet(isPresented: $showingPicker) {
+            NavigationView {
+                VStack(spacing: 0) {
+                    // Search bar
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.gray)
+                        TextField("Search timezone", text: $searchText)
+                            .textFieldStyle(PlainTextFieldStyle())
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color.gray.opacity(0.05))
+                    
+                    // Timezone list
+                    List {
+                        ForEach(filteredTimezones, id: \.identifier) { timezone in
+                            Button(action: {
+                                selectedTimezone = timezone.identifier
+                                showingPicker = false
+                            }) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(timezone.displayName)
+                                            .font(.system(size: 15))
+                                            .foregroundColor(.primary)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    if selectedTimezone == timezone.identifier {
+                                        Image(systemName: "checkmark")
+                                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                    }
+                                }
+                                .padding(.vertical, 8)
+                            }
+                        }
+                    }
+                }
+                .navigationTitle("Select Timezone")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") {
+                            showingPicker = false
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -3718,6 +3978,13 @@ struct EducationCard: View {
     let education: Education
     let onDelete: () -> Void
     
+    private func formatDate(year: Int, month: Int?) -> String {
+        if let month = month {
+            return "\(YearOptions.shortMonthName(for: month)) \(year)"
+        }
+        return "\(year)"
+    }
+    
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
@@ -3730,9 +3997,9 @@ struct EducationCard: View {
                     .foregroundColor(.gray)
                 
                 HStack {
-                    Text(education.startYear, format: .number.grouping(.never))
+                    Text(formatDate(year: education.startYear, month: education.startMonth))
                     if let endYear = education.endYear {
-                        Text("- \(endYear, format: .number.grouping(.never))")
+                        Text("- \(formatDate(year: endYear, month: education.endMonth))")
                     } else {
                         Text("- Present")
                     }
@@ -3764,6 +4031,13 @@ struct WorkExperienceCard: View {
     let workExperience: WorkExperience
     let onDelete: () -> Void
     
+    private func formatDate(year: Int, month: Int?) -> String {
+        if let month = month {
+            return "\(YearOptions.shortMonthName(for: month)) \(year)"
+        }
+        return "\(year)"
+    }
+    
     private var isValidWorkExperience: Bool {
         let currentYear = Calendar.current.component(.year, from: Date())
         guard workExperience.startYear <= currentYear else { return false }
@@ -3787,9 +4061,9 @@ struct WorkExperienceCard: View {
                 }
                 
                 HStack {
-                    Text(workExperience.startYear, format: .number.grouping(.never))
+                    Text(formatDate(year: workExperience.startYear, month: workExperience.startMonth))
                     if let endYear = workExperience.endYear {
-                        Text("- \(endYear, format: .number.grouping(.never))")
+                        Text("- \(formatDate(year: endYear, month: workExperience.endMonth))")
                     } else {
                         Text("- Present")
                     }
@@ -3829,7 +4103,9 @@ struct AddWorkExperienceView: View {
     
     @State private var companyName = ""
     @State private var startYear = YearOptions.currentYear
+    @State private var startMonth: Int? = YearOptions.currentMonth
     @State private var endYear: Int? = YearOptions.currentYear
+    @State private var endMonth: Int? = YearOptions.currentMonth
     @State private var position = ""
     @State private var isPresent = false
     @State private var skillInput = ""
@@ -3847,9 +4123,20 @@ struct AddWorkExperienceView: View {
             return false
         }
         
-        if let endYear = endYear, !isPresent, startYear > endYear {
-            validationError = "Start year must be before or equal to end year."
-            return false
+        if let endYear = endYear, !isPresent {
+            if startYear > endYear {
+                validationError = "Start year must be before or equal to end year."
+                return false
+            }
+            // 如果年份相同，检查月份
+            if startYear == endYear {
+                let startM = startMonth ?? 1
+                let endM = endMonth ?? 12
+                if startM > endM {
+                    validationError = "Start month must be before or equal to end month when years are the same."
+                    return false
+                }
+            }
         }
         
         validationError = nil
@@ -3946,29 +4233,63 @@ struct AddWorkExperienceView: View {
                     }
                 }
                 
-                // Start Year
+                // Start Date
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Start Year *")
+                    Text("Start Date *")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                     
-                    Picker("Start Year", selection: $startYear) {
-                        ForEach(YearOptions.workExperienceYears, id: \.self) { year in
-                            Text(year, format: .number.grouping(.never)).tag(year)
+                    HStack(spacing: 12) {
+                        // Start Year
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Year")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                            Picker("Start Year", selection: $startYear) {
+                                ForEach(YearOptions.workExperienceYears, id: \.self) { year in
+                                    Text("\(year)").tag(year)
+                                }
+                            }
+                            .pickerStyle(MenuPickerStyle())
+                            .frame(minWidth: 80, maxWidth: .infinity, minHeight: 44)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
+                        }
+                        
+                        // Start Month
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Month")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                            Picker("Start Month", selection: Binding(
+                                get: { startMonth ?? YearOptions.currentMonth },
+                                set: { startMonth = $0 }
+                            )) {
+                                Text("Not specified").tag(Int?.none)
+                                ForEach(YearOptions.months, id: \.self) { month in
+                                    Text(YearOptions.shortMonthName(for: month)).tag(Int?.some(month))
+                                }
+                            }
+                            .pickerStyle(MenuPickerStyle())
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
                         }
                     }
-                    .pickerStyle(MenuPickerStyle())
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(8)
                 }
                 
-                // End Year or Present
+                // End Date or Present
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("End Year")
+                        Text("End Date")
                             .font(.system(size: 16, weight: .medium))
                             .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                         
@@ -3980,24 +4301,66 @@ struct AddWorkExperienceView: View {
                     .onChange(of: isPresent) { newValue in
                         if newValue {
                             endYear = nil
+                            endMonth = nil
+                        } else {
+                            if endYear == nil {
+                                endYear = YearOptions.currentYear
+                            }
+                            if endMonth == nil {
+                                endMonth = YearOptions.currentMonth
+                            }
                         }
                     }
                     
                     if !isPresent {
-                        Picker("End Year", selection: Binding(
-                            get: { endYear ?? YearOptions.currentYear },
-                            set: { endYear = $0 }
-                        )) {
-                            ForEach(YearOptions.workExperienceYears, id: \.self) { year in
-                                Text(year, format: .number.grouping(.never)).tag(year)
+                        HStack(spacing: 12) {
+                            // End Year
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Year")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.gray)
+                                Picker("End Year", selection: Binding(
+                                    get: { endYear ?? YearOptions.currentYear },
+                                    set: { endYear = $0 }
+                                )) {
+                                    ForEach(YearOptions.workExperienceYears, id: \.self) { year in
+                                        Text("\(year)").tag(year)
+                                    }
+                                }
+                                .pickerStyle(MenuPickerStyle())
+                                .frame(minWidth: 80, maxWidth: .infinity, minHeight: 44)
+                                .lineLimit(1)
+                                .layoutPriority(1)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(Color.gray.opacity(0.1))
+                                .cornerRadius(8)
+                            }
+                            
+                            // End Month
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Month")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.gray)
+                                Picker("End Month", selection: Binding(
+                                    get: { endMonth ?? YearOptions.currentMonth },
+                                    set: { endMonth = $0 }
+                                )) {
+                                    Text("Not specified").tag(Int?.none)
+                                    ForEach(YearOptions.months, id: \.self) { month in
+                                        Text(YearOptions.shortMonthName(for: month)).tag(Int?.some(month))
+                                    }
+                                }
+                                .pickerStyle(MenuPickerStyle())
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(Color.gray.opacity(0.1))
+                                .cornerRadius(8)
                             }
                         }
-                        .pickerStyle(MenuPickerStyle())
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
                     }
                 }
                 
@@ -4028,7 +4391,9 @@ struct AddWorkExperienceView: View {
                         let workExperience = WorkExperience(
                             companyName: companyName,
                             startYear: startYear,
+                            startMonth: startMonth,
                             endYear: isPresent ? nil : endYear,
+                            endMonth: isPresent ? nil : endMonth,
                             position: position.isEmpty ? nil : position,
                             highlightedSkills: addedSkills,
                             responsibilities: responsibilities.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : responsibilities.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4063,7 +4428,9 @@ struct AddEducationView: View {
     
     @State private var schoolName = ""
     @State private var startYear = YearOptions.currentYear
+    @State private var startMonth: Int? = YearOptions.currentMonth
     @State private var endYear: Int? = YearOptions.currentYear
+    @State private var endMonth: Int? = YearOptions.currentMonth
     @State private var degree = DegreeType.bachelor
     @State private var fieldOfStudy = ""
     @State private var isPresent = false
@@ -4079,9 +4446,20 @@ struct AddEducationView: View {
             return false
         }
         
-        if let endYear = endYear, !isPresent, startYear > endYear {
-            validationError = "Start year must be before or equal to end year."
-            return false
+        if let endYear = endYear, !isPresent {
+            if startYear > endYear {
+                validationError = "Start year must be before or equal to end year."
+                return false
+            }
+            // 如果年份相同，检查月份
+            if startYear == endYear {
+                let startM = startMonth ?? 1
+                let endM = endMonth ?? 12
+                if startM > endM {
+                    validationError = "Start month must be before or equal to end month when years are the same."
+                    return false
+                }
+            }
         }
         
         validationError = nil
@@ -4101,29 +4479,63 @@ struct AddEducationView: View {
                         .textFieldStyle(CustomTextFieldStyle())
                 }
                 
-                // Start Year
+                // Start Date
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Start Year *")
+                    Text("Start Date *")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                     
-                    Picker("Start Year", selection: $startYear) {
-                        ForEach(YearOptions.years, id: \.self) { year in
-                            Text(year, format: .number.grouping(.never)).tag(year)
+                    HStack(spacing: 12) {
+                        // Start Year
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Year")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                            Picker("Start Year", selection: $startYear) {
+                                ForEach(YearOptions.years, id: \.self) { year in
+                                    Text("\(year)").tag(year)
+                                }
+                            }
+                            .pickerStyle(MenuPickerStyle())
+                            .frame(minWidth: 80, maxWidth: .infinity, minHeight: 44)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
+                        }
+                        
+                        // Start Month
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Month")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                            Picker("Start Month", selection: Binding(
+                                get: { startMonth ?? YearOptions.currentMonth },
+                                set: { startMonth = $0 }
+                            )) {
+                                Text("Not specified").tag(Int?.none)
+                                ForEach(YearOptions.months, id: \.self) { month in
+                                    Text(YearOptions.shortMonthName(for: month)).tag(Int?.some(month))
+                                }
+                            }
+                            .pickerStyle(MenuPickerStyle())
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
                         }
                     }
-                    .pickerStyle(MenuPickerStyle())
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(8)
                 }
                 
-                // End Year or Present
+                // End Date or Present
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("End Year")
+                        Text("End Date")
                             .font(.system(size: 16, weight: .medium))
                             .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                         
@@ -4132,22 +4544,69 @@ struct AddEducationView: View {
                         Toggle("Currently studying", isOn: $isPresent)
                             .font(.system(size: 14))
                     }
-                    
-                    if !isPresent {
-                        Picker("End Year", selection: Binding(
-                            get: { endYear ?? YearOptions.currentYear },
-                            set: { endYear = $0 }
-                        )) {
-                            ForEach(YearOptions.years, id: \.self) { year in
-                                Text(year, format: .number.grouping(.never)).tag(year)
+                    .onChange(of: isPresent) { newValue in
+                        if newValue {
+                            endYear = nil
+                            endMonth = nil
+                        } else {
+                            if endYear == nil {
+                                endYear = YearOptions.currentYear
+                            }
+                            if endMonth == nil {
+                                endMonth = YearOptions.currentMonth
                             }
                         }
-                        .pickerStyle(MenuPickerStyle())
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
+                    }
+                    
+                    if !isPresent {
+                        HStack(spacing: 12) {
+                            // End Year
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Year")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.gray)
+                                Picker("End Year", selection: Binding(
+                                    get: { endYear ?? YearOptions.currentYear },
+                                    set: { endYear = $0 }
+                                )) {
+                                    ForEach(YearOptions.years, id: \.self) { year in
+                                        Text("\(year)").tag(year)
+                                    }
+                                }
+                                .pickerStyle(MenuPickerStyle())
+                                .frame(minWidth: 80, maxWidth: .infinity, minHeight: 44)
+                                .lineLimit(1)
+                                .layoutPriority(1)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(Color.gray.opacity(0.1))
+                                .cornerRadius(8)
+                            }
+                            
+                            // End Month
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Month")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.gray)
+                                Picker("End Month", selection: Binding(
+                                    get: { endMonth ?? YearOptions.currentMonth },
+                                    set: { endMonth = $0 }
+                                )) {
+                                    Text("Not specified").tag(Int?.none)
+                                    ForEach(YearOptions.months, id: \.self) { month in
+                                        Text(YearOptions.shortMonthName(for: month)).tag(Int?.some(month))
+                                    }
+                                }
+                                .pickerStyle(MenuPickerStyle())
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(Color.gray.opacity(0.1))
+                                .cornerRadius(8)
+                            }
+                        }
                     }
                 }
                 
@@ -4207,7 +4666,9 @@ struct AddEducationView: View {
                         let education = Education(
                             schoolName: schoolName,
                             startYear: startYear,
+                            startMonth: startMonth,
                             endYear: isPresent ? nil : endYear,
+                            endMonth: isPresent ? nil : endMonth,
                             degree: degree,
                             fieldOfStudy: fieldOfStudy.isEmpty ? nil : fieldOfStudy
                         )

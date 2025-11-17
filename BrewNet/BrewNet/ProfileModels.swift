@@ -204,11 +204,33 @@ struct NetworkingPreferences: Codable, Equatable {
     let preferredChatFormat: ChatFormat
     let availableTimeslot: AvailableTimeslot
     let preferredChatDuration: String?
+    let timeslotTimezone: String? // 时区标识符，例如 "America/New_York"
     
     enum CodingKeys: String, CodingKey {
         case preferredChatFormat = "preferred_chat_format"
         case availableTimeslot = "available_timeslot"
         case preferredChatDuration = "preferred_chat_duration"
+        case timeslotTimezone = "timeslot_timezone"
+    }
+    
+    init(
+        preferredChatFormat: ChatFormat,
+        availableTimeslot: AvailableTimeslot,
+        preferredChatDuration: String? = nil,
+        timeslotTimezone: String? = nil
+    ) {
+        self.preferredChatFormat = preferredChatFormat
+        self.availableTimeslot = availableTimeslot
+        self.preferredChatDuration = preferredChatDuration
+        self.timeslotTimezone = timeslotTimezone
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.preferredChatFormat = try container.decode(ChatFormat.self, forKey: .preferredChatFormat)
+        self.availableTimeslot = try container.decode(AvailableTimeslot.self, forKey: .availableTimeslot)
+        self.preferredChatDuration = try container.decodeIfPresent(String.self, forKey: .preferredChatDuration)
+        self.timeslotTimezone = try container.decodeIfPresent(String.self, forKey: .timeslotTimezone)
     }
 }
 

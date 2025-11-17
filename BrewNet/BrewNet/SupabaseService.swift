@@ -3854,7 +3854,7 @@ extension SupabaseService {
     // MARK: - Coffee Chat Invitations
     
     /// 创建咖啡聊天邀请记录
-    func createCoffeeChatInvitation(senderId: String, receiverId: String, senderName: String, receiverName: String) async throws -> String {
+    func createCoffeeChatInvitation(senderId: String, receiverId: String, senderName: String, receiverName: String, scheduledDate: Date? = nil, location: String? = nil, notes: String? = nil) async throws -> String {
         print("📧 [咖啡聊天] 创建邀请: \(senderName) -> \(receiverName)")
         
         let invitationId = UUID().uuidString
@@ -3868,6 +3868,9 @@ extension SupabaseService {
             let receiverName: String
             let status: String
             let createdAt: String
+            let scheduledDate: String?
+            let location: String?
+            let notes: String?
             
             enum CodingKeys: String, CodingKey {
                 case id
@@ -3877,8 +3880,13 @@ extension SupabaseService {
                 case receiverName = "receiver_name"
                 case status
                 case createdAt = "created_at"
+                case scheduledDate = "scheduled_date"
+                case location
+                case notes
             }
         }
+        
+        let dateString = scheduledDate != nil ? ISO8601DateFormatter().string(from: scheduledDate!) : nil
         
         let invitation = InvitationInsert(
             id: invitationId,
@@ -3887,7 +3895,10 @@ extension SupabaseService {
             senderName: senderName,
             receiverName: receiverName,
             status: "pending",
-            createdAt: now
+            createdAt: now,
+            scheduledDate: dateString,
+            location: location,
+            notes: notes
         )
         
         try await client
@@ -4125,12 +4136,12 @@ extension SupabaseService {
     }
     
     /// 获取完整的邀请信息（包括状态、时间、地点等）
-    func getCoffeeChatInvitationInfo(senderId: String, receiverId: String) async throws -> (status: CoffeeChatInvitation.InvitationStatus?, scheduledDate: Date?, location: String?, invitationId: String?) {
+    func getCoffeeChatInvitationInfo(senderId: String, receiverId: String) async throws -> (status: CoffeeChatInvitation.InvitationStatus?, scheduledDate: Date?, location: String?, notes: String?, invitationId: String?) {
         print("🔍 [咖啡聊天] 获取完整邀请信息: senderId=\(senderId), receiverId=\(receiverId)")
         
         let response = try await client
             .from("coffee_chat_invitations")
-            .select("id, status, scheduled_date, location")
+            .select("id, status, scheduled_date, location, notes")
             .eq("sender_id", value: senderId)
             .eq("receiver_id", value: receiverId)
             .order("created_at", ascending: false)
@@ -4141,7 +4152,7 @@ extension SupabaseService {
         guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
               let firstInvitation = jsonArray.first else {
             print("⚠️ [咖啡聊天] 未找到邀请")
-            return (nil, nil, nil, nil)
+            return (nil, nil, nil, nil, nil)
         }
         
         let statusString = firstInvitation["status"] as? String ?? "pending"
@@ -4161,9 +4172,10 @@ extension SupabaseService {
         }
         
         let location = firstInvitation["location"] as? String
+        let notes = firstInvitation["notes"] as? String
         
-        print("✅ [咖啡聊天] 邀请信息: status=\(statusString), scheduledDate=\(scheduledDate?.description ?? "nil"), location=\(location ?? "nil")")
-        return (status, scheduledDate, location, invitationId)
+        print("✅ [咖啡聊天] 邀请信息: status=\(statusString), scheduledDate=\(scheduledDate?.description ?? "nil"), location=\(location ?? "nil"), notes=\(notes ?? "nil")")
+        return (status, scheduledDate, location, notes, invitationId)
     }
     
     /// 检查咖啡聊天日程是否已经 met（基于 scheduledDate 和 location）

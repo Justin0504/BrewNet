@@ -5,7 +5,9 @@ struct Education: Codable, Identifiable, Equatable {
     let id: UUID
     let schoolName: String
     let startYear: Int
+    let startMonth: Int? // 1-12, nil表示未设置
     let endYear: Int?
+    let endMonth: Int? // 1-12, nil表示未设置
     let degree: DegreeType
     let fieldOfStudy: String?
     
@@ -13,16 +15,20 @@ struct Education: Codable, Identifiable, Equatable {
         case id
         case schoolName = "school_name"
         case startYear = "start_year"
+        case startMonth = "start_month"
         case endYear = "end_year"
+        case endMonth = "end_month"
         case degree
         case fieldOfStudy = "field_of_study"
     }
     
-    init(schoolName: String, startYear: Int, endYear: Int? = nil, degree: DegreeType, fieldOfStudy: String? = nil) {
+    init(schoolName: String, startYear: Int, startMonth: Int? = nil, endYear: Int? = nil, endMonth: Int? = nil, degree: DegreeType, fieldOfStudy: String? = nil) {
         self.id = UUID()
         self.schoolName = schoolName
         self.startYear = startYear
+        self.startMonth = startMonth
         self.endYear = endYear
+        self.endMonth = endMonth
         self.degree = degree
         self.fieldOfStudy = fieldOfStudy
     }
@@ -58,7 +64,9 @@ struct WorkExperience: Identifiable, Codable, Equatable {
     let id: UUID
     var companyName: String
     var startYear: Int
+    var startMonth: Int? // 1-12, nil表示未设置
     var endYear: Int? // nil if currently working
+    var endMonth: Int? // 1-12, nil表示未设置
     var position: String?
     var highlightedSkills: [String] = []
     var responsibilities: String?
@@ -67,7 +75,9 @@ struct WorkExperience: Identifiable, Codable, Equatable {
         case id
         case companyName = "company_name"
         case startYear = "start_year"
+        case startMonth = "start_month"
         case endYear = "end_year"
+        case endMonth = "end_month"
         case position
         case highlightedSkills = "highlighted_skills"
         case responsibilities
@@ -77,7 +87,9 @@ struct WorkExperience: Identifiable, Codable, Equatable {
         id: UUID = UUID(),
         companyName: String,
         startYear: Int,
+        startMonth: Int? = nil,
         endYear: Int?,
+        endMonth: Int? = nil,
         position: String?,
         highlightedSkills: [String] = [],
         responsibilities: String? = nil
@@ -85,7 +97,9 @@ struct WorkExperience: Identifiable, Codable, Equatable {
         self.id = id
         self.companyName = companyName
         self.startYear = startYear
+        self.startMonth = startMonth
         self.endYear = endYear
+        self.endMonth = endMonth
         self.position = position
         self.highlightedSkills = highlightedSkills
         self.responsibilities = responsibilities
@@ -95,6 +109,8 @@ struct WorkExperience: Identifiable, Codable, Equatable {
 // MARK: - Year Options
 struct YearOptions {
     static let currentYear = Calendar.current.component(.year, from: Date())
+    static let currentMonth = Calendar.current.component(.month, from: Date())
+    
     static let years: [Int] = {
         var years: [Int] = []
         let minYear = 1900
@@ -115,4 +131,28 @@ struct YearOptions {
         }
         return years.reversed()
     }()
+    
+    // Month options (1-12)
+    static let months: [Int] = Array(1...12)
+    
+    // Years of experience options (0-40)
+    static let yearsOfExperienceOptions: [Int] = Array(0...40)
+    
+    // Month names for display
+    static let monthNames: [String] = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ]
+    
+    static func monthName(for month: Int) -> String {
+        guard month >= 1 && month <= 12 else { return "" }
+        return monthNames[month - 1]
+    }
+    
+    static func shortMonthName(for month: Int) -> String {
+        guard month >= 1 && month <= 12 else { return "" }
+        let names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        return names[month - 1]
+    }
 }
