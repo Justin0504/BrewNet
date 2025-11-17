@@ -605,17 +605,40 @@ struct ProfileCardContentView: View {
     }
 
     private var timeslotSection: some View {
-        guard shouldShowTimeslot, hasAvailableTimes else {
+        guard shouldShowTimeslot else {
             return AnyView(EmptyView())
         }
+        
+        // 即使没有timeslot，如果有时区信息也显示
+        let hasTimezone = profile.networkingPreferences.timeslotTimezone != nil
+        
+        if !hasAvailableTimes && !hasTimezone {
+            return AnyView(EmptyView())
+        }
+        
         return AnyView(
             sectionContainer(title: "Available Times", icon: "calendar") {
-                AvailableTimeslotGridView(
-                    timeslot: profile.networkingPreferences.availableTimeslot,
-                    accentColor: accentBrown,
-                    inactiveColor: Color.gray.opacity(0.15),
-                    textColor: themeBrown
-                )
+                VStack(alignment: .leading, spacing: 12) {
+                    // Timezone info - 始终显示（如果有）
+                    if let profileTimezone = profile.networkingPreferences.timeslotTimezone {
+                        TimezoneInfoView(
+                            profileTimezone: profileTimezone,
+                            viewerTimezone: TimeZone.current.identifier,
+                            accentColor: accentBrown,
+                            textColor: themeBrown
+                        )
+                    }
+                    
+                    // Timeslot grid - 只在有timeslot时显示
+                    if hasAvailableTimes {
+                        AvailableTimeslotGridView(
+                            timeslot: profile.networkingPreferences.availableTimeslot,
+                            accentColor: accentBrown,
+                            inactiveColor: Color.gray.opacity(0.15),
+                            textColor: themeBrown
+                        )
+                    }
+                }
             }
         )
     }
@@ -712,9 +735,17 @@ struct ProfileCardContentView: View {
         let themeColor: Color
         let textColor: Color
         
+        private func formatDate(year: Int, month: Int?) -> String {
+            if let month = month {
+                return "\(YearOptions.shortMonthName(for: month)) \(year)"
+            }
+            return "\(year)"
+        }
+        
         private var durationText: String {
-            let endText = education.endYear.map { String($0) } ?? "Present"
-            return "\(education.startYear)-\(endText)"
+            let startText = formatDate(year: education.startYear, month: education.startMonth)
+            let endText = education.endYear.map { formatDate(year: $0, month: education.endMonth) } ?? "Present"
+            return "\(startText)-\(endText)"
         }
         
         private var detailText: String? {
@@ -895,6 +926,90 @@ struct ProfileCardContentView: View {
                     }
                 }
             }
+        }
+    }
+    
+    // MARK: - Timezone Info View
+    private struct TimezoneInfoView: View {
+        let profileTimezone: String
+        let viewerTimezone: String
+        let accentColor: Color
+        let textColor: Color
+        @State private var showingOriginalTimezone = false
+        
+        private var profileTimezoneDisplay: String {
+            if let tz = TimeZone(identifier: profileTimezone) {
+                let offset = tz.secondsFromGMT()
+                let hours = offset / 3600
+                let minutes = abs(offset % 3600) / 60
+                let sign = hours >= 0 ? "+" : "-"
+                let offsetString = String(format: "%@%02d:%02d", sign, abs(hours), minutes)
+                return "\(profileTimezone.replacingOccurrences(of: "_", with: " ")) (GMT\(offsetString))"
+            }
+            return profileTimezone
+        }
+        
+        private var viewerTimezoneDisplay: String {
+            if let tz = TimeZone(identifier: viewerTimezone) {
+                let offset = tz.secondsFromGMT()
+                let hours = offset / 3600
+                let minutes = abs(offset % 3600) / 60
+                let sign = hours >= 0 ? "+" : "-"
+                let offsetString = String(format: "%@%02d:%02d", sign, abs(hours), minutes)
+                return "\(viewerTimezone.replacingOccurrences(of: "_", with: " ")) (GMT\(offsetString))"
+            }
+            return viewerTimezone
+        }
+        
+        private var isSameTimezone: Bool {
+            profileTimezone == viewerTimezone
+        }
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                if isSameTimezone {
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 12))
+                            .foregroundColor(textColor.opacity(0.7))
+                        Text("Timezone: \(profileTimezoneDisplay)")
+                            .font(.system(size: 12))
+                            .foregroundColor(textColor.opacity(0.7))
+                    }
+                } else {
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 12))
+                            .foregroundColor(textColor.opacity(0.7))
+                        if showingOriginalTimezone {
+                            Text("Original timezone: \(profileTimezoneDisplay)")
+                                .font(.system(size: 12))
+                                .foregroundColor(textColor.opacity(0.7))
+                        } else {
+                            Text("Converted to your timezone: \(viewerTimezoneDisplay)")
+                                .font(.system(size: 12))
+                                .foregroundColor(textColor.opacity(0.7))
+                        }
+                    }
+                    
+                    Button(action: {
+                        showingOriginalTimezone.toggle()
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: showingOriginalTimezone ? "eye.slash" : "eye")
+                                .font(.system(size: 11))
+                            Text(showingOriginalTimezone ? "Show converted" : "Show original")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundColor(accentColor)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(accentColor.opacity(0.1))
+                        .cornerRadius(6)
+                    }
+                }
+            }
+            .padding(.bottom, 4)
         }
     }
 }
@@ -1583,6 +1698,13 @@ struct NetworkingIntentionBadgeView: View {
 struct WorkExperienceRowView: View {
     let workExp: WorkExperience
     
+    private func formatDate(year: Int, month: Int?) -> String {
+        if let month = month {
+            return "\(YearOptions.shortMonthName(for: month)) \(year)"
+        }
+        return "\(year)"
+    }
+    
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
@@ -1599,9 +1721,9 @@ struct WorkExperienceRowView: View {
             
             Spacer()
             
-            let startYearText = String(workExp.startYear)
-            let endYearText = workExp.endYear.map { String($0) } ?? "Present"
-            Text(verbatim: "\(startYearText)-\(endYearText)")
+            let startDateText = formatDate(year: workExp.startYear, month: workExp.startMonth)
+            let endDateText = workExp.endYear.map { formatDate(year: $0, month: workExp.endMonth) } ?? "Present"
+            Text(verbatim: "\(startDateText)-\(endDateText)")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundColor(.gray)
         }

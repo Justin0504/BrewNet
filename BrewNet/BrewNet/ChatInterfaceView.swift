@@ -33,6 +33,10 @@ struct ChatInterfaceView: View {
     @State private var showingCoffeeInviteAnimation = false // 显示发送动画
     @State private var showingCoffeeChatSchedule = false // 显示咖啡聊天日程列表
     @State private var textAnimationState: (line1: Bool, line2: Bool, question: Bool) = (false, false, false) // 文字动画状态
+    @State private var showingSendInvitationSheet = false // 显示发送邀请表单
+    @State private var sendInvitationDate = Date().addingTimeInterval(86400) // 默认明天
+    @State private var sendInvitationLocation = "" // 发送者填写的地点
+    @State private var sendInvitationNotes = "" // 发送者填写的备注
     @State private var invitationStatusCache: [String: CoffeeChatInvitation.InvitationStatus] = [:] // 邀请状态缓存，key: "senderId-receiverId"
     @State private var currentInvitationInfo: [String: (status: CoffeeChatInvitation.InvitationStatus?, scheduledDate: Date?, location: String?, invitationId: String?, isSentByMe: Bool)] = [:] // 当前会话的邀请信息，key: "sessionId"
     @State private var showingInvitationErrorAlert = false // 显示邀请错误提示
@@ -402,6 +406,20 @@ struct ChatInterfaceView: View {
                 }
             }
         }
+        .sheet(isPresented: $showingSendInvitationSheet) {
+            SendInvitationSheet(
+                selectedDate: $sendInvitationDate,
+                locationText: $sendInvitationLocation,
+                notesText: $sendInvitationNotes,
+                onSend: {
+                    showingSendInvitationSheet = false
+                    sendCoffeeChatInvitation()
+                },
+                onCancel: {
+                    showingSendInvitationSheet = false
+                }
+            )
+        }
     }
     
     // MARK: - Custom Coffee Invite Alert
@@ -534,7 +552,8 @@ struct ChatInterfaceView: View {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                 showingCoffeeInviteAlert = false
                             }
-                            sendCoffeeChatInvitation()
+                            // 打开发送邀请表单
+                            showingSendInvitationSheet = true
                         }) {
                             Text("Send")
                                 .font(.system(size: 15, weight: .bold))
@@ -1917,6 +1936,13 @@ struct ChatInterfaceView: View {
     }
     
     private func performSendCoffeeChatInvitation(session: ChatSession, currentUser: AppUser, receiverUserId: String) {
+        // 验证必填字段
+        guard !sendInvitationLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            print("❌ [发送邀请] 地点不能为空")
+            // TODO: 显示错误提示给用户
+            return
+        }
+        
         // 显示发送动画
         showingCoffeeInviteAnimation = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
@@ -1932,12 +1958,15 @@ struct ChatInterfaceView: View {
                     receiverName = receiverProfile.coreIdentity.name
                 }
                 
-                // 创建邀请记录
+                // 创建邀请记录（包含发送者填写的信息）
                 let invitationId = try await supabaseService.createCoffeeChatInvitation(
                     senderId: currentUser.id,
                     receiverId: receiverUserId,
                     senderName: currentUser.name,
-                    receiverName: receiverName
+                    receiverName: receiverName,
+                    scheduledDate: sendInvitationDate,
+                    location: sendInvitationLocation.trimmingCharacters(in: .whitespacesAndNewlines),
+                    notes: sendInvitationNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : sendInvitationNotes.trimmingCharacters(in: .whitespacesAndNewlines)
                 )
                 
                 // 为接收方创建新的邀请消息（这样每次新邀请都会显示新的消息）
@@ -3541,7 +3570,43 @@ struct MessageBubbleView: View {
                         // 第二行：显示 Accept 和 Decline 按钮（只有pending状态）
                         HStack(spacing: 10) {
                             Button(action: {
-                                showingAcceptSheet = true
+                                // 从邀请中获取发送者填写的信息并预填充
+                                Task {
+                                    guard let currentUser = authManager.currentUser,
+                                          let otherUserId = session.user.userId else {
+                                        return
+                                    }
+                                    
+                                    // 确定 senderId 和 receiverId（别人发送的邀请）
+                                    let senderId = otherUserId
+                                    let receiverId = currentUser.id
+                                    
+                                    do {
+                                        let invitationInfo = try await supabaseService.getCoffeeChatInvitationInfo(
+                                            senderId: senderId,
+                                            receiverId: receiverId
+                                        )
+                                        
+                                        await MainActor.run {
+                                            // 如果发送者已经填写了信息，预填充表单
+                                            if let scheduledDate = invitationInfo.scheduledDate {
+                                                selectedDate = scheduledDate
+                                            }
+                                            if let location = invitationInfo.location, !location.isEmpty {
+                                                locationText = location
+                                            }
+                                            if let notes = invitationInfo.notes, !notes.isEmpty {
+                                                notesText = notes
+                                            }
+                                            showingAcceptSheet = true
+                                        }
+                                    } catch {
+                                        print("❌ [获取邀请信息] 失败: \(error.localizedDescription)")
+                                        await MainActor.run {
+                                            showingAcceptSheet = true
+                                        }
+                                    }
+                                }
                             }) {
                                 Text("Accept")
                                     .font(.system(size: 14, weight: .semibold))
@@ -4119,9 +4184,13 @@ struct AcceptInvitationSheet: View {
                                     .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                             }
                             
-                            Text("Schedule Your Coffee Chat")
+                            Text("Review & Confirm")
                                 .font(.system(size: 22, weight: .semibold))
                                 .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            
+                            Text("You can modify the details below")
+                                .font(.system(size: 14, weight: .regular))
+                                .foregroundColor(Color(red: 0.5, green: 0.4, blue: 0.3))
                         }
                         .padding(.top, 20)
                         
@@ -4288,6 +4357,230 @@ struct AcceptInvitationSheet: View {
                             showingLocationError = true
                         } else {
                         onAccept()
+                        }
+                    }
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                }
+            }
+            .alert("Notice", isPresented: $showingLocationError) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("Location cannot be empty. Please enter a location.")
+            }
+        }
+    }
+}
+
+// MARK: - Send Invitation Sheet
+struct SendInvitationSheet: View {
+    @Binding var selectedDate: Date
+    @Binding var locationText: String
+    @Binding var notesText: String
+    let onSend: () -> Void
+    let onCancel: () -> Void
+    @State private var showingLocationError = false
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                // 背景
+                Color(red: 0.98, green: 0.97, blue: 0.95)
+                    .ignoresSafeArea()
+                
+                ScrollView {
+                    VStack(spacing: 24) {
+                        // 顶部装饰图标
+                        VStack(spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [
+                                                Color(red: 0.9, green: 0.85, blue: 0.8),
+                                                Color(red: 0.85, green: 0.8, blue: 0.75)
+                                            ],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 80, height: 80)
+                                    .shadow(color: Color(red: 0.6, green: 0.45, blue: 0.3).opacity(0.2), radius: 8, x: 0, y: 4)
+                                
+                                Image(systemName: "calendar.badge.plus")
+                                    .font(.system(size: 35, weight: .medium))
+                                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            }
+                            
+                            Text("Schedule Coffee Chat")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                        }
+                        .padding(.top, 20)
+                        
+                        // 表单卡片
+                        VStack(alignment: .leading, spacing: 20) {
+                            // Date & Time
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "clock.fill")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                    
+                                    Text("Date & Time")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                }
+                                
+                                DatePicker("", selection: $selectedDate, displayedComponents: [.date, .hourAndMinute])
+                                    .datePickerStyle(.compact)
+                                    .labelsHidden()
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color(red: 0.98, green: 0.96, blue: 0.94))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(
+                                                LinearGradient(
+                                                    colors: [
+                                                        Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.5),
+                                                        Color(red: 0.85, green: 0.8, blue: 0.75).opacity(0.3)
+                                                    ],
+                                                    startPoint: .leading,
+                                                    endPoint: .trailing
+                                                ),
+                                                lineWidth: 1
+                                            )
+                                    )
+                            }
+                            
+                            // Location
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "mappin.circle.fill")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                    
+                                    Text("Location")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                }
+                                
+                                TextField("Enter location", text: $locationText)
+                                    .font(.system(size: 16))
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 14)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color(red: 0.98, green: 0.96, blue: 0.94))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(
+                                                LinearGradient(
+                                                    colors: [
+                                                        Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.5),
+                                                        Color(red: 0.85, green: 0.8, blue: 0.75).opacity(0.3)
+                                                    ],
+                                                    startPoint: .leading,
+                                                    endPoint: .trailing
+                                                ),
+                                                lineWidth: 1
+                                            )
+                                    )
+                            }
+                            
+                            // Notes
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "note.text")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                    
+                                    Text("Notes (Optional)")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                }
+                                
+                                TextField("Add any notes...", text: $notesText, axis: .vertical)
+                                    .font(.system(size: 16))
+                                    .lineLimit(3...6)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 14)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color(red: 0.98, green: 0.96, blue: 0.94))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(
+                                                LinearGradient(
+                                                    colors: [
+                                                        Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.5),
+                                                        Color(red: 0.85, green: 0.8, blue: 0.75).opacity(0.3)
+                                                    ],
+                                                    startPoint: .leading,
+                                                    endPoint: .trailing
+                                                ),
+                                                lineWidth: 1
+                                            )
+                                    )
+                            }
+                        }
+                        .padding(24)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.white,
+                                            Color(red: 0.99, green: 0.98, blue: 0.97)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .shadow(color: Color(red: 0.4, green: 0.3, blue: 0.2).opacity(0.12), radius: 12, x: 0, y: 6)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20)
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 0.95, green: 0.92, blue: 0.88).opacity(0.6),
+                                            Color(red: 0.9, green: 0.85, blue: 0.8).opacity(0.3)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1.5
+                                )
+                        )
+                        .padding(.horizontal, 20)
+                    }
+                    .padding(.bottom, 30)
+                }
+            }
+            .navigationTitle("Send Invitation")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        onCancel()
+                    }
+                    .foregroundColor(Color(red: 0.5, green: 0.4, blue: 0.3))
+                    .font(.system(size: 16, weight: .medium))
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Send") {
+                        // 验证必填字段
+                        if locationText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            showingLocationError = true
+                        } else {
+                            onSend()
                         }
                     }
                     .font(.system(size: 16, weight: .semibold))

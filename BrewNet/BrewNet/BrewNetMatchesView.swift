@@ -1756,19 +1756,25 @@ struct BrewNetMatchesView: View {
                     WorkExperience(
                         companyName: "Google",
                         startYear: 2021,
+                        startMonth: nil,
                         endYear: nil,
+                        endMonth: nil,
                         position: "Senior Product Designer"
                     ),
                     WorkExperience(
                         companyName: "Adobe",
                         startYear: 2020,
+                        startMonth: nil,
                         endYear: 2021,
+                        endMonth: nil,
                         position: "Product Designer"
                     ),
                     WorkExperience(
                         companyName: "StartupCo",
                         startYear: 2018,
+                        startMonth: nil,
                         endYear: 2020,
+                        endMonth: nil,
                         position: "UX Designer"
                     )
                 ]
@@ -1846,13 +1852,17 @@ struct BrewNetMatchesView: View {
                     WorkExperience(
                         companyName: "StartupXYZ",
                         startYear: 2020,
+                        startMonth: nil,
                         endYear: nil,
+                        endMonth: nil,
                         position: "Software Engineer"
                     ),
                     WorkExperience(
                         companyName: "TechCorp",
                         startYear: 2019,
+                        startMonth: nil,
                         endYear: 2020,
+                        endMonth: nil,
                         position: "Junior Developer"
                     )
                 ]
@@ -2398,16 +2408,7 @@ struct MatchFilterView: View {
                                 )
                             }
                             
-                            // 2. Career Stage (单选) - 关联Experience Level
-                            FilterSection(title: "Career Stage") {
-                                SingleSelectFilter(
-                                    options: CareerStage.allCases,
-                                    selected: $filter.careerStage,
-                                    displayName: { $0.displayName }
-                                )
-                            }
-                            
-                            // 3. Years of Experience Range - 关联Experience Level [PRO ONLY]
+                            // 2. Years of Experience Range - 关联Experience Level [PRO ONLY]
                             FilterSection(title: "Years of Experience", isProOnly: !(authManager.currentUser?.isProActive ?? false)) {
                                 ExperienceRangeFilter(
                                     minYears: $filter.minYearsOfExperience
