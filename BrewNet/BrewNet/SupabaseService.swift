@@ -366,6 +366,19 @@ class SupabaseService: ObservableObject {
             .update(["last_login_at": ISO8601DateFormatter().string(from: Date())])
             .eq("id", value: userId)
             .execute()
+
+        // 记录用户活动并更新行为指标
+        Task {
+            do {
+                try await recordUserActivityAndUpdateMetrics(
+                    userId: userId,
+                    activityType: "login",
+                    profile: nil
+                )
+            } catch {
+                print("⚠️ Failed to record login activity: \(error.localizedDescription)")
+            }
+        }
     }
     
     /// 更新用户的实时GPS位置
@@ -1128,14 +1141,42 @@ class SupabaseService: ObservableObject {
             
             if profiles.isEmpty {
                 throw ProfileError.updateFailed("No profile found with ID: \(profileId)")
-            } else if profiles.count == 1 {
+            } else             if profiles.count == 1 {
                 let updatedProfile = profiles.first!
                 print("✅ Profile updated successfully via SDK: \(updatedProfile.id)")
+
+                // 记录用户活动并更新行为指标
+                Task {
+                    do {
+                        try await recordUserActivityAndUpdateMetrics(
+                            userId: updatedProfile.userId,
+                            activityType: "update_profile",
+                            profile: updatedProfile.toBrewNetProfile()
+                        )
+                    } catch {
+                        print("⚠️ Failed to record profile update activity: \(error.localizedDescription)")
+                    }
+                }
+
                 return updatedProfile
             } else {
                 print("⚠️ Multiple profiles updated, returning the first one")
                 let updatedProfile = profiles.first!
                 print("✅ Profile updated successfully via SDK: \(updatedProfile.id)")
+
+                // 记录用户活动并更新行为指标
+                Task {
+                    do {
+                        try await recordUserActivityAndUpdateMetrics(
+                            userId: updatedProfile.userId,
+                            activityType: "update_profile",
+                            profile: updatedProfile.toBrewNetProfile()
+                        )
+                    } catch {
+                        print("⚠️ Failed to record profile update activity: \(error.localizedDescription)")
+                    }
+                }
+
                 return updatedProfile
             }
             
@@ -2162,7 +2203,20 @@ class SupabaseService: ObservableObject {
         let data = response.data
         let updatedInvitation = try JSONDecoder().decode(SupabaseInvitation.self, from: data)
         print("✅ Invitation accepted successfully")
-        
+
+        // 记录用户活动并更新行为指标
+        Task {
+            do {
+                try await recordUserActivityAndUpdateMetrics(
+                    userId: userId,
+                    activityType: "accept_invitation",
+                    profile: nil
+                )
+            } catch {
+                print("⚠️ Failed to record accept invitation activity: \(error.localizedDescription)")
+            }
+        }
+
         // 触发器会自动创建匹配记录，这里不需要手动创建
         return updatedInvitation
     }
@@ -2304,6 +2358,20 @@ class SupabaseService: ObservableObject {
         let data = response.data
         let createdMatch = try JSONDecoder().decode(SupabaseMatch.self, from: data)
         print("✅ Match created successfully: \(createdMatch.id)")
+
+        // 记录用户活动并更新行为指标
+        Task {
+            do {
+                try await recordUserActivityAndUpdateMetrics(
+                    userId: userId,
+                    activityType: "create_match",
+                    profile: nil
+                )
+            } catch {
+                print("⚠️ Failed to record create match activity: \(error.localizedDescription)")
+            }
+        }
+
         return createdMatch
     }
     
@@ -2519,6 +2587,20 @@ class SupabaseService: ObservableObject {
         let data = response.data
         let createdMessage = try JSONDecoder().decode(SupabaseMessage.self, from: data)
         print("✅ Message sent successfully: \(createdMessage.id)")
+
+        // 记录用户活动并更新行为指标
+        Task {
+            do {
+                try await recordUserActivityAndUpdateMetrics(
+                    userId: senderId,
+                    activityType: "send_message",
+                    profile: nil // 可以后续传递用户资料以获得更准确的指标计算
+                )
+            } catch {
+                print("⚠️ Failed to record send message activity: \(error.localizedDescription)")
+            }
+        }
+
         return createdMessage
     }
     
@@ -5415,6 +5497,168 @@ extension SupabaseService {
         
         print("✅ [Verify] Found \(verifiedUserIds.count) verified users")
         return verifiedUserIds
+    }
+
+    // MARK: - Behavioral Metrics
+
+    /// 获取用户的行为指标
+    func getUserBehavioralMetrics(userId: String) async throws -> (activity: Int, connect: Int, mentor: Int) {
+        let response = try await client
+            .from("user_features")
+            .select("activity_score, connect_score, mentor_score")
+            .eq("user_id", userId)
+            .single()
+            .execute()
+
+        struct BehavioralScores: Codable {
+            let activity_score: Int
+            let connect_score: Int
+            let mentor_score: Int
+        }
+
+        let scores = try JSONDecoder().decode(BehavioralScores.self, from: response.data)
+        return (scores.activity_score, scores.connect_score, scores.mentor_score)
+    }
+
+    /// 更新用户的行为指标
+    func updateUserBehavioralMetrics(
+        userId: String,
+        activityScore: Int,
+        connectScore: Int,
+        mentorScore: Int,
+        sessions7d: Int,
+        messagesSent7d: Int,
+        matches7d: Int,
+        lastActiveAt: Date = Date()
+    ) async throws {
+        let updateData: [String: AnyEncodableValue] = [
+            "activity_score": .int(activityScore),
+            "connect_score": .int(connectScore),
+            "mentor_score": .int(mentorScore),
+            "sessions_7d": .int(sessions7d),
+            "messages_sent_7d": .int(messagesSent7d),
+            "matches_7d": .int(matches7d),
+            "last_active_at": .string(lastActiveAt.ISO8601Format()),
+            "updated_at": .string(Date().ISO8601Format())
+        ]
+
+        try await client
+            .from("user_features")
+            .update(updateData)
+            .eq("user_id", userId)
+            .execute()
+    }
+
+    /// 记录用户活动并更新行为指标
+    func recordUserActivityAndUpdateMetrics(
+        userId: String,
+        activityType: String,
+        profile: BrewNetProfile? = nil
+    ) async throws {
+        // 更新最后活跃时间
+        let updateData: [String: AnyEncodableValue] = [
+            "last_active_at": .string(Date().ISO8601Format()),
+            "updated_at": .string(Date().ISO8601Format())
+        ]
+
+        try await client
+            .from("user_features")
+            .update(updateData)
+            .eq("user_id", userId)
+            .execute()
+
+        // 如果有BehavioralMetricsService，触发行为指标重新计算
+        if let behavioralService = self.databaseManager?.behavioralMetricsService {
+            Task {
+                do {
+                    _ = try await behavioralService.calculateAndUpdateBehavioralMetrics(
+                        userId: userId,
+                        profile: profile
+                    )
+                } catch {
+                    print("⚠️ Failed to update behavioral metrics after activity: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    /// 获取用户推荐候选池（基于行为指标过滤）
+    func getRecommendedProfilesWithBehavioralFilter(
+        userId: String,
+        minConnectScore: Int = 3,
+        minActivityScore: Int = 2,
+        limit: Int = 20,
+        offset: Int = 0
+    ) async throws -> ([SupabaseProfile], totalInBatch: Int, filteredCount: Int) {
+
+        print("🔍 Getting recommended profiles with behavioral filter (connect>=\(minConnectScore), activity>=\(minActivityScore))")
+
+        // 首先获取基础推荐用户
+        let (profiles, totalInBatch, _) = try await getRecommendedProfiles(
+            userId: userId,
+            limit: limit * 3, // 获取更多候选以便过滤
+            offset: offset
+        )
+
+        // 过滤掉不符合行为指标的用户
+        var filteredProfiles: [SupabaseProfile] = []
+        var processedCount = 0
+
+        for profile in profiles {
+            processedCount += 1
+
+            do {
+                let metrics = try await getUserBehavioralMetrics(userId: profile.userId)
+
+                // 检查是否满足最低行为指标要求
+                if metrics.connect >= minConnectScore && metrics.activity >= minActivityScore {
+                    filteredProfiles.append(profile)
+                }
+
+                // 如果已收集到足够用户，停止处理
+                if filteredProfiles.count >= limit {
+                    break
+                }
+
+            } catch {
+                // 如果获取行为指标失败，使用默认中等分数
+                print("⚠️ Failed to get behavioral metrics for user \(profile.userId), using defaults")
+                filteredProfiles.append(profile)
+            }
+        }
+
+        print("✅ Filtered \(processedCount) profiles, kept \(filteredProfiles.count) based on behavioral criteria")
+
+        return (filteredProfiles, totalInBatch, processedCount)
+    }
+
+    /// 获取导师推荐（基于导师潜力分数）
+    func getMentorRecommendations(
+        userId: String,
+        minMentorScore: Int = 6,
+        limit: Int = 10
+    ) async throws -> [SupabaseProfile] {
+
+        print("🔍 Getting mentor recommendations (mentor_score>=\(minMentorScore))")
+
+        // 获取有learn意向的用户作为导师候选
+        let response = try await client
+            .from("user_features")
+            .select("""
+                user_id, mentor_score, skills_to_teach,
+                profiles!inner(user_id, core_identity, professional_background, networking_intention)
+            """)
+            .neq("user_id", userId) // 排除自己
+            .gte("mentor_score", minMentorScore)
+            .not("skills_to_teach", "is", "null")
+            .limit(limit)
+            .execute()
+
+        let profiles = try JSONDecoder().decode([SupabaseProfile].self, from: response.data)
+
+        print("✅ Found \(profiles.count) mentor candidates")
+
+        return profiles
     }
 }
 

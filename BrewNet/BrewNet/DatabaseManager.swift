@@ -23,6 +23,9 @@ class DatabaseManager: ObservableObject {
     
     // MARK: - Supabase Service
     private let supabaseService = SupabaseService.shared
+
+    // MARK: - Behavioral Metrics Service
+    let behavioralMetricsService = BehavioralMetricsService.shared
     
     // MARK: - Sync Configuration
     @Published var syncMode: SyncMode = .hybrid
@@ -38,7 +41,10 @@ class DatabaseManager: ObservableObject {
     private init() {
         // Start network monitoring
         supabaseService.startNetworkMonitoring()
-        
+
+        // Set up BehavioralMetricsService dependencies
+        behavioralMetricsService.setDependencies(supabaseService: supabaseService)
+
         // Listen for network status changes
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("NetworkStatusChanged"),

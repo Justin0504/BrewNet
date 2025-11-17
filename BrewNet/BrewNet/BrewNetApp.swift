@@ -48,6 +48,8 @@ struct BrewNetApp: App {
         supabaseService.setDependencies(databaseManager: databaseManager)
         print("🔧 2. 设置 AuthManager 依赖...")
         authManager.setDependencies(databaseManager: databaseManager, supabaseService: supabaseService)
+        print("🔧 3. 设置 BehavioralMetricsService 依赖...")
+        databaseManager.behavioralMetricsService.setDependencies(supabaseService: supabaseService)
         
         print("✅ 依赖关系设置完成")
         print("📊 DatabaseManager: \(databaseManager)")
