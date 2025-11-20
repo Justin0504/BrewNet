@@ -24,8 +24,10 @@ class DatabaseManager: ObservableObject {
     // MARK: - Supabase Service
     private let supabaseService = SupabaseService.shared
 
-    // MARK: - Behavioral Metrics Service
-    let behavioralMetricsService = BehavioralMetricsService.shared
+    // MARK: - Behavioral Metrics Service (已禁用)
+    // 注：BehavioralMetricsService 因兼容性问题暂时禁用
+    // 行为量化指标功能将通过 UserTowerFeatures.behavioralMetrics 访问
+    // let behavioralMetricsService = BehavioralMetricsService.shared
     
     // MARK: - Sync Configuration
     @Published var syncMode: SyncMode = .hybrid
@@ -42,8 +44,8 @@ class DatabaseManager: ObservableObject {
         // Start network monitoring
         supabaseService.startNetworkMonitoring()
 
-        // Set up BehavioralMetricsService dependencies
-        behavioralMetricsService.setDependencies(supabaseService: supabaseService)
+        // Set up BehavioralMetricsService dependencies (已禁用)
+        // behavioralMetricsService.setDependencies(supabaseService: supabaseService)
 
         // Listen for network status changes
         NotificationCenter.default.addObserver(

@@ -109,32 +109,33 @@ struct MainView: View {
         // 在后台预加载推荐用户和行为量化指标
         Task {
             do {
-                // 并行执行推荐数据预加载和行为指标计算
+                // 并行执行推荐数据预加载（行为指标计算已禁用）
                 async let recommendationsTask = supabaseService.getRecommendedProfiles(
                     userId: currentUser.id,
                     limit: 20,
                     offset: 0
                 )
 
-                async let behavioralMetricsTask = databaseManager.behavioralMetricsService.calculateAllActiveUsersBehavioralMetrics()
+                // 注：BehavioralMetricsService 因兼容性问题暂时禁用
+                // async let behavioralMetricsTask = databaseManager.behavioralMetricsService.calculateAllActiveUsersBehavioralMetrics()
 
                 // 等待推荐数据加载完成
                 let (profiles, _, _) = try await recommendationsTask
-                let behavioralResult = try await behavioralMetricsTask
+                // let behavioralResult = try await behavioralMetricsTask
 
                 // 数据加载成功，标记为已预加载
                 // 实际的数据会在 MatchesView 的 onAppear 中使用缓存
                 await MainActor.run {
                     profilesPreloaded = true
                     print("✅ Preloaded \(profiles.count) profiles for Matches tab")
-                    print("✅ Behavioral metrics calculated for active users")
+                    // print("✅ Behavioral metrics calculated for active users")
                 }
             } catch {
-                print("⚠️ Failed to preload profiles or behavioral metrics: \(error.localizedDescription)")
-                // 即使行为指标计算失败，也要设置预加载标志以避免阻塞UI
+                print("⚠️ Failed to preload profiles: \(error.localizedDescription)")
+                // 即使预加载失败，也要设置预加载标志以避免阻塞UI
                 await MainActor.run {
                     profilesPreloaded = true
-                    print("⚠️ Profiles preloaded but behavioral metrics failed")
+                    print("⚠️ Profiles preload failed but continuing")
                 }
             }
         }

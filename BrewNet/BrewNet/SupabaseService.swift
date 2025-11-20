@@ -5506,7 +5506,7 @@ extension SupabaseService {
         let response = try await client
             .from("user_features")
             .select("activity_score, connect_score, mentor_score")
-            .eq("user_id", userId)
+            .eq("user_id", value: userId)
             .single()
             .execute()
 
@@ -5531,21 +5531,32 @@ extension SupabaseService {
         matches7d: Int,
         lastActiveAt: Date = Date()
     ) async throws {
-        let updateData: [String: AnyEncodableValue] = [
-            "activity_score": .int(activityScore),
-            "connect_score": .int(connectScore),
-            "mentor_score": .int(mentorScore),
-            "sessions_7d": .int(sessions7d),
-            "messages_sent_7d": .int(messagesSent7d),
-            "matches_7d": .int(matches7d),
-            "last_active_at": .string(lastActiveAt.ISO8601Format()),
-            "updated_at": .string(Date().ISO8601Format())
-        ]
+        struct BehavioralMetricsUpdate: Encodable {
+            let activity_score: Int
+            let connect_score: Int
+            let mentor_score: Int
+            let sessions_7d: Int
+            let messages_sent_7d: Int
+            let matches_7d: Int
+            let last_active_at: String
+            let updated_at: String
+        }
+        
+        let updateData = BehavioralMetricsUpdate(
+            activity_score: activityScore,
+            connect_score: connectScore,
+            mentor_score: mentorScore,
+            sessions_7d: sessions7d,
+            messages_sent_7d: messagesSent7d,
+            matches_7d: matches7d,
+            last_active_at: lastActiveAt.ISO8601Format(),
+            updated_at: Date().ISO8601Format()
+        )
 
         try await client
             .from("user_features")
             .update(updateData)
-            .eq("user_id", userId)
+            .eq("user_id", value: userId)
             .execute()
     }
 
@@ -5555,19 +5566,27 @@ extension SupabaseService {
         activityType: String,
         profile: BrewNetProfile? = nil
     ) async throws {
+        struct ActivityUpdate: Encodable {
+            let last_active_at: String
+            let updated_at: String
+        }
+        
         // 更新最后活跃时间
-        let updateData: [String: AnyEncodableValue] = [
-            "last_active_at": .string(Date().ISO8601Format()),
-            "updated_at": .string(Date().ISO8601Format())
-        ]
+        let updateData = ActivityUpdate(
+            last_active_at: Date().ISO8601Format(),
+            updated_at: Date().ISO8601Format()
+        )
 
         try await client
             .from("user_features")
             .update(updateData)
-            .eq("user_id", userId)
+            .eq("user_id", value: userId)
             .execute()
 
-        // 如果有BehavioralMetricsService，触发行为指标重新计算
+        // 如果有BehavioralMetricsService，触发行为指标重新计算（已禁用）
+        // 注：BehavioralMetricsService 因兼容性问题暂时禁用
+        // 行为量化指标功能将通过其他方式实现
+        /*
         if let behavioralService = self.databaseManager?.behavioralMetricsService {
             Task {
                 do {
@@ -5580,6 +5599,7 @@ extension SupabaseService {
                 }
             }
         }
+        */
     }
 
     /// 获取用户推荐候选池（基于行为指标过滤）
@@ -5648,9 +5668,9 @@ extension SupabaseService {
                 user_id, mentor_score, skills_to_teach,
                 profiles!inner(user_id, core_identity, professional_background, networking_intention)
             """)
-            .neq("user_id", userId) // 排除自己
-            .gte("mentor_score", minMentorScore)
-            .not("skills_to_teach", "is", "null")
+            .neq("user_id", value: userId) // 排除自己
+            .gte("mentor_score", value: minMentorScore)
+            .not("skills_to_teach", operator: .is, value: "null")
             .limit(limit)
             .execute()
 

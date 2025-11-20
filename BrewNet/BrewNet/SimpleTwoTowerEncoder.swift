@@ -268,10 +268,13 @@ class SimpleTwoTowerEncoder {
     ) -> [(userId: String, score: Double, profile: BrewNetProfile)] {
 
         let reRankedResults = recommendations.map { result in
+            // 从 profile 创建 UserTowerFeatures 来获取行为指标
+            let features = UserTowerFeatures.from(result.profile)
+            
             // 获取用户的行为指标（如果没有则使用默认值5）
-            let activityScore = Double(result.profile.userFeatures?.behavioralMetrics?.activityScore ?? 5) / 10.0
-            let connectScore = Double(result.profile.userFeatures?.behavioralMetrics?.connectScore ?? 5) / 10.0
-            let mentorScore = Double(result.profile.userFeatures?.behavioralMetrics?.mentorScore ?? 5) / 10.0
+            let activityScore = Double(features.behavioralMetrics?.activityScore ?? 5) / 10.0
+            let connectScore = Double(features.behavioralMetrics?.connectScore ?? 5) / 10.0
+            let mentorScore = Double(features.behavioralMetrics?.mentorScore ?? 5) / 10.0
 
             // 计算综合行为分数
             let behaviorScore = beta1 * activityScore + beta2 * connectScore + beta3 * mentorScore
@@ -289,22 +292,22 @@ class SimpleTwoTowerEncoder {
     /// 获取冷启动推荐（基于行为指标和资料完整度）
     /// - Parameters:
     ///   - userId: 当前用户ID
-    ///   - candidates: 候选用户列表
+    ///   - candidates: 候选用户列表 (userId, features)
     ///   - limit: 返回数量
     /// - Returns: 冷启动推荐结果
     static func getColdStartRecommendations(
         userId: String,
-        candidates: [UserTowerFeatures],
+        candidates: [(userId: String, features: UserTowerFeatures)],
         limit: Int = 20
     ) -> [(userId: String, score: Double)] {
 
         let scoredCandidates = candidates.map { candidate -> (userId: String, score: Double) in
             // 冷启动评分：行为指标(0.6) + 资料完整度(0.4)
-            let activityScore = Double(candidate.behavioralMetrics?.activityScore ?? 5) / 10.0
-            let connectScore = Double(candidate.behavioralMetrics?.connectScore ?? 5) / 10.0
+            let activityScore = Double(candidate.features.behavioralMetrics?.activityScore ?? 5) / 10.0
+            let connectScore = Double(candidate.features.behavioralMetrics?.connectScore ?? 5) / 10.0
             let behaviorScore = (activityScore + connectScore) / 2.0
 
-            let profileCompletion = candidate.profileCompletion
+            let profileCompletion = candidate.features.profileCompletion
 
             let finalScore = behaviorScore * 0.6 + profileCompletion * 0.4
 

@@ -26,20 +26,44 @@ struct UserBehavioralMetrics: Codable {
     // ========== 计算时间戳 ==========
     let calculatedAt: Date
 
+    enum CodingKeys: String, CodingKey {
+        case activityScore = "activity_score"
+        case connectScore = "connect_score"
+        case mentorScore = "mentor_score"
+        case sessions7d = "sessions_7d"
+        case messagesSent7d = "messages_sent_7d"
+        case matches7d = "matches_7d"
+        case lastActiveDays = "last_active_days"
+        case responseRate30d = "response_rate_30d"
+        case passRate = "pass_rate"
+        case avgResponseTimeHours = "avg_response_time_hours"
+        case profilePublicnessScore = "profile_publicness_score"
+        case pastMentorshipCount = "past_mentorship_count"
+        case isVerified = "is_verified"
+        case isProUser = "is_pro_user"
+        case seniorityLevel = "seniority_level"
+        case calculatedAt = "calculated_at"
+    }
+
     /// 标准化函数：将值映射到[0,1]区间
-    private static func normalize(_ value: Double, min: Double = 0.0, max: Double = 1.0) -> Double {
-        guard max > min else { return 0.5 }
-        return max(0.0, min(1.0, (value - min) / (max - min)))
+    private static func normalize(_ value: Double, minValue: Double = 0.0, maxValue: Double = 1.0) -> Double {
+        guard maxValue > minValue else { return 0.5 }
+        return max(0.0, min(1.0, (value - minValue) / (maxValue - minValue)))
     }
 
     /// 计算活跃度分数 (0-10)
     /// 衡量用户在平台上的参与强度
-    private func calculateActivityScore() -> Int {
+    private static func calculateActivityScore(
+        sessions7d: Int,
+        messagesSent7d: Int,
+        matches7d: Int,
+        lastActiveDays: Int
+    ) -> Int {
         // 归一化各项指标
-        let sessionsNorm = normalize(Double(sessions7d), min: 0, max: 20.0) // 假设最大20次会话
-        let messagesNorm = normalize(Double(messagesSent7d), min: 0, max: 50.0) // 假设最大50条消息
-        let matchesNorm = normalize(Double(matches7d), min: 0, max: 10.0) // 假设最大10个匹配
-        let recencyNorm = normalize(1.0 / (1.0 + Double(lastActiveDays)), min: 0, max: 1.0)
+        let sessionsNorm = Self.normalize(Double(sessions7d), minValue: 0, maxValue: 20.0)
+        let messagesNorm = Self.normalize(Double(messagesSent7d), minValue: 0, maxValue: 50.0)
+        let matchesNorm = Self.normalize(Double(matches7d), minValue: 0, maxValue: 10.0)
+        let recencyNorm = Self.normalize(1.0 / (1.0 + Double(lastActiveDays)), minValue: 0, maxValue: 1.0)
 
         // 加权合成 (权重: 0.3, 0.3, 0.2, 0.2)
         let activityRaw = 0.3 * sessionsNorm +
@@ -52,11 +76,17 @@ struct UserBehavioralMetrics: Codable {
 
     /// 计算连接意愿分数 (0-10)
     /// 表示用户愿意被他人接触的主观倾向
-    private func calculateConnectScore() -> Int {
+    private static func calculateConnectScore(
+        responseRate30d: Double,
+        passRate: Double,
+        avgResponseTimeHours: Double,
+        profilePublicnessScore: Double,
+        isProUser: Bool
+    ) -> Int {
         // 归一化各项指标
-        let responseRateNorm = normalize(responseRate30d, min: 0, max: 1.0)
-        let passRateNorm = normalize(passRate, min: 0, max: 1.0)
-        let responseTimeNorm = normalize(1.0 / (1.0 + avgResponseTimeHours), min: 0, max: 1.0)
+        let responseRateNorm = Self.normalize(responseRate30d, minValue: 0, maxValue: 1.0)
+        let passRateNorm = Self.normalize(passRate, minValue: 0, maxValue: 1.0)
+        let responseTimeNorm = Self.normalize(1.0 / (1.0 + avgResponseTimeHours), minValue: 0, maxValue: 1.0)
         let proBonus = isProUser ? 1.0 : 0.0
 
         // 加权合成 (权重: 0.35, 0.15, 0.15, 0.25, 0.10)
@@ -71,9 +101,14 @@ struct UserBehavioralMetrics: Codable {
 
     /// 计算导师潜力分数 (0-10)
     /// 衡量用户作为导师的可能性
-    private func calculateMentorScore() -> Int {
+    private static func calculateMentorScore(
+        activityScore: Int,
+        pastMentorshipCount: Int,
+        isVerified: Bool,
+        seniorityLevel: Double
+    ) -> Int {
         let verifiedBonus = isVerified ? 1.0 : 0.0
-        let mentorshipNorm = normalize(Double(pastMentorshipCount), min: 0, max: 20.0)
+        let mentorshipNorm = Self.normalize(Double(pastMentorshipCount), minValue: 0, maxValue: 20.0)
         let activityScoreNorm = Double(activityScore) / 10.0
 
         // 加权合成 (权重: 0.3, 0.25, 0.2, 0.15, 0.1)
@@ -84,6 +119,37 @@ struct UserBehavioralMetrics: Codable {
                        0.1 * 0.5 // 假设平均会话评分为0.5，可后续扩展
 
         return Int(round(mentorRaw * 10.0))
+    }
+
+    /// 自定义解码器 - 支持缺失字段使用默认值
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // 解码行为指标分数（可能缺失，使用默认值5）
+        self.activityScore = try container.decodeIfPresent(Int.self, forKey: .activityScore) ?? 5
+        self.connectScore = try container.decodeIfPresent(Int.self, forKey: .connectScore) ?? 5
+        self.mentorScore = try container.decodeIfPresent(Int.self, forKey: .mentorScore) ?? 5
+        
+        // 解码原始行为数据（可能缺失，使用默认值）
+        self.sessions7d = try container.decodeIfPresent(Int.self, forKey: .sessions7d) ?? 0
+        self.messagesSent7d = try container.decodeIfPresent(Int.self, forKey: .messagesSent7d) ?? 0
+        self.matches7d = try container.decodeIfPresent(Int.self, forKey: .matches7d) ?? 0
+        self.lastActiveDays = try container.decodeIfPresent(Int.self, forKey: .lastActiveDays) ?? 30
+        self.responseRate30d = try container.decodeIfPresent(Double.self, forKey: .responseRate30d) ?? 0.5
+        self.passRate = try container.decodeIfPresent(Double.self, forKey: .passRate) ?? 0.5
+        self.avgResponseTimeHours = try container.decodeIfPresent(Double.self, forKey: .avgResponseTimeHours) ?? 24.0
+        self.profilePublicnessScore = try container.decodeIfPresent(Double.self, forKey: .profilePublicnessScore) ?? 0.5
+        self.pastMentorshipCount = try container.decodeIfPresent(Int.self, forKey: .pastMentorshipCount) ?? 0
+        self.isVerified = try container.decodeIfPresent(Bool.self, forKey: .isVerified) ?? false
+        self.isProUser = try container.decodeIfPresent(Bool.self, forKey: .isProUser) ?? false
+        self.seniorityLevel = try container.decodeIfPresent(Double.self, forKey: .seniorityLevel) ?? 0.0
+        
+        // 解码计算时间戳
+        if let dateString = try? container.decode(String.self, forKey: .calculatedAt) {
+            self.calculatedAt = ISO8601DateFormatter().date(from: dateString) ?? Date()
+        } else {
+            self.calculatedAt = Date()
+        }
     }
 
     /// 从原始数据创建行为指标
@@ -116,10 +182,30 @@ struct UserBehavioralMetrics: Codable {
         self.seniorityLevel = seniorityLevel
         self.calculatedAt = calculatedAt
 
-        // 计算各项分数
-        self.activityScore = calculateActivityScore()
-        self.connectScore = calculateConnectScore()
-        self.mentorScore = calculateMentorScore()
+        // 计算各项分数（注意：mentorScore 依赖 activityScore，需先计算）
+        let computedActivityScore = Self.calculateActivityScore(
+            sessions7d: sessions7d,
+            messagesSent7d: messagesSent7d,
+            matches7d: matches7d,
+            lastActiveDays: lastActiveDays
+        )
+        
+        let computedConnectScore = Self.calculateConnectScore(
+            responseRate30d: responseRate30d,
+            passRate: passRate,
+            avgResponseTimeHours: avgResponseTimeHours,
+            profilePublicnessScore: profilePublicnessScore,
+            isProUser: isProUser
+        )
+        
+        self.activityScore = computedActivityScore
+        self.connectScore = computedConnectScore
+        self.mentorScore = Self.calculateMentorScore(
+            activityScore: computedActivityScore,
+            pastMentorshipCount: pastMentorshipCount,
+            isVerified: isVerified,
+            seniorityLevel: seniorityLevel
+        )
     }
 
     /// 从用户资料和行为数据创建指标
@@ -129,7 +215,8 @@ struct UserBehavioralMetrics: Codable {
         isProUser: Bool = false
     ) -> UserBehavioralMetrics {
         // 计算资历水平 (基于经验年限)
-        let seniorityLevel = normalize(min(Double(profile.professionalBackground.yearsOfExperience ?? 0), 20.0) / 20.0)
+        let expYears = min(Double(profile.professionalBackground.yearsOfExperience ?? 0), 20.0)
+        let seniorityLevel = Self.normalize(expYears / 20.0)
 
         // 计算资料公开度 (基于隐私设置)
         let profilePublicnessScore = calculateProfilePublicnessScore(profile: profile)
@@ -152,15 +239,30 @@ struct UserBehavioralMetrics: Codable {
 
     /// 计算资料公开度分数
     private static func calculateProfilePublicnessScore(profile: BrewNetProfile) -> Double {
-        // 基于隐私设置编码公开度
-        switch profile.privacyTrust.visibilitySettings {
-        case .public:
-            return 1.0
-        case .connectionsOnly:
-            return 0.6
-        case .private:
-            return 0.2
+        // 基于隐私设置编码公开度 - 计算所有字段的平均公开度
+        let settings = profile.privacyTrust.visibilitySettings
+        let visibilityLevels = [
+            settings.company,
+            settings.email,
+            settings.phoneNumber,
+            settings.location,
+            settings.skills,
+            settings.interests,
+            settings.timeslot
+        ]
+        
+        let scores = visibilityLevels.map { level -> Double in
+            switch level {
+            case .public_:
+                return 1.0
+            case .connectionsOnly:
+                return 0.6
+            case .private_:
+                return 0.2
+            }
         }
+        
+        return scores.reduce(0.0, +) / Double(scores.count)
     }
 
     /// 获取综合行为分数 (用于排序)

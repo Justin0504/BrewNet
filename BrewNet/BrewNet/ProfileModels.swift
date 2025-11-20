@@ -492,6 +492,44 @@ struct IndustrySelection: Codable, Equatable {
         case learnIn = "learn_in"
         case guideIn = "guide_in"
     }
+    
+    init(industryName: String, learnIn: Bool, guideIn: Bool) {
+        self.industryName = industryName
+        self.learnIn = learnIn
+        self.guideIn = guideIn
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        self.industryName = try container.decode(String.self, forKey: .industryName)
+        
+        // 灵活处理 learnIn：支持 Bool、Int (0/1)、String
+        if let boolValue = try? container.decode(Bool.self, forKey: .learnIn) {
+            self.learnIn = boolValue
+        } else if let intValue = try? container.decode(Int.self, forKey: .learnIn) {
+            self.learnIn = intValue != 0
+        } else if let doubleValue = try? container.decode(Double.self, forKey: .learnIn) {
+            self.learnIn = doubleValue != 0
+        } else if let stringValue = try? container.decode(String.self, forKey: .learnIn) {
+            self.learnIn = stringValue == "1" || stringValue.lowercased() == "true"
+        } else {
+            self.learnIn = false
+        }
+        
+        // 灵活处理 guideIn：支持 Bool、Int (0/1)、String
+        if let boolValue = try? container.decode(Bool.self, forKey: .guideIn) {
+            self.guideIn = boolValue
+        } else if let intValue = try? container.decode(Int.self, forKey: .guideIn) {
+            self.guideIn = intValue != 0
+        } else if let doubleValue = try? container.decode(Double.self, forKey: .guideIn) {
+            self.guideIn = doubleValue != 0
+        } else if let stringValue = try? container.decode(String.self, forKey: .guideIn) {
+            self.guideIn = stringValue == "1" || stringValue.lowercased() == "true"
+        } else {
+            self.guideIn = false
+        }
+    }
 }
 
 // Available Timeslot Matrix (Sunday-Saturday × Morning/Noon/Afternoon/Evening/Night)

@@ -261,7 +261,7 @@ class RecommendationService: ObservableObject {
         // 11. 缓存结果（确保只缓存推荐系统的结果）
         let userIds = behaviorallyRankedResults.map { $0.userId }
         let scores = behaviorallyRankedResults.map { $0.score }
-
+        
         // 验证结果：确保每个结果都有有效的分数和用户ID
         guard userIds.count == scores.count, !userIds.isEmpty else {
             print("⚠️ Invalid results for caching, skipping cache")
@@ -272,20 +272,20 @@ class RecommendationService: ObservableObject {
             userId: userId,
             recommendations: userIds,
             scores: scores,
-            modelVersion: "two_tower_behavioral_v1" // 更新版本号以标识包含行为指标的新算法
+            modelVersion: "two_tower_enhanced_v1" // 更新版本号以标识新算法
         )
-
-        print("💾 Cached \(userIds.count) behaviorally-ranked recommendations from Two-Tower system")
-
+        
+        print("💾 Cached \(userIds.count) recommendations from Two-Tower system")
+        
         print("✅ Recommendations generated: \(behaviorallyRankedResults.count) profiles (requested: \(limit))")
-
+        
         // 如果成功获取的profiles数量太少，给出警告
         if behaviorallyRankedResults.count < limit / 2 && behaviorallyRankedResults.count > 0 {
             print("⚠️ WARNING: Only \(behaviorallyRankedResults.count)/\(limit) profiles successfully loaded")
             print("   - Missing profiles: \(missingProfiles.count)")
             print("   - Decoding errors: \(decodingErrors.count)")
         }
-
+        
         if behaviorallyRankedResults.isEmpty {
             print("⚠️ WARNING: Recommendation system returned 0 profiles!")
             print("   - Requested: \(limit) profiles")
@@ -298,7 +298,7 @@ class RecommendationService: ObservableObject {
             print("     2. Profile decoding failed for all recommended users")
             print("     3. All profiles have incomplete/corrupted data in database")
         }
-
+        
         return behaviorallyRankedResults
     }
     
