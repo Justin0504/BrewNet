@@ -6,6 +6,8 @@ struct ExploreMainView: View {
     @EnvironmentObject var supabaseService: SupabaseService
     
     private let recommendationService = RecommendationService.shared
+    private let queryParser = QueryParser.shared
+    private let fieldAwareScoring = FieldAwareScoring()
     private let placeholderText = "alumni, works at a top tech company, three years of experience, open to mentoring"
     
     @State private var descriptionText: String = ""
@@ -21,6 +23,7 @@ struct ExploreMainView: View {
     @State private var selectedProfileForChat: BrewNetProfile?
     @State private var showSubscriptionPayment = false
     @State private var showingInviteLimitAlert = false
+    @State private var currentUserProfile: BrewNetProfile? = nil
     @FocusState private var textEditorFocused: Bool
     
     private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
@@ -115,10 +118,6 @@ struct ExploreMainView: View {
             Text("Headhunting")
                 .font(.system(size: 32, weight: .bold))
                 .foregroundColor(themeColor)
-            
-            Text("Describe who you wanna connect with—we'll comb the network and surface five people who fit that brief.")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.gray)
         }
     }
     
@@ -161,7 +160,7 @@ struct ExploreMainView: View {
         Button(action: runHeadhuntingSearch) {
             HStack {
                 Image(systemName: "sparkle.magnifyingglass")
-                Text(isLoading ? "Finding people..." : "Find Matches")
+                Text(isLoading ? "Headhunting..." : "Start Hunting")
                     .fontWeight(.bold)
             }
             .frame(maxWidth: .infinity)
@@ -253,14 +252,43 @@ struct ExploreMainView: View {
         textEditorFocused = false
         
         Task {
+            let searchStart = Date()
+            
             do {
+                // 获取当前用户的 profile（用于校友匹配）
+                if currentUserProfile == nil {
+                    if let supabaseProfile = try? await supabaseService.getProfile(userId: currentUser.id) {
+                        await MainActor.run {
+                            currentUserProfile = supabaseProfile.toBrewNetProfile()
+                        }
+                    }
+                }
+                
+                // ===== V2.0: NLP 增强 =====
+                // 1. 解析查询
+                let parsedQuery = queryParser.parse(trimmed)
+                print("\n📊 Query Analysis:")
+                print("  - Difficulty: \(parsedQuery.difficulty)")
+                print("  - Summary: \(parsedQuery.summary)")
+                
+                // 2. 获取推荐候选池（扩大到100人）
+                let step1 = Date()
                 let recommendations = try await recommendationService.getRecommendations(
                     for: currentUser.id,
-                    limit: 60,
+                    limit: 100,  // V2.0: 从60扩大到100
                     forceRefresh: true
                 )
+                print("  ⏱️  Recall: \(Date().timeIntervalSince(step1) * 1000)ms")
                 
-                let ranked = rankRecommendations(recommendations, query: trimmed)
+                // 3. V2.0 升级的排序逻辑
+                let step2 = Date()
+                let ranked = rankRecommendationsV2(
+                    recommendations, 
+                    parsedQuery: parsedQuery,
+                    currentUserProfile: currentUserProfile
+                )
+                print("  ⏱️  Ranking: \(Date().timeIntervalSince(step2) * 1000)ms")
+                
                 let topProfiles = Array(ranked.prefix(5))
                 let topIds = topProfiles.map { $0.userId }
                 
@@ -279,6 +307,9 @@ struct ExploreMainView: View {
                     print("⚠️ Headhunting: failed to fetch verification statuses: \(error.localizedDescription)")
                 }
                 
+                print("  ⏱️  Total time: \(Date().timeIntervalSince(searchStart) * 1000)ms")
+                print("  ✅ Top 5 selected from \(recommendations.count) candidates\n")
+                
                 await MainActor.run {
                     self.recommendedProfiles = topProfiles
                     self.proUserIds = fetchedProIds
@@ -296,10 +327,57 @@ struct ExploreMainView: View {
         }
     }
     
-    // MARK: - Ranking Logic
+    // MARK: - Ranking Logic V2.0
+    
+    /// V2.0 升级版排序逻辑（使用NLP增强）
+    private func rankRecommendationsV2(
+        _ recommendations: [(userId: String, score: Double, profile: BrewNetProfile)],
+        parsedQuery: ParsedQuery,
+        currentUserProfile: BrewNetProfile?
+    ) -> [BrewNetProfile] {
+        
+        guard !parsedQuery.tokens.isEmpty else {
+            return recommendations.map { $0.profile }
+        }
+        
+        // 动态权重调整
+        let weights = DynamicWeighting.adjustWeights(
+            for: parsedQuery.rawText,
+            parsedQuery: parsedQuery
+        )
+        
+        // 查询的概念标签
+        let queryConceptTags = ConceptTagger.mapQueryToConcepts(query: parsedQuery.rawText)
+        
+        let ranked = recommendations.map { item -> (profile: BrewNetProfile, score: Double) in
+            print("\n👤 Scoring: \(item.profile.coreIdentity.name)")
+            
+            // V2.0 升级的匹配分数
+            let matchScore = computeMatchScoreV2(
+                for: item.profile,
+                parsedQuery: parsedQuery,
+                currentUserProfile: currentUserProfile,
+                queryConceptTags: queryConceptTags
+            )
+            
+            // 动态权重混合
+            let blendedScore = (item.score * weights.recommendation) + (matchScore * weights.textMatch)
+            
+            print("  📊 Final: Rec(\(String(format: "%.2f", item.score))×\(String(format: "%.1f", weights.recommendation))) + Match(\(String(format: "%.2f", matchScore))×\(String(format: "%.1f", weights.textMatch))) = \(String(format: "%.2f", blendedScore))")
+            
+            return (profile: item.profile, score: blendedScore)
+        }
+        
+        return ranked
+            .sorted { $0.score > $1.score }
+            .map { $0.profile }
+    }
+    
+    /// V1.0 原始排序逻辑（保留作为备用）
     private func rankRecommendations(
         _ recommendations: [(userId: String, score: Double, profile: BrewNetProfile)],
-        query: String
+        query: String,
+        currentUserProfile: BrewNetProfile?
     ) -> [BrewNetProfile] {
         let tokens = tokenize(query)
         let numbers = extractNumbers(from: query)
@@ -309,7 +387,7 @@ struct ExploreMainView: View {
         }
         
         let ranked = recommendations.map { item -> (profile: BrewNetProfile, score: Double) in
-            let matchScore = computeMatchScore(for: item.profile, tokens: tokens, numbers: numbers)
+            let matchScore = computeMatchScore(for: item.profile, tokens: tokens, numbers: numbers, currentUserProfile: currentUserProfile)
             let blendedScore = (item.score * 0.3) + matchScore
             return (profile: item.profile, score: blendedScore)
         }
@@ -319,10 +397,96 @@ struct ExploreMainView: View {
             .map { $0.profile }
     }
     
+    // MARK: - Match Scoring V2.0
+    
+    /// V2.0 升级版匹配分数计算
+    private func computeMatchScoreV2(
+        for profile: BrewNetProfile,
+        parsedQuery: ParsedQuery,
+        currentUserProfile: BrewNetProfile?,
+        queryConceptTags: Set<ConceptTag>
+    ) -> Double {
+        var score: Double = 0.0
+        
+        // 1. 字段感知评分（替代简单的关键词匹配）
+        let fieldScore = fieldAwareScoring.computeScore(
+            profile: profile,
+            tokens: parsedQuery.tokens
+        )
+        score += fieldScore
+        
+        // 2. 实体匹配评分（精确匹配公司、职位、学校等）
+        let entityScore = fieldAwareScoring.computeEntityScore(
+            profile: profile,
+            entities: parsedQuery.entities
+        )
+        score += entityScore
+        
+        // 3. 概念标签匹配
+        let profileConceptTags = profile.conceptTags
+        let conceptScore = ConceptTagger.scoreConceptMatch(
+            profileTags: profileConceptTags,
+            queryTags: queryConceptTags
+        )
+        score += conceptScore
+        
+        // 4. 软年限匹配（使用高斯衰减）
+        if !parsedQuery.entities.numbers.isEmpty {
+            let expScore = SoftMatching.softExperienceMatch(
+                profile: profile,
+                targetYears: parsedQuery.entities.numbers
+            )
+            score += expScore
+        }
+        
+        // 5. Mentor/Mentoring 意图匹配
+        if parsedQuery.tokens.contains(where: { $0.contains("mentor") || $0.contains("mentoring") }) {
+            if profile.networkingIntention.selectedIntention == .learnGrow ||
+                profile.networkingIntention.selectedSubIntentions.contains(.skillDevelopment) ||
+                profile.networkingIntention.selectedSubIntentions.contains(.careerDirection) {
+                score += 1.5
+                print("  ✓ Mentor intention match (+1.5)")
+            }
+        }
+        
+        // 6. 校友匹配（增强版）
+        if parsedQuery.tokens.contains(where: { $0.contains("alum") }) {
+            let alumniScore = computeAlumniScore(
+                profile: profile,
+                parsedQuery: parsedQuery,
+                currentUserProfile: currentUserProfile
+            )
+            score += alumniScore
+        }
+        
+        // 7. Founder/Startup 匹配
+        if parsedQuery.tokens.contains(where: { $0.contains("founder") || $0.contains("startup") || $0.contains("entrepreneur") }) {
+            if profile.professionalBackground.careerStage == .founder ||
+                profile.networkingIntention.selectedIntention == .buildCollaborate {
+                score += 1.0
+                print("  ✓ Founder/Startup match (+1.0)")
+            }
+        }
+        
+        // 8. 否定词处理（降权）
+        for negation in parsedQuery.modifiers.negations {
+            let zonedText = ZonedSearchableText.from(profile: profile)
+            let allText = [zonedText.zoneA, zonedText.zoneB, zonedText.zoneC].joined(separator: " ")
+            if allText.contains(negation) {
+                score -= 2.0
+                print("  ⚠️ Negation match: '\(negation)' (-2.0)")
+            }
+        }
+        
+        return max(0.0, score)  // 确保分数不为负
+    }
+    
+    /// V1.0 原始匹配分数计算（保留作为备用）
     private func computeMatchScore(
         for profile: BrewNetProfile,
         tokens: [String],
-        numbers: [Double]
+        numbers: [Double],
+        currentUserProfile: BrewNetProfile?
     ) -> Double {
         var score: Double = 0.0
         let searchableText = aggregatedSearchableText(for: profile)
@@ -351,11 +515,35 @@ struct ExploreMainView: View {
             }
         }
         
-        if tokenSet.contains("alumni") {
+        // 校友匹配逻辑：如果查询包含 alumni/alum 相关词汇
+        if tokenSet.contains(where: { $0.contains("alum") }) {
+            // 基础分：有教育经历的用户
             if let educations = profile.professionalBackground.educations, !educations.isEmpty {
                 score += 1.0
             } else if profile.professionalBackground.education != nil {
                 score += 0.5
+            }
+            
+            // 校友加分：如果与当前用户来自同一所学校
+            if let currentUserProfile = currentUserProfile,
+               let currentUserEducations = currentUserProfile.professionalBackground.educations,
+               !currentUserEducations.isEmpty,
+               let targetEducations = profile.professionalBackground.educations,
+               !targetEducations.isEmpty {
+                
+                // 提取当前用户的学校名称集合（转为小写便于比较）
+                let currentUserSchools = Set(currentUserEducations.map { $0.schoolName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) })
+                
+                // 检查目标用户是否有匹配的学校
+                for targetEducation in targetEducations {
+                    let targetSchool = targetEducation.schoolName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                    if currentUserSchools.contains(targetSchool) {
+                        // 校友匹配！给予高额加分
+                        score += 5.0
+                        print("🎓 Alumni match found! School: \(targetEducation.schoolName)")
+                        break // 只要找到一个匹配的学校即可
+                    }
+                }
             }
         }
         
@@ -412,6 +600,82 @@ struct ExploreMainView: View {
             .joined(separator: " ")
             .lowercased()
     }
+    
+    // MARK: - 校友匹配增强
+    
+    /// 增强版校友匹配（支持精确和模糊匹配）
+    private func computeAlumniScore(
+        profile: BrewNetProfile,
+        parsedQuery: ParsedQuery,
+        currentUserProfile: BrewNetProfile?
+    ) -> Double {
+        var score: Double = 0.0
+        
+        // 基础分：有教育经历的用户
+        if let educations = profile.professionalBackground.educations, !educations.isEmpty {
+            score += 1.0
+        } else if profile.professionalBackground.education != nil {
+            score += 0.5
+        }
+        
+        // 校友加分：与当前用户同校
+        if let currentUserProfile = currentUserProfile,
+           let currentUserEducations = currentUserProfile.professionalBackground.educations,
+           !currentUserEducations.isEmpty,
+           let targetEducations = profile.professionalBackground.educations,
+           !targetEducations.isEmpty {
+            
+            // 提取当前用户的学校名称集合
+            let currentUserSchools = Set(currentUserEducations.map { 
+                $0.schoolName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) 
+            })
+            
+            // 检查是否同校（精确匹配）
+            for targetEducation in targetEducations {
+                let targetSchool = targetEducation.schoolName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                if currentUserSchools.contains(targetSchool) {
+                    // 精确同校匹配
+                    score += 5.0
+                    print("  🎓 Alumni match (exact): \(targetEducation.schoolName) (+5.0)")
+                    break
+                } else {
+                    // 模糊匹配（处理 "Stanford" vs "Stanford University"）
+                    for currentSchool in currentUserSchools {
+                        let similarity = SoftMatching.fuzzySimilarity(
+                            string1: currentSchool,
+                            string2: targetSchool
+                        )
+                        if similarity > 0.8 {
+                            score += 4.0
+                            print("  🎓 Alumni match (fuzzy): \(targetEducation.schoolName) ≈ \(currentSchool) (+4.0)")
+                            break
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 查询中指定学校（无需当前用户也是校友）
+        if !parsedQuery.entities.schools.isEmpty {
+            if let targetEducations = profile.professionalBackground.educations {
+                for targetEducation in targetEducations {
+                    let targetSchool = targetEducation.schoolName.lowercased()
+                    for querySchool in parsedQuery.entities.schools {
+                        if targetSchool.contains(querySchool) || querySchool.contains(targetSchool) {
+                            score += 2.0
+                            print("  🎓 School match: \(querySchool) (+2.0)")
+                            break
+                        }
+                    }
+                }
+            }
+        }
+        
+        return score
+    }
+    
+    // MARK: - Legacy Functions (V1.0)
     
     private func tokenize(_ text: String) -> [String] {
         text
@@ -565,7 +829,7 @@ struct HeadhuntingResultCard: View {
                 
                 Spacer()
                 
-                Text(profile.professionalBackground.careerStage.displayName)
+                Text(profile.professionalBackground.experienceLevel.displayName)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.gray)
             }
