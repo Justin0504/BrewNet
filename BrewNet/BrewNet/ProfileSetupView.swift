@@ -20,7 +20,7 @@ struct ProfileSetupView: View {
     @State private var contentHeight: CGFloat = 0
     @State private var scrollViewHeight: CGFloat = 0
     
-    private let totalSteps = 7
+    private let totalSteps = 8
     
     // MARK: - Computed Properties
     private var progressPercentage: Int {
@@ -274,17 +274,20 @@ struct ProfileSetupView: View {
                                                 NetworkingIntentionStep(profileData: $profileData)
                                                     .id("step-3")
                                             case 4:
-                                                NetworkingPreferencesStep(profileData: $profileData)
+                                                IndustryEditStep(profileData: $profileData)
                                                     .id("step-4")
                                             case 5:
-                                                PersonalitySocialStep(profileData: $profileData)
+                                                NetworkingPreferencesStep(profileData: $profileData)
                                                     .id("step-5")
                                             case 6:
-                                                WorkAndLifestylePhotosStep(profileData: $profileData)
+                                                PersonalitySocialStep(profileData: $profileData)
                                                     .id("step-6")
                                             case 7:
-                                                PrivacyTrustStep(profileData: $profileData)
+                                                WorkAndLifestylePhotosStep(profileData: $profileData)
                                                     .id("step-7")
+                                            case 8:
+                                                PrivacyTrustStep(profileData: $profileData)
+                                                    .id("step-8")
                                             default:
                                                 EmptyView()
                                             }
@@ -389,10 +392,11 @@ struct ProfileSetupView: View {
         case 1: return "Core Identity"
         case 2: return "Professional Background"
         case 3: return "Networking Intention"
-        case 4: return "Networking Preferences"
-        case 5: return "Personality & Social"
-        case 6: return "Work & Lifestyle Photos"
-        case 7: return "Privacy & Trust"
+        case 4: return "Industry Preferences"
+        case 5: return "Networking Preferences"
+        case 6: return "Personality & Social"
+        case 7: return "Work & Lifestyle Photos"
+        case 8: return "Privacy & Trust"
         default: return ""
         }
     }
@@ -402,10 +406,11 @@ struct ProfileSetupView: View {
         case 1: return "Tell us about yourself - the basics that help others connect with you"
         case 2: return "Share your professional experience and expertise"
         case 3: return "Define your networking goals and intentions"
-        case 4: return "Set your networking preferences and availability"
-        case 5: return "Show your personality and what makes you unique"
-        case 6: return "Share your work and lifestyle - up to 10 photos each"
-        case 7: return "Control your privacy and how others can discover you"
+        case 4: return "Select industries you're interested in for recommendations"
+        case 5: return "Set your networking preferences and availability"
+        case 6: return "Show your personality and what makes you unique"
+        case 7: return "Share your work and lifestyle - up to 10 photos each"
+        case 8: return "Control your privacy and how others can discover you"
         default: return ""
         }
     }
@@ -417,10 +422,10 @@ struct ProfileSetupView: View {
             guard let coreIdentity = profileData.coreIdentity else {
                 return "Please fill in all required fields: Name and Email are required."
             }
-            if coreIdentity.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if coreIdentity.name.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
                 return "Name is required. Please enter your full name."
             }
-            if coreIdentity.email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if coreIdentity.email.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
                 return "Email is required. Please enter your email address."
             }
             // Basic email validation
@@ -436,7 +441,7 @@ struct ProfileSetupView: View {
                 return "Please select your Industry (required field)."
             }
             if professionalBackground.industry == nil || professionalBackground.industry!.isEmpty {
-                return "Industry is required. Please select your industry."
+                return "Industry is required. Please select your industry category and subcategory."
             }
             return nil
             
@@ -451,7 +456,11 @@ struct ProfileSetupView: View {
             }
             return nil
             
-        case 4: // Networking Preferences
+        case 4: // Industry Preferences
+            // Industry preferences are optional, so no validation needed
+            return nil
+            
+        case 5: // Networking Preferences
             guard let networkingPreferences = profileData.networkingPreferences else {
                 return "Please set your networking preferences."
             }
@@ -459,15 +468,15 @@ struct ProfileSetupView: View {
             // This might not be required, but we can add validation if needed
             return nil
             
-        case 5: // Personality & Social
+        case 6: // Personality & Social
             // No required fields
             return nil
             
-        case 6: // Work & Lifestyle Photos
+        case 7: // Work & Lifestyle Photos
             // No required fields
             return nil
             
-        case 7: // Privacy & Trust
+        case 8: // Privacy & Trust
             // No required fields
             return nil
             
@@ -491,6 +500,32 @@ struct ProfileSetupView: View {
         
         Task {
             do {
+                // For step 4, force update industry preferences before saving
+                if currentStep == 4 {
+                    print("📋 Step 4: Forcing update of industry preferences before save...")
+                    // Post a notification to trigger update in IndustryEditStep
+                    await MainActor.run {
+                        NotificationCenter.default.post(name: NSNotification.Name("ForceUpdateIndustryPreferences"), object: nil)
+                    }
+                    
+                    // Wait a moment to ensure industry preferences are updated
+                    print("⏳ Waiting for industry preferences to update...")
+                    try await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+                    
+                    // Check if industry preferences were updated
+                    await MainActor.run {
+                        if let networkingIntention = self.profileData.networkingIntention {
+                            if let industryPrefs = networkingIntention.industryPreferences {
+                                print("✅ Industry preferences found: \(industryPrefs.selections.count) selections")
+                            } else {
+                                print("⚠️ Warning: networkingIntention exists but industryPreferences is nil")
+                            }
+                        } else {
+                            print("⚠️ Warning: networkingIntention is nil in profileData")
+                        }
+                    }
+                }
+                
                 // First, try to ensure the profiles table exists
                 do {
                     try await supabaseService.createProfilesTable()
@@ -507,12 +542,48 @@ struct ProfileSetupView: View {
                     // Update existing profile with current step data
                     print("🔄 Saving current step data to existing profile...")
                     
+                    // Merge networkingIntention properly to preserve industryPreferences
+                    let existingIntention = existing.networkingIntention
+                    
+                    // Get the latest profileData on main thread
+                    let currentProfileData = await MainActor.run {
+                        return self.profileData
+                    }
+                    
+                    let mergedNetworkingIntention: NetworkingIntention
+                    if let newIntention = currentProfileData.networkingIntention {
+                        // If new intention exists, merge it with existing, prioritizing new data
+                        // For step 4, always use new industryPreferences if it exists
+                        let finalIndustryPreferences: IndustryPreferencesData?
+                        if currentStep == 4, let newPrefs = newIntention.industryPreferences {
+                            finalIndustryPreferences = newPrefs
+                            print("💾 [Step 4] Using new industryPreferences: \(newPrefs.selections.count) selections")
+                        } else {
+                            finalIndustryPreferences = newIntention.industryPreferences ?? existingIntention.industryPreferences
+                        }
+                        
+                        mergedNetworkingIntention = NetworkingIntention(
+                            selectedIntention: newIntention.selectedIntention,
+                            additionalIntentions: newIntention.additionalIntentions,
+                            selectedSubIntentions: newIntention.selectedSubIntentions,
+                            careerDirection: newIntention.careerDirection ?? existingIntention.careerDirection,
+                            skillDevelopment: newIntention.skillDevelopment ?? existingIntention.skillDevelopment,
+                            industryTransition: newIntention.industryTransition ?? existingIntention.industryTransition,
+                            industryPreferences: finalIndustryPreferences
+                        )
+                        print("💾 Merged networkingIntention - industryPreferences count: \(mergedNetworkingIntention.industryPreferences?.selections.count ?? 0)")
+                    } else {
+                        // Use existing intention if no new one
+                        mergedNetworkingIntention = existingIntention
+                        print("💾 Using existing networkingIntention - industryPreferences count: \(mergedNetworkingIntention.industryPreferences?.selections.count ?? 0)")
+                    }
+                    
                     let updatedProfile = SupabaseProfile(
                         id: existing.id,
                         userId: existing.userId,
                         coreIdentity: profileData.coreIdentity ?? existing.coreIdentity,
                         professionalBackground: profileData.professionalBackground ?? existing.professionalBackground,
-                        networkingIntention: profileData.networkingIntention ?? existing.networkingIntention,
+                        networkingIntention: mergedNetworkingIntention,
                         networkingPreferences: profileData.networkingPreferences ?? existing.networkingPreferences,
                         personalitySocial: profileData.personalitySocial ?? existing.personalitySocial,
                         workPhotos: profileData.workPhotos ?? existing.workPhotos,
@@ -521,6 +592,13 @@ struct ProfileSetupView: View {
                         createdAt: existing.createdAt,
                         updatedAt: ISO8601DateFormatter().string(from: Date())
                     )
+                    
+                    // Log industry preferences before saving
+                    if let industryPrefs = updatedProfile.networkingIntention.industryPreferences {
+                        print("💾 Saving profile with \(industryPrefs.selections.count) industry preferences")
+                    } else {
+                        print("⚠️ Warning: No industry preferences in profile being saved")
+                    }
                     
                     supabaseProfile = try await supabaseService.updateProfile(profileId: existing.id, profile: updatedProfile)
                 } else {
@@ -561,10 +639,19 @@ struct ProfileSetupView: View {
                     profileData.workPhotos = supabaseProfile.workPhotos
                     profileData.lifestylePhotos = supabaseProfile.lifestylePhotos
                     profileData.privacyTrust = supabaseProfile.privacyTrust
-                    print("✅ Profile data reloaded from saved profile")
+                    
+                    // Verify industry preferences were reloaded
+                    if let reloadedPrefs = supabaseProfile.networkingIntention.industryPreferences {
+                        print("✅ Profile data reloaded with \(reloadedPrefs.selections.count) industry preferences")
+                    } else {
+                        print("⚠️ Warning: Reloaded profile has no industry preferences")
+                    }
                     
                     // 发送通知刷新 profile 数据
                     NotificationCenter.default.post(name: NSNotification.Name("ProfileUpdated"), object: nil)
+                    
+                    // Post notification to reload industry preferences
+                    NotificationCenter.default.post(name: NSNotification.Name("ProfileDataLoaded"), object: nil)
                     
                     // 直接关闭 edit profile 界面，不显示 Notice
                     print("✅ Profile saved successfully, closing edit profile view...")
@@ -766,65 +853,67 @@ struct ProfileSetupView: View {
         return updatedProfile
     }
     
-    private func showAlert(message: String) {
-        alertMessage = message
-        showAlert = true
-    }
-    
     // MARK: - Load Existing Profile Data
     private func loadExistingProfileData() {
         guard let currentUser = authManager.currentUser else {
-            print("❌ No current user found")
+            print("⚠️ No current user found, skipping profile load")
             return
         }
         
-        isLoadingExistingData = true
-        
         Task {
             do {
-                // Try to load existing profile from Supabase
-                if let existingProfile = try await supabaseService.getProfile(userId: currentUser.id) {
-                    print("✅ Found existing profile, loading data...")
-                    
-                    await MainActor.run {
-                        // 标记为编辑模式
-                        isEditingExistingProfile = true
+                isLoadingExistingData = true
+                print("📥 Loading existing profile data for user: \(currentUser.id)")
+                
+                let existingProfile = try await supabaseService.getProfile(userId: currentUser.id)
+                
+                await MainActor.run {
+                    if let profile = existingProfile {
+                        print("✅ Found existing profile, loading data...")
                         
                         // Convert SupabaseProfile to ProfileCreationData
-                        print("📥 Loading profile data from Supabase...")
-                        print("   Networking intention: \(existingProfile.networkingIntention.selectedIntention)")
-                        print("   Sub-intentions: \(existingProfile.networkingIntention.selectedSubIntentions.map { $0.rawValue })")
+                        profileData = ProfileCreationData(
+                            coreIdentity: profile.coreIdentity,
+                            professionalBackground: profile.professionalBackground,
+                            networkingIntention: profile.networkingIntention,
+                            networkingPreferences: profile.networkingPreferences,
+                            personalitySocial: profile.personalitySocial,
+                            workPhotos: profile.workPhotos,
+                            lifestylePhotos: profile.lifestylePhotos,
+                            privacyTrust: profile.privacyTrust
+                        )
                         
-                        profileData.coreIdentity = existingProfile.coreIdentity
-                        profileData.professionalBackground = existingProfile.professionalBackground
-                        profileData.networkingIntention = existingProfile.networkingIntention
-                        profileData.networkingPreferences = existingProfile.networkingPreferences
-                        profileData.personalitySocial = existingProfile.personalitySocial
-                        profileData.workPhotos = existingProfile.workPhotos
-                        profileData.lifestylePhotos = existingProfile.lifestylePhotos
-                        profileData.privacyTrust = existingProfile.privacyTrust
+                        // Log industry preferences if they exist
+                        if let industryPrefs = profile.networkingIntention.industryPreferences {
+                            print("✅ Loaded \(industryPrefs.selections.count) industry preferences from database")
+                            print("   Selections: \(industryPrefs.selections.map { "\($0.categoryName) > \($0.subcategoryName)" })")
+                        } else {
+                            print("ℹ️ No industry preferences found in existing profile")
+                        }
                         
-                        print("✅ Profile data loaded into profileData")
-                        print("   profileData.networkingIntention: \(profileData.networkingIntention?.selectedIntention ?? .buildCollaborate)")
-                        print("   profileData.networkingIntention.sub-intentions: \(profileData.networkingIntention?.selectedSubIntentions.map { $0.rawValue } ?? [])")
-                        
+                        isEditingExistingProfile = true
                         isLoadingExistingData = false
-                    }
-                } else {
-                    print("ℹ️ No existing profile found, starting fresh")
-                    await MainActor.run {
-                        isEditingExistingProfile = false
+                        
+                        // Notify that profile data has been loaded
+                        NotificationCenter.default.post(name: NSNotification.Name("ProfileDataLoaded"), object: nil)
+                    } else {
+                        print("ℹ️ No existing profile found, starting fresh")
                         isLoadingExistingData = false
                     }
                 }
             } catch {
-                print("❌ Failed to load existing profile: \(error.localizedDescription)")
                 await MainActor.run {
-                    isEditingExistingProfile = false
+                    print("⚠️ Failed to load existing profile: \(error.localizedDescription)")
                     isLoadingExistingData = false
+                    // Don't show error alert, just start fresh
                 }
             }
         }
+    }
+    
+    private func showAlert(message: String) {
+        alertMessage = message
+        showAlert = true
     }
 
 }
@@ -1375,7 +1464,9 @@ struct ProfessionalBackgroundStep: View {
     @Binding var profileData: ProfileCreationData
     @State private var currentCompany = ""
     @State private var jobTitle = ""
-    @State private var selectedIndustry: IndustryOption? = nil
+    @State private var selectedIndustry: IndustryOption? = nil // 保持向后兼容
+    @State private var selectedCategory: IndustryCategory? = nil // 一级分类
+    @State private var selectedSubcategory: String? = nil // 二级分类
     @State private var experienceLevel = ExperienceLevel.entry
     @State private var education = ""
     @State private var yearsOfExperience: Int? = nil
@@ -1413,22 +1504,24 @@ struct ProfessionalBackgroundStep: View {
                     .textFieldStyle(CustomTextFieldStyle())
             }
             
-            // Industry
-            VStack(alignment: .leading, spacing: 8) {
+            // Industry - 两级选择
+            VStack(alignment: .leading, spacing: 12) {
                 Text("Industry *")
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 
+                // 一级分类选择
                 Menu {
-                    ForEach(IndustryOption.allCases, id: \.self) { industry in
-                        Button(industry.displayName) {
-                            selectedIndustry = industry
+                    ForEach(IndustryData.categories, id: \.id) { category in
+                        Button(category.name) {
+                            selectedCategory = category
+                            selectedSubcategory = nil // 重置二级分类
                         }
                     }
                 } label: {
                     HStack {
-                        Text(selectedIndustry?.displayName ?? "Select your industry")
-                            .foregroundColor(selectedIndustry == nil ? .gray : .primary)
+                        Text(selectedCategory?.name ?? "Select category")
+                            .foregroundColor(selectedCategory == nil ? .gray : .primary)
                         Spacer()
                         Image(systemName: "chevron.down")
                             .foregroundColor(.gray)
@@ -1437,6 +1530,29 @@ struct ProfessionalBackgroundStep: View {
                     .padding(.vertical, 12)
                     .background(Color.gray.opacity(0.1))
                     .cornerRadius(8)
+                }
+                
+                // 二级分类选择（只有选择了一级分类后才显示）
+                if let category = selectedCategory {
+                    Menu {
+                        ForEach(category.subcategories, id: \.self) { subcategory in
+                            Button(subcategory) {
+                                selectedSubcategory = subcategory
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Text(selectedSubcategory ?? "Select subcategory")
+                                .foregroundColor(selectedSubcategory == nil ? .gray : .primary)
+                            Spacer()
+                            Image(systemName: "chevron.down")
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(8)
+                    }
                 }
             }
             
@@ -1602,7 +1718,35 @@ struct ProfessionalBackgroundStep: View {
             if let professionalBackground = profileData.professionalBackground {
                 currentCompany = professionalBackground.currentCompany ?? ""
                 jobTitle = professionalBackground.jobTitle ?? ""
-                selectedIndustry = IndustryOption.allCases.first { $0.rawValue == professionalBackground.industry }
+                
+                // 尝试从industry字段加载两级分类
+                if let industry = professionalBackground.industry {
+                    // 尝试解析格式 "一级分类 > 二级分类" 或只包含二级分类
+                    if industry.contains(" > ") {
+                        let parts = industry.components(separatedBy: " > ")
+                        if parts.count == 2 {
+                            let categoryName = parts[0]
+                            let subcategoryName = parts[1]
+                            selectedCategory = IndustryData.categories.first { $0.name == categoryName }
+                            selectedSubcategory = subcategoryName
+                        }
+                    } else {
+                        // 尝试匹配二级分类
+                        for category in IndustryData.categories {
+                            if category.subcategories.contains(industry) {
+                                selectedCategory = category
+                                selectedSubcategory = industry
+                                break
+                            }
+                        }
+                    }
+                    
+                    // 如果没有匹配到，尝试旧的IndustryOption格式（向后兼容）
+                    if selectedCategory == nil {
+                        selectedIndustry = IndustryOption.allCases.first { $0.rawValue == industry }
+                    }
+                }
+                
                 experienceLevel = professionalBackground.experienceLevel
                 education = professionalBackground.education ?? ""
                 if let years = professionalBackground.yearsOfExperience {
@@ -1621,6 +1765,8 @@ struct ProfessionalBackgroundStep: View {
         .onChange(of: currentCompany) { _ in updateProfileData() }
         .onChange(of: jobTitle) { _ in updateProfileData() }
         .onChange(of: selectedIndustry) { _ in updateProfileData() }
+        .onChange(of: selectedCategory) { _ in updateProfileData() }
+        .onChange(of: selectedSubcategory) { _ in updateProfileData() }
         .onChange(of: experienceLevel) { _ in updateProfileData() }
         .onChange(of: education) { _ in updateProfileData() }
         .onChange(of: yearsOfExperience) { _ in updateProfileData() }
@@ -1643,10 +1789,20 @@ struct ProfessionalBackgroundStep: View {
     }
     
     private func updateProfileData() {
+        // 优先使用新的两级分类，如果没有则使用旧的IndustryOption
+        var industryValue: String? = nil
+        if let category = selectedCategory, let subcategory = selectedSubcategory {
+            // 保存格式：一级分类 > 二级分类
+            industryValue = "\(category.name) > \(subcategory)"
+        } else if let oldIndustry = selectedIndustry {
+            // 向后兼容：使用旧的IndustryOption
+            industryValue = oldIndustry.rawValue
+        }
+        
         let professionalBackground = ProfessionalBackground(
             currentCompany: currentCompany.isEmpty ? nil : currentCompany,
             jobTitle: jobTitle.isEmpty ? nil : jobTitle,
-            industry: selectedIndustry?.rawValue,
+            industry: industryValue,
             experienceLevel: experienceLevel,
             education: education.isEmpty ? nil : education,
             educations: educations.isEmpty ? nil : educations,
@@ -2150,6 +2306,221 @@ struct TimezonePicker: View {
     }
 }
 
+// MARK: - Step 4: Industry Edit
+struct IndustryEditStep: View {
+    @Binding var profileData: ProfileCreationData
+    @State private var industrySelections: [IndustryEditSelection] = []
+    @State private var isUpdatingFromData = false
+    @State private var hasLoadedInitialData = false
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            IndustryEditView(industrySelections: $industrySelections)
+        }
+        .onAppear {
+            print("📥 [IndustryEditStep] onAppear called")
+            // Reset the flag when view appears to ensure fresh load
+            hasLoadedInitialData = false
+            // Load immediately when view appears, with a delay to ensure profileData is ready
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                print("📥 [IndustryEditStep] Delayed load triggered")
+                loadIndustryPreferences()
+                hasLoadedInitialData = true
+            }
+        }
+        .onChange(of: profileData.networkingIntention?.industryPreferences) { newPrefs in
+            // Only reload if this change was NOT made by our own updateProfileData() call
+            // Check if the new preferences match our current selections
+            if !isUpdatingFromData {
+                let currentSelectionIds = Set(industrySelections.map { "\($0.categoryName)-\($0.subcategoryName)" })
+                let newPrefIds = Set((newPrefs?.selections ?? []).map { "\($0.categoryName)-\($0.subcategoryName)" })
+                
+                // Only reload if the data is actually different (e.g., loaded from database)
+                // OR if this is the first time loading data
+                if currentSelectionIds != newPrefIds || !hasLoadedInitialData {
+                    print("📥 [IndustryEditStep] profileData.networkingIntention.industryPreferences changed externally")
+                    loadIndustryPreferences()
+                    hasLoadedInitialData = true
+                } else {
+                    print("ℹ️ [IndustryEditStep] industryPreferences changed but matches current selections, skipping reload")
+                }
+            }
+        }
+        .onChange(of: profileData.networkingIntention) { newIntention in
+            // Only reload if networkingIntention was nil and now has data, or if it's a different instance
+            if !isUpdatingFromData {
+                if let prefs = newIntention?.industryPreferences {
+                    let currentSelectionIds = Set(industrySelections.map { "\($0.categoryName)-\($0.subcategoryName)" })
+                    let newPrefIds = Set(prefs.selections.map { "\($0.categoryName)-\($0.subcategoryName)" })
+                    
+                    // Load if different OR if this is first time loading
+                    if currentSelectionIds != newPrefIds || !hasLoadedInitialData {
+                        print("📥 [IndustryEditStep] profileData.networkingIntention changed with different preferences")
+                        print("   Found industryPreferences in newIntention: \(prefs.selections.count) selections")
+                        loadIndustryPreferences()
+                        hasLoadedInitialData = true
+                    }
+                } else if !industrySelections.isEmpty {
+                    // If networkingIntention exists but has no preferences, and we have selections, don't clear them
+                    // This might be a temporary state during update
+                    print("ℹ️ [IndustryEditStep] networkingIntention changed but no preferences, keeping current selections")
+                }
+            }
+        }
+        .onChange(of: industrySelections) { newSelections in
+            // Only update profileData if this change was made by user interaction, not from loading
+            if !isUpdatingFromData {
+                print("🔄 Industry selections changed: \(newSelections.count) selections")
+                updateProfileData()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ForceUpdateIndustryPreferences"))) { _ in
+            print("🔔 Received ForceUpdateIndustryPreferences notification")
+            updateProfileData()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ProfileDataLoaded"))) { _ in
+            print("🔔 Received ProfileDataLoaded notification, reloading industry preferences")
+            // Load immediately when profile data is loaded
+            loadIndustryPreferences()
+            hasLoadedInitialData = true
+        }
+    }
+    
+    private func loadIndustryPreferences() {
+        print("📥 [IndustryEditStep] loadIndustryPreferences() called")
+        print("   profileData.networkingIntention is nil: \(profileData.networkingIntention == nil)")
+        
+        // Load existing industry preferences from profileData
+        if let networkingIntention = profileData.networkingIntention {
+            print("   networkingIntention exists")
+            if let existing = networkingIntention.industryPreferences {
+                print("   industryPreferences exists with \(existing.selections.count) selections")
+                let loadedSelections = existing.selections.map { selection in
+                    IndustryEditSelection(
+                        categoryName: selection.categoryName,
+                        subcategoryName: selection.subcategoryName
+                    )
+                }
+                
+                print("   Loaded selections: \(loadedSelections.map { "\($0.categoryName) > \($0.subcategoryName)" })")
+                print("   Current industrySelections count: \(industrySelections.count)")
+                
+                // Check if selections are different before updating to avoid unnecessary UI updates
+                let currentSelectionIds = Set(industrySelections.map { $0.id })
+                let loadedSelectionIds = Set(loadedSelections.map { $0.id })
+                
+                // Always update if selections are different OR if we haven't loaded initial data yet
+                if currentSelectionIds != loadedSelectionIds || !hasLoadedInitialData {
+                    // Temporarily disable onChange trigger during loading
+                    isUpdatingFromData = true
+                    
+                    // Always update to ensure UI reflects the saved state
+                    industrySelections = loadedSelections
+                    print("✅ [IndustryEditStep] Set industrySelections to \(industrySelections.count) items")
+                    print("   Updated selections: \(industrySelections.map { "\($0.categoryName) > \($0.subcategoryName)" })")
+                    
+                    // Re-enable onChange trigger after a brief delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        isUpdatingFromData = false
+                    }
+                    
+                    // Auto-expand categories with selections
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("ExpandCategoriesWithSelections"),
+                            object: nil,
+                            userInfo: ["selections": loadedSelections]
+                        )
+                    }
+                } else {
+                    print("ℹ️ [IndustryEditStep] Selections unchanged, skipping update")
+                    // Even if unchanged, ensure categories are expanded
+                    if !loadedSelections.isEmpty {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("ExpandCategoriesWithSelections"),
+                                object: nil,
+                                userInfo: ["selections": loadedSelections]
+                            )
+                        }
+                    }
+                }
+            } else {
+                print("⚠️ [IndustryEditStep] networkingIntention exists but industryPreferences is nil")
+                // Only clear if we have selections but no preferences (data mismatch)
+                if !industrySelections.isEmpty {
+                    isUpdatingFromData = true
+                    industrySelections = []
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        isUpdatingFromData = false
+                    }
+                }
+            }
+        } else {
+            print("⚠️ [IndustryEditStep] profileData.networkingIntention is nil")
+            // Only clear if we have selections but no networkingIntention (data mismatch)
+            if !industrySelections.isEmpty {
+                isUpdatingFromData = true
+                industrySelections = []
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    isUpdatingFromData = false
+                }
+            }
+        }
+    }
+    
+    private func updateProfileData() {
+        // Convert IndustryEditSelection to IndustryPreferencesData
+        let preferences = IndustryPreferencesData(
+            selections: industrySelections.map { selection in
+                IndustryPreferenceSelection(
+                    categoryName: selection.categoryName,
+                    subcategoryName: selection.subcategoryName
+                )
+            }
+        )
+        
+        print("💾 [IndustryEditStep] Updating profileData with \(preferences.selections.count) industry preferences")
+        print("   Selections: \(industrySelections.map { "\($0.categoryName) > \($0.subcategoryName)" })")
+        
+        // Temporarily set flag to prevent onChange from triggering reload
+        isUpdatingFromData = true
+        
+        // Update networkingIntention with industry preferences
+        if var networkingIntention = profileData.networkingIntention {
+            networkingIntention.industryPreferences = preferences
+            profileData.networkingIntention = networkingIntention
+            print("✅ [IndustryEditStep] Updated existing networkingIntention with industry preferences")
+        } else {
+            // Create a default networkingIntention if it doesn't exist
+            let defaultIntention = NetworkingIntention(
+                selectedIntention: .learnGrow,
+                additionalIntentions: [],
+                selectedSubIntentions: [],
+                careerDirection: nil,
+                skillDevelopment: nil,
+                industryTransition: nil,
+                industryPreferences: preferences
+            )
+            profileData.networkingIntention = defaultIntention
+            print("✅ [IndustryEditStep] Created new networkingIntention with industry preferences")
+        }
+        
+        // Re-enable onChange after a brief delay to allow the update to complete
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            isUpdatingFromData = false
+        }
+        
+        // Verify the update
+        if let updated = profileData.networkingIntention?.industryPreferences {
+            print("✅ [IndustryEditStep] Verified: profileData now has \(updated.selections.count) industry preferences")
+            print("   Updated selections: \(updated.selections.map { "\($0.categoryName) > \($0.subcategoryName)" })")
+        } else {
+            print("⚠️ [IndustryEditStep] Warning: profileData.networkingIntention.industryPreferences is still nil after update")
+        }
+    }
+}
+
 // MARK: - Step 3: Networking Intention
 struct NetworkingIntentionStep: View {
     @Binding var profileData: ProfileCreationData
@@ -2299,26 +2670,6 @@ struct NetworkingIntentionStep: View {
                 VStack(spacing: 16) {
                     ForEach(orderedSelectedSubIntentions(), id: \.self) { subIntention in
                         switch subIntention {
-                        case .careerDirection:
-                            CareerDirectionForm(
-                                functions: $marketingFunctions,
-                                productTech: $productTechFunctions,
-                                dataAnalytics: $dataAnalyticsFunctions,
-                                financeConsulting: $financeConsultingFunctions,
-                                operationsHR: $operationsHRFunctions,
-                                creativeMedia: $creativeMediaFunctions,
-                                onUpdate: {
-                                    updateCareerDirectionData()
-                                }
-                            )
-                        case .skillDevelopment:
-                            SkillDevelopmentForm(
-                                skills: $skills,
-                                newSkill: $newSkill,
-                                onUpdate: {
-                                    updateSkillDevelopmentData()
-                                }
-                            )
                         case .industryTransition:
                             IndustryTransitionForm(
                                 industries: $industries,
@@ -2598,13 +2949,21 @@ struct NetworkingIntentionStep: View {
             primaryIntention = orderedSelectedIntentions().first ?? .learnGrow
         }
         let additional = orderedSelectedIntentions().filter { $0 != primaryIntention }
+        
+        // Preserve existing industryPreferences when updating from Step 3
+        let existingIndustryPreferences = profileData.networkingIntention?.industryPreferences
+        if let existing = existingIndustryPreferences {
+            print("📋 [NetworkingIntentionStep] Preserving \(existing.selections.count) industry preferences")
+        }
+        
         let networkingIntention = NetworkingIntention(
             selectedIntention: primaryIntention,
             additionalIntentions: additional,
             selectedSubIntentions: orderedSelectedSubIntentions(),
             careerDirection: careerDirectionData,
             skillDevelopment: skillDevelopmentData,
-            industryTransition: industryTransitionData
+            industryTransition: industryTransitionData,
+            industryPreferences: existingIndustryPreferences // Preserve existing industryPreferences
         )
         profileData.networkingIntention = networkingIntention
         
@@ -4705,3 +5064,4 @@ struct ProfileSetupView_Previews: PreviewProvider {
             .environmentObject(SupabaseService.shared)
     }
 }
+
