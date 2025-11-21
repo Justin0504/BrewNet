@@ -39,7 +39,20 @@ struct RecommendationWeights {
     
     /// 认证状态权重：优先推荐认证用户
     static let verifiedWeight: Double = 0.015
-    
+
+    // ========== 行为量化指标权重 ==========
+    /// 活跃度权重：优先推荐活跃用户
+    static let activityScoreWeight: Double = 0.08
+
+    /// 连接意愿权重：优先推荐愿意连接的用户
+    static let connectScoreWeight: Double = 0.06
+
+    /// 导师潜力权重：用于导师推荐场景
+    static let mentorScoreWeight: Double = 0.04
+
+    /// 综合行为分数权重：在最终排序中应用
+    static let combinedBehaviorWeight: Double = 0.12
+
     // ========== 多样性权重 ==========
     /// 多样性惩罚：避免过度推荐同一类型用户
     static let diversityPenalty: Double = 0.1
@@ -205,8 +218,19 @@ class SimpleTwoTowerEncoder {
         // 6. 辅助分数
         let profileCompletionScore = (userFeatures.profileCompletion + candidateFeatures.profileCompletion) / 2.0
         let verifiedScore = (Double(userFeatures.isVerified) + Double(candidateFeatures.isVerified)) / 2.0
-        
-        // 7. 加权综合分数
+
+        // 7. 行为量化指标分数（标准化到0-1范围）
+        let userActivityScore = Double(userFeatures.behavioralMetrics?.activityScore ?? 5) / 10.0
+        let candidateActivityScore = Double(candidateFeatures.behavioralMetrics?.activityScore ?? 5) / 10.0
+        let avgActivityScore = (userActivityScore + candidateActivityScore) / 2.0
+
+        let userConnectScore = Double(userFeatures.behavioralMetrics?.connectScore ?? 5) / 10.0
+        let candidateConnectScore = Double(candidateFeatures.behavioralMetrics?.connectScore ?? 5) / 10.0
+        let avgConnectScore = (userConnectScore + candidateConnectScore) / 2.0
+
+        let candidateMentorScore = Double(candidateFeatures.behavioralMetrics?.mentorScore ?? 5) / 10.0
+
+        // 8. 加权综合分数
         var finalScore = 0.0
         finalScore += avgSkillComplement * RecommendationWeights.skillComplementWeight
         finalScore += intentionScore * RecommendationWeights.intentionWeight
@@ -219,9 +243,82 @@ class SimpleTwoTowerEncoder {
         finalScore += careerStageScore * RecommendationWeights.careerStageWeight
         finalScore += profileCompletionScore * RecommendationWeights.profileCompletionWeight
         finalScore += verifiedScore * RecommendationWeights.verifiedWeight
+
+        // 9. 加入行为量化指标
+        finalScore += avgActivityScore * RecommendationWeights.activityScoreWeight
+        finalScore += avgConnectScore * RecommendationWeights.connectScoreWeight
+        finalScore += candidateMentorScore * RecommendationWeights.mentorScoreWeight
         
         // 确保分数在 [0, 1] 范围内
         return min(max(finalScore, 0.0), 1.0)
+    }
+
+    /// 应用行为量化指标进行最终重排序
+    /// - Parameters:
+    ///   - recommendations: 原始推荐结果（userId, score, profile）
+    ///   - beta1: 活跃度权重 (默认0.4)
+    ///   - beta2: 连接意愿权重 (默认0.4)
+    ///   - beta3: 导师潜力权重 (默认0.2)
+    /// - Returns: 重排序后的推荐结果
+    static func applyBehavioralReRanking(
+        _ recommendations: [(userId: String, score: Double, profile: BrewNetProfile)],
+        beta1: Double = 0.4,
+        beta2: Double = 0.4,
+        beta3: Double = 0.2
+    ) -> [(userId: String, score: Double, profile: BrewNetProfile)] {
+
+        let reRankedResults = recommendations.map { result in
+            // 从 profile 创建 UserTowerFeatures 来获取行为指标
+            let features = UserTowerFeatures.from(result.profile)
+            
+            // 获取用户的行为指标（如果没有则使用默认值5）
+            let activityScore = Double(features.behavioralMetrics?.activityScore ?? 5) / 10.0
+            let connectScore = Double(features.behavioralMetrics?.connectScore ?? 5) / 10.0
+            let mentorScore = Double(features.behavioralMetrics?.mentorScore ?? 5) / 10.0
+
+            // 计算综合行为分数
+            let behaviorScore = beta1 * activityScore + beta2 * connectScore + beta3 * mentorScore
+
+            // 重新计算最终分数：原始分数(0.85) + 行为分数(0.15)
+            let finalScore = result.score * 0.85 + behaviorScore * 0.15
+
+            return (userId: result.userId, score: finalScore, profile: result.profile)
+        }
+
+        // 按最终分数重新排序
+        return reRankedResults.sorted { $0.score > $1.score }
+    }
+
+    /// 获取冷启动推荐（基于行为指标和资料完整度）
+    /// - Parameters:
+    ///   - userId: 当前用户ID
+    ///   - candidates: 候选用户列表 (userId, features)
+    ///   - limit: 返回数量
+    /// - Returns: 冷启动推荐结果
+    static func getColdStartRecommendations(
+        userId: String,
+        candidates: [(userId: String, features: UserTowerFeatures)],
+        limit: Int = 20
+    ) -> [(userId: String, score: Double)] {
+
+        let scoredCandidates = candidates.map { candidate -> (userId: String, score: Double) in
+            // 冷启动评分：行为指标(0.6) + 资料完整度(0.4)
+            let activityScore = Double(candidate.features.behavioralMetrics?.activityScore ?? 5) / 10.0
+            let connectScore = Double(candidate.features.behavioralMetrics?.connectScore ?? 5) / 10.0
+            let behaviorScore = (activityScore + connectScore) / 2.0
+
+            let profileCompletion = candidate.features.profileCompletion
+
+            let finalScore = behaviorScore * 0.6 + profileCompletion * 0.4
+
+            return (userId: candidate.userId, score: finalScore)
+        }
+
+        // 按分数排序并返回前limit个
+        return scoredCandidates
+            .sorted { $0.score > $1.score }
+            .prefix(limit)
+            .map { $0 }
     }
     
     /// 计算子意图相似度（Jaccard）

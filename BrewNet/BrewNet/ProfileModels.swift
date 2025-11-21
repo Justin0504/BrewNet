@@ -204,11 +204,33 @@ struct NetworkingPreferences: Codable, Equatable {
     let preferredChatFormat: ChatFormat
     let availableTimeslot: AvailableTimeslot
     let preferredChatDuration: String?
+    let timeslotTimezone: String? // 时区标识符，例如 "America/New_York"
     
     enum CodingKeys: String, CodingKey {
         case preferredChatFormat = "preferred_chat_format"
         case availableTimeslot = "available_timeslot"
         case preferredChatDuration = "preferred_chat_duration"
+        case timeslotTimezone = "timeslot_timezone"
+    }
+    
+    init(
+        preferredChatFormat: ChatFormat,
+        availableTimeslot: AvailableTimeslot,
+        preferredChatDuration: String? = nil,
+        timeslotTimezone: String? = nil
+    ) {
+        self.preferredChatFormat = preferredChatFormat
+        self.availableTimeslot = availableTimeslot
+        self.preferredChatDuration = preferredChatDuration
+        self.timeslotTimezone = timeslotTimezone
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.preferredChatFormat = try container.decode(ChatFormat.self, forKey: .preferredChatFormat)
+        self.availableTimeslot = try container.decode(AvailableTimeslot.self, forKey: .availableTimeslot)
+        self.preferredChatDuration = try container.decodeIfPresent(String.self, forKey: .preferredChatDuration)
+        self.timeslotTimezone = try container.decodeIfPresent(String.self, forKey: .timeslotTimezone)
     }
 }
 
@@ -469,6 +491,44 @@ struct IndustrySelection: Codable, Equatable {
         case industryName = "industry_name"
         case learnIn = "learn_in"
         case guideIn = "guide_in"
+    }
+    
+    init(industryName: String, learnIn: Bool, guideIn: Bool) {
+        self.industryName = industryName
+        self.learnIn = learnIn
+        self.guideIn = guideIn
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        self.industryName = try container.decode(String.self, forKey: .industryName)
+        
+        // 灵活处理 learnIn：支持 Bool、Int (0/1)、String
+        if let boolValue = try? container.decode(Bool.self, forKey: .learnIn) {
+            self.learnIn = boolValue
+        } else if let intValue = try? container.decode(Int.self, forKey: .learnIn) {
+            self.learnIn = intValue != 0
+        } else if let doubleValue = try? container.decode(Double.self, forKey: .learnIn) {
+            self.learnIn = doubleValue != 0
+        } else if let stringValue = try? container.decode(String.self, forKey: .learnIn) {
+            self.learnIn = stringValue == "1" || stringValue.lowercased() == "true"
+        } else {
+            self.learnIn = false
+        }
+        
+        // 灵活处理 guideIn：支持 Bool、Int (0/1)、String
+        if let boolValue = try? container.decode(Bool.self, forKey: .guideIn) {
+            self.guideIn = boolValue
+        } else if let intValue = try? container.decode(Int.self, forKey: .guideIn) {
+            self.guideIn = intValue != 0
+        } else if let doubleValue = try? container.decode(Double.self, forKey: .guideIn) {
+            self.guideIn = doubleValue != 0
+        } else if let stringValue = try? container.decode(String.self, forKey: .guideIn) {
+            self.guideIn = stringValue == "1" || stringValue.lowercased() == "true"
+        } else {
+            self.guideIn = false
+        }
     }
 }
 
