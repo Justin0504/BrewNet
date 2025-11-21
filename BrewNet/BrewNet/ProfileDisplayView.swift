@@ -1911,17 +1911,14 @@ struct NetworkingIntentionDisplayView: View {
                 }
             }
             
-            if let careerDirection = intention.careerDirection {
-                CareerDirectionDisplayView(data: careerDirection)
-            }
-            
             if let skillDevelopment = intention.skillDevelopment {
                 SkillDevelopmentDisplayView(data: skillDevelopment)
             }
             
-            if let industryTransition = intention.industryTransition {
-                IndustryTransitionDisplayView(data: industryTransition)
-            }
+            // Industry Transition display removed - form has been deleted
+            // if let industryTransition = intention.industryTransition {
+            //     IndustryTransitionDisplayView(data: industryTransition)
+            // }
         }
     }
 }
@@ -1937,23 +1934,9 @@ struct CareerDirectionDisplayView: View {
                 .foregroundColor(.gray)
             
             ForEach(data.functions, id: \.functionName) { function in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(function.functionName)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.primary)
-                    
-                    if !function.learnIn.isEmpty {
-                        Text("Learn in: \(function.learnIn.joined(separator: ", "))")
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    if !function.guideIn.isEmpty {
-                        Text("Guide in: \(function.guideIn.joined(separator: ", "))")
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
-                    }
-                }
+                Text(function.functionName)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.primary)
             }
         }
     }
@@ -1970,33 +1953,9 @@ struct SkillDevelopmentDisplayView: View {
                 .foregroundColor(.gray)
             
             ForEach(data.skills, id: \.skillName) { skill in
-                HStack {
-                    Text(skill.skillName)
-                        .font(.system(size: 16))
-                        .foregroundColor(.primary)
-                    
-                    Spacer()
-                    
-                    if skill.learnIn {
-                        Text("Learn")
-                            .font(.system(size: 12))
-                            .foregroundColor(.blue)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(Color.blue.opacity(0.1))
-                            .cornerRadius(4)
-                    }
-                    
-                    if skill.guideIn {
-                        Text("Guide")
-                            .font(.system(size: 12))
-                            .foregroundColor(.green)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(Color.green.opacity(0.1))
-                            .cornerRadius(4)
-                    }
-                }
+                Text(skill.skillName)
+                    .font(.system(size: 16))
+                    .foregroundColor(.primary)
             }
         }
     }
@@ -2013,33 +1972,9 @@ struct IndustryTransitionDisplayView: View {
                 .foregroundColor(.gray)
             
             ForEach(data.industries, id: \.industryName) { industry in
-                HStack {
-                    Text(industry.industryName)
-                        .font(.system(size: 16))
-                        .foregroundColor(.primary)
-                    
-                    Spacer()
-                    
-                    if industry.learnIn {
-                        Text("Learn")
-                            .font(.system(size: 12))
-                            .foregroundColor(.blue)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(Color.blue.opacity(0.1))
-                            .cornerRadius(4)
-                    }
-                    
-                    if industry.guideIn {
-                        Text("Guide")
-                            .font(.system(size: 12))
-                            .foregroundColor(.green)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(Color.green.opacity(0.1))
-                            .cornerRadius(4)
-                    }
-                }
+                Text(industry.industryName)
+                    .font(.system(size: 16))
+                    .foregroundColor(.primary)
             }
         }
     }
