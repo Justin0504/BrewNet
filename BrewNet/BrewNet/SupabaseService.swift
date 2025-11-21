@@ -847,6 +847,15 @@ class SupabaseService: ObservableObject {
                     print("   - timeslot: \(profile.privacyTrust.visibilitySettings.timeslot.rawValue)")
                     print("   - email: \(profile.privacyTrust.visibilitySettings.email.rawValue)")
                     print("   - phone_number: \(profile.privacyTrust.visibilitySettings.phoneNumber.rawValue)")
+                    
+                    // Verify industry preferences loaded from database
+                    if let industryPrefs = profile.networkingIntention.industryPreferences {
+                        print("📋 Industry Preferences loaded from DB: \(industryPrefs.selections.count) selections")
+                        print("   Selections: \(industryPrefs.selections.map { "\($0.categoryName) > \($0.subcategoryName)" })")
+                    } else {
+                        print("⚠️ No industry preferences found in loaded profile")
+                    }
+                    
                     return profile
                 } else {
                     print("⚠️ Multiple profiles found for user: \(userId), returning the first one")
@@ -859,6 +868,14 @@ class SupabaseService: ObservableObject {
                     print("   - interests: \(profile.privacyTrust.visibilitySettings.interests.rawValue)")
                     print("   - location: \(profile.privacyTrust.visibilitySettings.location.rawValue)")
                     print("   - timeslot: \(profile.privacyTrust.visibilitySettings.timeslot.rawValue)")
+                    
+                    // Verify industry preferences loaded from database
+                    if let industryPrefs = profile.networkingIntention.industryPreferences {
+                        print("📋 Industry Preferences loaded from DB: \(industryPrefs.selections.count) selections")
+                        print("   Selections: \(industryPrefs.selections.map { "\($0.categoryName) > \($0.subcategoryName)" })")
+                    } else {
+                        print("⚠️ No industry preferences found in loaded profile")
+                    }
                     return profile
                 }
             } catch let decodeError {
@@ -963,6 +980,14 @@ class SupabaseService: ObservableObject {
             throw ProfileError.invalidData("Email is required")
         }
         
+        // Verify industry preferences before saving
+        if let industryPrefs = profile.networkingIntention.industryPreferences {
+            print("📋 [updateProfile] Profile contains \(industryPrefs.selections.count) industry preferences")
+            print("   Selections: \(industryPrefs.selections.map { "\($0.categoryName) > \($0.subcategoryName)" })")
+        } else {
+            print("⚠️ [updateProfile] Profile has no industry preferences")
+        }
+        
         // 使用与 createProfile 相同的方法：Supabase Swift SDK 的 .update() 方法
         // 这样应该能避免 PostgREST 的类型转换问题
         do {
@@ -985,6 +1010,16 @@ class SupabaseService: ObservableObject {
                   let personalitySocial = try JSONSerialization.jsonObject(with: personalitySocialData) as? [String: Any],
                   let privacyTrust = try JSONSerialization.jsonObject(with: privacyTrustData) as? [String: Any] else {
                 throw ProfileError.updateFailed("Failed to encode profile fields")
+            }
+            
+            // Verify industry_preferences in encoded networkingIntention
+            if let industryPrefsDict = networkingIntention["industry_preferences"] as? [String: Any] {
+                print("📋 [updateProfile] Encoded networkingIntention contains industry_preferences")
+                if let selections = industryPrefsDict["selections"] as? [[String: Any]] {
+                    print("   Encoded selections count: \(selections.count)")
+                }
+            } else {
+                print("⚠️ [updateProfile] Encoded networkingIntention missing industry_preferences")
             }
             
             // 处理 work_photos（可选字段）

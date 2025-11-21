@@ -1,6 +1,129 @@
 import Foundation
 
-// MARK: - Industry Options
+// MARK: - Industry Category (一级分类)
+struct IndustryCategory: Identifiable, Codable, Equatable {
+    let id: String
+    let name: String
+    let subcategories: [String]
+    
+    init(name: String, subcategories: [String]) {
+        self.id = name
+        self.name = name
+        self.subcategories = subcategories
+    }
+}
+
+// MARK: - Industry Data (一级二级分类数据)
+struct IndustryData {
+    static let categories: [IndustryCategory] = [
+        IndustryCategory(
+            name: "Tech / Internet",
+            subcategories: [
+                "Software Engineer",
+                "Backend / Infrastructure",
+                "Frontend Engineer",
+                "DevOps / SRE",
+                "Mobile Engineer",
+                "Product Manager (Tech)",
+                "Data Engineer",
+                "Machine Learning / AI Engineer",
+                "Other"
+            ]
+        ),
+        IndustryCategory(
+            name: "Business & Finance",
+            subcategories: [
+                "Finance / Investment Banking",
+                "Equity Research / Asset Mgmt",
+                "Corporate Strategy / BizOps",
+                "Management Consulting",
+                "Accounting / FP&A",
+                "Sales & Business Development",
+                "Corporate Development / M&A",
+                "Other"
+            ]
+        ),
+        IndustryCategory(
+            name: "Consumer & Retail (FMCG / CPG)",
+            subcategories: [
+                "Brand / Marketing Manager",
+                "Category Manager / Merchandising",
+                "Supply Chain / Ops",
+                "Retail Strategy",
+                "eCommerce Manager",
+                "Product Marketing",
+                "Other"
+            ]
+        ),
+        IndustryCategory(
+            name: "Product & Design",
+            subcategories: [
+                "Product Manager",
+                "UX/UI Designer",
+                "Product Designer",
+                "UX Research / Researcher",
+                "Product Ops",
+                "Growth PM",
+                "Other"
+            ]
+        ),
+        IndustryCategory(
+            name: "Data & Research",
+            subcategories: [
+                "Data Scientist",
+                "Data Analyst / BI",
+                "Research Scientist",
+                "Causal Inference / Uplift Specialist",
+                "Quant / ML Research",
+                "Other"
+            ]
+        ),
+        IndustryCategory(
+            name: "Hardware & Engineering",
+            subcategories: [
+                "Hardware Engineer",
+                "Mechanical Engineer",
+                "Systems / Firmware Engineer",
+                "Robotics / Controls Engineer",
+                "Hardware PM",
+                "Other"
+            ]
+        ),
+        IndustryCategory(
+            name: "Healthcare & Life Sciences",
+            subcategories: [
+                "Clinical Research / Scientist",
+                "Biotech / Pharma R&D",
+                "Healthcare Product Manager",
+                "Health Data Scientist",
+                "Medical Professional (MD/NP)",
+                "Other"
+            ]
+        ),
+        IndustryCategory(
+            name: "Other / Startup & Ops",
+            subcategories: [
+                "Founder / Co-founder",
+                "Operations / Program Manager",
+                "HR / Recruiting",
+                "Legal / Compliance",
+                "Customer Success / Support",
+                "Other"
+            ]
+        )
+    ]
+    
+    static func category(for name: String) -> IndustryCategory? {
+        return categories.first { $0.name == name }
+    }
+    
+    static func subcategory(for categoryName: String, subcategoryName: String) -> String? {
+        guard let category = category(for: categoryName) else { return nil }
+        return category.subcategories.first { $0 == subcategoryName }
+    }
+}
+
+// MARK: - Industry Option (保持向后兼容)
 enum IndustryOption: String, CaseIterable, Codable {
     case technology = "Technology"
     case finance = "Finance"

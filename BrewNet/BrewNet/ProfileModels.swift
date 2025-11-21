@@ -150,6 +150,7 @@ struct NetworkingIntention: Codable, Equatable {
     var careerDirection: CareerDirectionData?
     var skillDevelopment: SkillDevelopmentData?
     var industryTransition: IndustryTransitionData?
+    var industryPreferences: IndustryPreferencesData?
     
     enum CodingKeys: String, CodingKey {
         case selectedIntention = "selected_intention"
@@ -158,6 +159,7 @@ struct NetworkingIntention: Codable, Equatable {
         case careerDirection = "career_direction"
         case skillDevelopment = "skill_development"
         case industryTransition = "industry_transition"
+        case industryPreferences = "industry_preferences"
     }
     
     init(
@@ -166,7 +168,8 @@ struct NetworkingIntention: Codable, Equatable {
         selectedSubIntentions: [SubIntentionType],
         careerDirection: CareerDirectionData?,
         skillDevelopment: SkillDevelopmentData?,
-        industryTransition: IndustryTransitionData?
+        industryTransition: IndustryTransitionData?,
+        industryPreferences: IndustryPreferencesData? = nil
     ) {
         self.selectedIntention = selectedIntention
         self.additionalIntentions = additionalIntentions
@@ -174,6 +177,7 @@ struct NetworkingIntention: Codable, Equatable {
         self.careerDirection = careerDirection
         self.skillDevelopment = skillDevelopment
         self.industryTransition = industryTransition
+        self.industryPreferences = industryPreferences
     }
     
     init(from decoder: Decoder) throws {
@@ -184,6 +188,7 @@ struct NetworkingIntention: Codable, Equatable {
         self.careerDirection = try container.decodeIfPresent(CareerDirectionData.self, forKey: .careerDirection)
         self.skillDevelopment = try container.decodeIfPresent(SkillDevelopmentData.self, forKey: .skillDevelopment)
         self.industryTransition = try container.decodeIfPresent(IndustryTransitionData.self, forKey: .industryTransition)
+        self.industryPreferences = try container.decodeIfPresent(IndustryPreferencesData.self, forKey: .industryPreferences)
     }
     
     func encode(to encoder: Encoder) throws {
@@ -191,6 +196,19 @@ struct NetworkingIntention: Codable, Equatable {
         try container.encode(selectedIntention, forKey: .selectedIntention)
         if !additionalIntentions.isEmpty {
             try container.encode(additionalIntentions, forKey: .additionalIntentions)
+        }
+        try container.encode(selectedSubIntentions, forKey: .selectedSubIntentions)
+        if let careerDirection = careerDirection {
+            try container.encode(careerDirection, forKey: .careerDirection)
+        }
+        if let skillDevelopment = skillDevelopment {
+            try container.encode(skillDevelopment, forKey: .skillDevelopment)
+        }
+        if let industryTransition = industryTransition {
+            try container.encode(industryTransition, forKey: .industryTransition)
+        }
+        if let industryPreferences = industryPreferences {
+            try container.encode(industryPreferences, forKey: .industryPreferences)
         }
         try container.encode(selectedSubIntentions, forKey: .selectedSubIntentions)
         try container.encodeIfPresent(careerDirection, forKey: .careerDirection)
@@ -479,6 +497,25 @@ struct IndustryTransitionData: Codable, Equatable {
     
     enum CodingKeys: String, CodingKey {
         case industries
+    }
+}
+
+// Industry Preferences Data (for recommendations)
+struct IndustryPreferencesData: Codable, Equatable {
+    let selections: [IndustryPreferenceSelection]
+    
+    enum CodingKeys: String, CodingKey {
+        case selections
+    }
+}
+
+struct IndustryPreferenceSelection: Codable, Equatable {
+    let categoryName: String
+    let subcategoryName: String
+    
+    enum CodingKeys: String, CodingKey {
+        case categoryName = "category_name"
+        case subcategoryName = "subcategory_name"
     }
 }
 

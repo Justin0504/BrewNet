@@ -383,7 +383,9 @@ struct ProfileCardContentView: View {
             if let industry = profile.professionalBackground.industry, !industry.isEmpty || experienceLevelDisplay != nil {
                 HStack(spacing: 6) {
                     if let industry = profile.professionalBackground.industry, !industry.isEmpty {
-                        Text(industry)
+                        // 只显示一级分类（在 ">" 之前的部分）
+                        let displayIndustry = industry.components(separatedBy: " > ").first ?? industry
+                        Text(displayIndustry)
                     }
                     if let experienceLevel = experienceLevelDisplay, !experienceLevel.isEmpty {
                         if profile.professionalBackground.industry?.isEmpty == false {
