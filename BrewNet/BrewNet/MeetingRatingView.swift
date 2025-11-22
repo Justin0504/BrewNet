@@ -7,28 +7,31 @@ struct MeetingRatingView: View {
     let otherUserId: String
     let otherUserName: String
     @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var supabaseService: SupabaseService
     
     @State private var rating: Double = 3.0
     @State private var selectedTags: Set<RatingTag> = []
+    @State private var comment: String = ""  // 🆕 评论内容
     @State private var showReportSheet = false
     @State private var isSubmitting = false
     
     var body: some View {
+        // 🆕 使用 NavigationView 来提供导航栏和 dismiss 环境
         NavigationView {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    // Header
-                    VStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    // Header - 简化版本
+                    VStack(alignment: .leading, spacing: 8) {
                         Text("How was your Coffee Chat?")
-                            .font(.system(size: 24, weight: .bold))
+                            .font(.system(size: 22, weight: .bold))
                         
-                        Text("Please rate your in-person meeting. Your feedback helps BrewNet maintain a professional, safe, and high-quality networking environment.")
+                        Text("Please rate your in-person meeting.")
                             .font(.system(size: 14))
                             .foregroundColor(.gray)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.horizontal)
-                    .padding(.top)
+                    .padding(.top, 8)
                     
                     Divider()
                     
@@ -41,26 +44,26 @@ struct MeetingRatingView: View {
                             .font(.system(size: 13))
                             .foregroundColor(.gray)
                         
-                        // Star Display
+                        // Star Display - 优化版本，不使用 GeometryReader
                         HStack(spacing: 8) {
                             ForEach(0..<5) { index in
-                                ZStack {
-                                    Image(systemName: "star.fill")
-                                        .font(.system(size: 40))
-                                        .foregroundColor(.gray.opacity(0.2))
-                                    
-                                    Image(systemName: "star.fill")
-                                        .font(.system(size: 40))
-                                        .foregroundColor(.yellow)
-                                        .mask(
-                                            GeometryReader { geometry in
-                                                let starProgress = rating - Double(index)
-                                                let fillWidth = geometry.size.width * min(max(starProgress, 0), 1)
-                                                Rectangle()
-                                                    .frame(width: fillWidth)
-                                            }
-                                        )
+                                let starValue = Double(index) + 0.5
+                                let isFilled = rating >= starValue
+                                let isHalfFilled = rating >= Double(index) && rating < starValue
+                                
+                                Group {
+                                    if isFilled {
+                                        Image(systemName: "star.fill")
+                                            .foregroundColor(.yellow)
+                                    } else if isHalfFilled {
+                                        Image(systemName: "star.lefthalf.fill")
+                                            .foregroundColor(.yellow)
+                                    } else {
+                                        Image(systemName: "star")
+                                            .foregroundColor(.gray.opacity(0.3))
+                                    }
                                 }
+                                .font(.system(size: 40))
                             }
                         }
                         .frame(maxWidth: .infinity)
@@ -76,40 +79,69 @@ struct MeetingRatingView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         
-                        // Rating Scale Reference
-                        VStack(alignment: .leading, spacing: 6) {
-                            ratingReferenceRow(stars: "5.0 ★", description: "Excellent — Highly valuable conversation")
-                            ratingReferenceRow(stars: "4.0 ★", description: "Good — Smooth and insightful")
-                            ratingReferenceRow(stars: "3.0 ★", description: "Fair — Average experience")
-                            ratingReferenceRow(stars: "2.0 ★", description: "Poor — Below expectations")
-                            ratingReferenceRow(stars: "1.0 ★", description: "Very Poor — Would not meet again")
-                            ratingReferenceRow(stars: "0.5 ★", description: "Unacceptable — Seriously negative experience")
+                        // Rating Scale Reference - 简化版本，只显示当前评分对应的描述
+                        if rating >= 4.5 {
+                            Text("5.0 ★ Excellent — Highly valuable conversation")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                                .padding(.top, 4)
+                        } else if rating >= 3.5 {
+                            Text("4.0 ★ Good — Smooth and insightful")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                                .padding(.top, 4)
+                        } else if rating >= 2.5 {
+                            Text("3.0 ★ Fair — Average experience")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                                .padding(.top, 4)
+                        } else if rating >= 1.5 {
+                            Text("2.0 ★ Poor — Below expectations")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                                .padding(.top, 4)
+                        } else if rating >= 0.5 {
+                            Text("1.0 ★ Very Poor — Would not meet again")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                                .padding(.top, 4)
                         }
-                        .font(.system(size: 12))
-                        .foregroundColor(.gray)
-                        .padding(.top, 8)
                     }
                     .padding(.horizontal)
                     
                     Divider()
                     
-                    // Optional Tags
-                    VStack(alignment: .leading, spacing: 16) {
+                    // 🆕 评论框（替代标签）
+                    VStack(alignment: .leading, spacing: 12) {
                         Text("Why this rating? (Optional)")
                             .font(.system(size: 18, weight: .semibold))
                         
-                        Text("Select any reasons that apply. These tags help us improve recommendations.")
+                        Text("Share your thoughts about this coffee chat experience.")
                             .font(.system(size: 13))
                             .foregroundColor(.gray)
                         
-                        // Positive Tags
-                        tagSection(title: "Positive", tags: positiveTags, color: .green)
+                        TextEditor(text: $comment)
+                            .frame(minHeight: 120)
+                            .padding(8)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                            )
+                            .onChange(of: comment) { newValue in
+                                // 限制评论长度（可选）
+                                if newValue.count > 500 {
+                                    comment = String(newValue.prefix(500))
+                                }
+                            }
                         
-                        // Neutral Tags
-                        tagSection(title: "Neutral", tags: neutralTags, color: .blue)
-                        
-                        // Negative Tags
-                        tagSection(title: "Negative", tags: negativeTags, color: .orange)
+                        HStack {
+                            Spacer()
+                            Text("\(comment.count)/500")
+                                .font(.system(size: 12))
+                                .foregroundColor(comment.count > 500 ? .red : .gray)
+                        }
                     }
                     .padding(.horizontal)
                     
@@ -186,9 +218,13 @@ struct MeetingRatingView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
-            .navigationBarItems(trailing: Button("Cancel") {
-                dismiss()
-            })
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
             .sheet(isPresented: $showReportSheet) {
                 MisconductReportView(
                     reportedUserId: otherUserId,
@@ -279,17 +315,216 @@ struct MeetingRatingView: View {
     // MARK: - Actions
     
     private func submitRating() {
+        guard let currentUserId = authManager.currentUser?.id else {
+            print("❌ [评分] 当前用户为空，无法提交评分")
+            return
+        }
+        
         isSubmitting = true
         
-        // TODO: Submit to backend
-        // 1. Create MeetingRating record
-        // 2. Update CredibilityScore for otherUser
-        // 3. Check for GPS verification
-        // 4. Apply anti-cheating checks
+        print("📝 [评分] ========== 开始提交评分 ==========")
+        print("📝 [评分] meetingId: \(meetingId)")
+        print("📝 [评分] raterId: \(currentUserId)")
+        print("📝 [评分] ratedUserId: \(otherUserId)")
+        print("📝 [评分] rating: \(rating)")
+        print("📝 [评分] comment: \(comment.isEmpty ? "(无评论)" : comment)")
+        print("📝 [评分] tags: \(selectedTags.map { $0.rawValue })")
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            isSubmitting = false
-            dismiss()
+        Task {
+            do {
+                // 1. 先查询 meeting 信息，确定当前用户是 user_id 还是 participant_id
+                print("🔍 [评分] 步骤1: 查询 meeting 信息...")
+                let meetingResponse = try await supabaseService.supabase
+                    .from("coffee_chat_schedules")
+                    .select("user_id, participant_id")
+                    .eq("id", value: meetingId)
+                    .single()
+                    .execute()
+                
+                print("✅ [评分] meeting 查询成功，状态码: \(meetingResponse.response.statusCode)")
+                
+                let decoder = JSONDecoder()
+                decoder.keyDecodingStrategy = .convertFromSnakeCase
+                struct MeetingInfo: Codable {
+                    let userId: String
+                    let participantId: String
+                }
+                let meetingInfo = try decoder.decode(MeetingInfo.self, from: meetingResponse.data)
+                
+                let isCurrentUserOwner = meetingInfo.userId == currentUserId
+                let ratingIdField = isCurrentUserOwner ? "user_rating_id" : "participant_rating_id"
+                let ratedField = isCurrentUserOwner ? "user_rated" : "participant_rated"
+                
+                print("📝 [评分] 当前用户是 \(isCurrentUserOwner ? "user_id" : "participant_id")")
+                
+                // 2. 准备评分数据
+                print("🔍 [评分] 步骤2: 准备评分数据...")
+                let tagsArray = Array(selectedTags)
+                
+                // 创建符合 Encodable 的结构体
+                struct MeetingRatingInsert: Encodable {
+                    let meetingId: String
+                    let raterId: String
+                    let ratedUserId: String
+                    let rating: Double
+                    let tags: [RatingTag]
+                    let comment: String?
+                    let gpsVerified: Bool
+                    let meetingDuration: Int
+                    
+                    enum CodingKeys: String, CodingKey {
+                        case meetingId = "meeting_id"
+                        case raterId = "rater_id"
+                        case ratedUserId = "rated_user_id"
+                        case rating
+                        case tags
+                        case comment
+                        case gpsVerified = "gps_verified"
+                        case meetingDuration = "meeting_duration"
+                    }
+                }
+                
+                // 确保 UUID 格式为小写（数据库通常存储为小写）
+                let ratingInsert = MeetingRatingInsert(
+                    meetingId: meetingId.lowercased(),
+                    raterId: currentUserId.lowercased(),
+                    ratedUserId: otherUserId.lowercased(),
+                    rating: rating,
+                    tags: tagsArray,
+                    comment: comment.isEmpty ? nil : comment,
+                    gpsVerified: true,
+                    meetingDuration: 0
+                )
+                
+                print("📝 [评分] 准备插入的数据: meetingId=\(meetingId), rating=\(rating), tags=\(tagsArray.count)个")
+                
+                // 3. 插入评分记录
+                print("🔍 [评分] 步骤3: 插入评分记录到 meeting_ratings 表...")
+                let ratingResponse = try await supabaseService.supabase
+                    .from("meeting_ratings")
+                    .insert(ratingInsert)
+                    .select("id")
+                    .single()
+                    .execute()
+                
+                print("✅ [评分] 插入成功，状态码: \(ratingResponse.response.statusCode)")
+                print("📊 [评分] 响应数据: \(String(data: ratingResponse.data, encoding: .utf8) ?? "无法解析")")
+                
+                let ratingIdData = try decoder.decode([String: String].self, from: ratingResponse.data)
+                let ratingId = ratingIdData["id"] ?? ""
+                
+                print("✅ [评分] 评分记录已保存到数据库，rating_id: \(ratingId)")
+                
+                // 4. 更新 coffee_chat_schedules 表的评分状态
+                print("🔍 [评分] 步骤4: 更新 coffee_chat_schedules 表...")
+                
+                // 创建符合 Encodable 的更新结构体
+                struct ScheduleUpdate: Encodable {
+                    let userRated: Bool?
+                    let participantRated: Bool?
+                    let userRatingId: String?
+                    let participantRatingId: String?
+                    
+                    enum CodingKeys: String, CodingKey {
+                        case userRated = "user_rated"
+                        case participantRated = "participant_rated"
+                        case userRatingId = "user_rating_id"
+                        case participantRatingId = "participant_rating_id"
+                    }
+                }
+                
+                // 根据当前用户角色构建更新数据
+                let scheduleUpdate: ScheduleUpdate
+                if isCurrentUserOwner {
+                    scheduleUpdate = ScheduleUpdate(
+                        userRated: true,
+                        participantRated: nil,
+                        userRatingId: ratingId.isEmpty ? nil : ratingId,
+                        participantRatingId: nil
+                    )
+                } else {
+                    scheduleUpdate = ScheduleUpdate(
+                        userRated: nil,
+                        participantRated: true,
+                        userRatingId: nil,
+                        participantRatingId: ratingId.isEmpty ? nil : ratingId
+                    )
+                }
+                
+                print("📝 [评分] 更新数据: \(isCurrentUserOwner ? "user_rated" : "participant_rated") = true, rating_id = \(ratingId)")
+                
+                let updateResponse = try await supabaseService.supabase
+                    .from("coffee_chat_schedules")
+                    .update(scheduleUpdate)
+                    .eq("id", value: meetingId)
+                    .execute()
+                
+                print("✅ [评分] coffee_chat_schedules 更新成功，状态码: \(updateResponse.response.statusCode)")
+                
+                // 5. 更新被评分用户的信誉评分
+                print("🔍 [评分] 步骤5: 触发信誉评分重新计算...")
+                do {
+                    let rpcResponse = try await supabaseService.supabase
+                        .rpc("calculate_credibility_score", params: ["p_user_id": otherUserId.lowercased()])
+                        .execute()
+                    print("✅ [评分] 已触发信誉评分重新计算，状态码: \(rpcResponse.response.statusCode)")
+                    
+                    // 验证评分是否更新
+                    if let updatedScore = try? await supabaseService.getCredibilityScore(userId: otherUserId) {
+                        print("✅ [评分] 验证更新后的评分:")
+                        print("   - average_rating: \(updatedScore.averageRating)")
+                        print("   - overall_score: \(updatedScore.overallScore)")
+                    } else {
+                        print("⚠️ [评分] 无法验证更新后的评分")
+                    }
+                } catch {
+                    print("❌ [评分] 触发信誉评分重新计算失败: \(error.localizedDescription)")
+                    print("❌ [评分] 错误详情: \(error)")
+                }
+                
+                // 6. 清除缓存并发送通知，让其他界面刷新评分
+                print("🔍 [评分] 步骤6: 清除缓存并发送刷新评分通知...")
+                CredibilityScoreCache.shared.invalidateScore(for: otherUserId)
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("CredibilityScoreUpdated"),
+                    object: nil,
+                    userInfo: ["userId": otherUserId]
+                )
+                print("✅ [评分] 已清除缓存并发送刷新评分通知")
+                
+                print("✅ [评分] ========== 评分提交完成 ==========")
+                
+                await MainActor.run {
+                    isSubmitting = false
+                    dismiss()
+                }
+            } catch {
+                print("❌ [评分] ========== 提交失败 ==========")
+                print("❌ [评分] 错误类型: \(type(of: error))")
+                print("❌ [评分] 错误描述: \(error.localizedDescription)")
+                
+                // 尝试获取更详细的错误信息
+                if let nsError = error as NSError? {
+                    print("❌ [评分] 错误代码: \(nsError.code)")
+                    print("❌ [评分] 错误域: \(nsError.domain)")
+                    print("❌ [评分] 用户信息: \(nsError.userInfo)")
+                }
+                
+                // 打印完整的错误信息
+                print("❌ [评分] 完整错误: \(error)")
+                
+                // 如果是 URL 错误，尝试获取更多信息
+                if let urlError = error as? URLError {
+                    print("❌ [评分] URL 错误代码: \(urlError.code.rawValue)")
+                    print("❌ [评分] URL 错误描述: \(urlError.localizedDescription)")
+                }
+                
+                await MainActor.run {
+                    isSubmitting = false
+                    // 即使失败也关闭界面，避免用户卡住
+                    dismiss()
+                }
+            }
         }
     }
 }

@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS meeting_ratings (
     rated_user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     rating DECIMAL(2,1) NOT NULL CHECK (rating >= 0.5 AND rating <= 5.0),
     tags JSONB DEFAULT '[]'::jsonb,
+    comment TEXT,  -- 🆕 评论内容（可选）
     timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     gps_verified BOOLEAN DEFAULT FALSE,
     meeting_duration INT,  -- 秒

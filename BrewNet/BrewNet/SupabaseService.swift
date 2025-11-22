@@ -7,6 +7,7 @@ class SupabaseService: ObservableObject {
     static let shared = SupabaseService()
     
     private let client: SupabaseClient
+    var supabase: SupabaseClient { client }  // 🆕 公开访问 client
     private weak var databaseManager: DatabaseManager?
     
     private init() {
@@ -5714,6 +5715,102 @@ extension SupabaseService {
         print("✅ Found \(profiles.count) mentor candidates")
 
         return profiles
+    }
+    
+    // MARK: - Credibility System
+    
+    /// 获取用户信誉评分
+    func getCredibilityScore(userId: String) async throws -> CredibilityScore? {
+        print("🔍 [SupabaseService] 查询信誉评分，userId: \(userId)")
+        do {
+            // 使用小写格式查询（数据库通常存储为小写）
+            let response = try await client
+                .from("credibility_scores")
+                .select("*")
+                .eq("user_id", value: userId.lowercased())
+                .single()
+                .execute()
+            
+            print("✅ [SupabaseService] 查询成功，状态码: \(response.response.statusCode)")
+            print("📊 [SupabaseService] 响应数据: \(String(data: response.data, encoding: .utf8) ?? "无法解析")")
+            
+            let decoder = JSONDecoder()
+            // 不使用 convertFromSnakeCase，因为 CredibilityScore 已经定义了完整的 CodingKeys
+            // 也不设置 dateDecodingStrategy，因为 CredibilityScore 的自定义 init(from decoder:) 会处理日期
+            decoder.keyDecodingStrategy = .useDefaultKeys
+            
+            let score = try decoder.decode(CredibilityScore.self, from: response.data)
+            print("✅ [SupabaseService] 解码成功:")
+            print("   - average_rating: \(score.averageRating)")
+            print("   - overall_score: \(score.overallScore)")
+            return score
+        } catch {
+            print("❌ [SupabaseService] 无法获取信誉评分: \(error.localizedDescription)")
+            print("❌ [SupabaseService] 错误类型: \(type(of: error))")
+            print("❌ [SupabaseService] 完整错误: \(error)")
+            return nil
+        }
+    }
+    
+    /// 获取见面评分记录
+    func getMeetingRating(meetingId: String, raterId: String, ratedUserId: String) async throws -> MeetingRating? {
+        do {
+            print("🔍 [SupabaseService] 查询评分记录:")
+            print("   - meetingId (原始): \(meetingId)")
+            print("   - meetingId (小写): \(meetingId.lowercased())")
+            print("   - raterId (原始): \(raterId)")
+            print("   - raterId (小写): \(raterId.lowercased())")
+            print("   - ratedUserId (原始): \(ratedUserId)")
+            print("   - ratedUserId (小写): \(ratedUserId.lowercased())")
+            
+            // 不使用 .single()，先查询所有匹配的记录
+            // 使用小写格式查询（数据库通常存储为小写）
+            let response = try await client
+                .from("meeting_ratings")
+                .select("*")
+                .eq("meeting_id", value: meetingId.lowercased())
+                .eq("rater_id", value: raterId.lowercased())
+                .eq("rated_user_id", value: ratedUserId.lowercased())
+                .execute()
+            
+            print("✅ [SupabaseService] 查询成功，状态码: \(response.response.statusCode)")
+            print("📊 [SupabaseService] 响应数据大小: \(response.data.count) bytes")
+            
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            
+            // 处理日期格式
+            let dateFormatter = ISO8601DateFormatter()
+            dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            
+            decoder.dateDecodingStrategy = .custom { decoder in
+                let container = try decoder.singleValueContainer()
+                let dateString = try container.decode(String.self)
+                
+                if let date = dateFormatter.date(from: dateString) {
+                    return date
+                }
+                
+                dateFormatter.formatOptions = [.withInternetDateTime]
+                if let date = dateFormatter.date(from: dateString) {
+                    return date
+                }
+                
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid date format: \(dateString)")
+            }
+            
+            // 尝试解码为数组
+            let ratings = try decoder.decode([MeetingRating].self, from: response.data)
+            print("✅ [SupabaseService] 找到 \(ratings.count) 条评分记录")
+            
+            // 返回第一条记录（应该只有一条）
+            return ratings.first
+        } catch {
+            print("❌ [SupabaseService] 无法获取评分记录: \(error.localizedDescription)")
+            print("❌ [SupabaseService] 错误类型: \(type(of: error))")
+            print("❌ [SupabaseService] 完整错误: \(error)")
+            return nil
+        }
     }
 }
 

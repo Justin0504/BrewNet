@@ -1,5 +1,51 @@
 import Foundation
 
+// MARK: - 信誉评分缓存
+
+class CredibilityScoreCache {
+    static let shared = CredibilityScoreCache()
+    
+    private var cache: [String: CredibilityScore] = [:]
+    private var cacheTimestamps: [String: Date] = [:]
+    private let cacheExpirationInterval: TimeInterval = 300 // 5分钟缓存过期
+    
+    private init() {}
+    
+    func getScore(for userId: String) -> CredibilityScore? {
+        let key = userId.lowercased()
+        guard let score = cache[key],
+              let timestamp = cacheTimestamps[key],
+              Date().timeIntervalSince(timestamp) < cacheExpirationInterval else {
+            // 缓存过期或不存在，清除
+            cache.removeValue(forKey: key)
+            cacheTimestamps.removeValue(forKey: key)
+            return nil
+        }
+        print("📦 [CredibilityScoreCache] 从缓存获取评分: \(score.averageRating) (userId: \(key))")
+        return score
+    }
+    
+    func setScore(_ score: CredibilityScore, for userId: String) {
+        let key = userId.lowercased()
+        cache[key] = score
+        cacheTimestamps[key] = Date()
+        print("💾 [CredibilityScoreCache] 保存评分到缓存: \(score.averageRating) (userId: \(key))")
+    }
+    
+    func invalidateScore(for userId: String) {
+        let key = userId.lowercased()
+        cache.removeValue(forKey: key)
+        cacheTimestamps.removeValue(forKey: key)
+        print("🗑️ [CredibilityScoreCache] 清除缓存: \(key)")
+    }
+    
+    func clearAll() {
+        cache.removeAll()
+        cacheTimestamps.removeAll()
+        print("🗑️ [CredibilityScoreCache] 清除所有缓存")
+    }
+}
+
 // MARK: - 信誉评分系统
 
 /// 信誉等级
@@ -123,6 +169,48 @@ struct CredibilityScore: Codable, Equatable {
         case gpsAnomalyCount = "gps_anomaly_count"
         case mutualHighRatingCount = "mutual_high_rating_count"
         case lastDecayDate = "last_decay_date"
+        // 忽略数据库中的时间戳字段（不需要在结构体中存储）
+        // case createdAt = "created_at"
+        // case updatedAt = "updated_at"
+    }
+    
+    // 自定义解码，忽略 created_at 和 updated_at 字段，并处理日期格式
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // 处理日期解码
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        
+        func decodeDate(from key: CodingKeys) throws -> Date? {
+            guard container.contains(key) else { return nil }
+            if let dateString = try? container.decode(String.self, forKey: key) {
+                if let date = dateFormatter.date(from: dateString) {
+                    return date
+                }
+                dateFormatter.formatOptions = [.withInternetDateTime]
+                if let date = dateFormatter.date(from: dateString) {
+                    return date
+                }
+            }
+            return nil
+        }
+        
+        self.userId = try container.decode(String.self, forKey: .userId)
+        self.overallScore = try container.decode(Double.self, forKey: .overallScore)
+        self.averageRating = try container.decode(Double.self, forKey: .averageRating)
+        self.fulfillmentRate = try container.decode(Double.self, forKey: .fulfillmentRate)
+        self.totalMeetings = try container.decode(Int.self, forKey: .totalMeetings)
+        self.totalNoShows = try container.decode(Int.self, forKey: .totalNoShows)
+        self.lastMeetingDate = try decodeDate(from: .lastMeetingDate)
+        self.tier = try container.decode(CredibilityTier.self, forKey: .tier)
+        self.isFrozen = try container.decode(Bool.self, forKey: .isFrozen)
+        self.freezeEndDate = try decodeDate(from: .freezeEndDate)
+        self.isBanned = try container.decode(Bool.self, forKey: .isBanned)
+        self.banReason = try container.decodeIfPresent(String.self, forKey: .banReason)
+        self.gpsAnomalyCount = try container.decode(Int.self, forKey: .gpsAnomalyCount)
+        self.mutualHighRatingCount = try container.decode(Int.self, forKey: .mutualHighRatingCount)
+        self.lastDecayDate = try decodeDate(from: .lastDecayDate)
     }
     
     init(userId: String) {
@@ -153,6 +241,7 @@ struct MeetingRating: Codable, Identifiable {
     let ratedUserId: String           // 被评分者
     let rating: Double                // 评分 (0.5-5.0)
     let tags: [RatingTag]             // 评分标签
+    let comment: String?             // 🆕 评论内容
     let timestamp: Date
     let gpsVerified: Bool             // GPS验证通过
     let meetingDuration: TimeInterval // 见面时长（秒）
@@ -164,21 +253,95 @@ struct MeetingRating: Codable, Identifiable {
         case ratedUserId = "rated_user_id"
         case rating
         case tags
+        case comment
         case timestamp
         case gpsVerified = "gps_verified"
         case meetingDuration = "meeting_duration"
     }
     
-    init(meetingId: String, raterId: String, ratedUserId: String, rating: Double, tags: [RatingTag], gpsVerified: Bool, meetingDuration: TimeInterval) {
+    init(meetingId: String, raterId: String, ratedUserId: String, rating: Double, tags: [RatingTag], comment: String? = nil, gpsVerified: Bool, meetingDuration: TimeInterval) {
         self.id = UUID()
         self.meetingId = meetingId
         self.raterId = raterId
         self.ratedUserId = ratedUserId
         self.rating = rating
         self.tags = tags
+        self.comment = comment
         self.timestamp = Date()
         self.gpsVerified = gpsVerified
         self.meetingDuration = meetingDuration
+    }
+    
+    // 自定义解码，处理 tags 字段可能的不同格式
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // 解码基本字段
+        let idString = try container.decode(String.self, forKey: .id)
+        guard let uuid = UUID(uuidString: idString) else {
+            throw DecodingError.dataCorruptedError(forKey: .id, in: container, debugDescription: "Invalid UUID format")
+        }
+        self.id = uuid
+        
+        self.meetingId = try container.decode(String.self, forKey: .meetingId)
+        self.raterId = try container.decode(String.self, forKey: .raterId)
+        self.ratedUserId = try container.decode(String.self, forKey: .ratedUserId)
+        
+        // 处理 rating 字段（可能是 Double 或 Int）
+        if let ratingDouble = try? container.decode(Double.self, forKey: .rating) {
+            self.rating = ratingDouble
+        } else if let ratingInt = try? container.decode(Int.self, forKey: .rating) {
+            self.rating = Double(ratingInt)
+        } else {
+            throw DecodingError.dataCorruptedError(forKey: .rating, in: container, debugDescription: "Invalid rating type")
+        }
+        
+        self.comment = try container.decodeIfPresent(String.self, forKey: .comment)
+        
+        // 处理 gpsVerified 字段（可能是 Bool 或 Int）
+        if let gpsBool = try? container.decode(Bool.self, forKey: .gpsVerified) {
+            self.gpsVerified = gpsBool
+        } else if let gpsInt = try? container.decode(Int.self, forKey: .gpsVerified) {
+            self.gpsVerified = gpsInt != 0
+        } else {
+            self.gpsVerified = false
+        }
+        
+        // 处理 meetingDuration 字段（可能是 TimeInterval 或 Int）
+        if let durationDouble = try? container.decode(TimeInterval.self, forKey: .meetingDuration) {
+            self.meetingDuration = durationDouble
+        } else if let durationInt = try? container.decode(Int.self, forKey: .meetingDuration) {
+            self.meetingDuration = TimeInterval(durationInt)
+        } else {
+            self.meetingDuration = 0
+        }
+        
+        // 处理日期
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let timestampString = try container.decode(String.self, forKey: .timestamp)
+        if let date = dateFormatter.date(from: timestampString) {
+            self.timestamp = date
+        } else {
+            dateFormatter.formatOptions = [.withInternetDateTime]
+            if let date = dateFormatter.date(from: timestampString) {
+                self.timestamp = date
+            } else {
+                throw DecodingError.dataCorruptedError(forKey: .timestamp, in: container, debugDescription: "Invalid date format: \(timestampString)")
+            }
+        }
+        
+        // 处理 tags 字段（可能是数组、字符串数组或空数组）
+        if let tagsArray = try? container.decode([RatingTag].self, forKey: .tags) {
+            self.tags = tagsArray
+        } else if let tagsStringArray = try? container.decode([String].self, forKey: .tags) {
+            // 如果是字符串数组，尝试转换为 RatingTag
+            self.tags = tagsStringArray.compactMap { RatingTag(rawValue: $0) }
+        } else {
+            // 如果都失败，使用空数组
+            print("⚠️ [MeetingRating] 无法解码 tags 字段，使用空数组")
+            self.tags = []
+        }
     }
 }
 
