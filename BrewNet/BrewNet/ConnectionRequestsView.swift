@@ -267,6 +267,9 @@ struct ConnectionRequestsView: View {
                 
                 print("✅ Rejected invitation from \(request.requesterProfile.name)")
                 
+                // 🆕 从缓存中移除该请求
+                LocalCacheManager.shared.invalidateConnectionRequest(userId: currentUser.id, requestId: request.id)
+                
                 await MainActor.run {
                     NotificationCenter.default.post(
                         name: NSNotification.Name("ConnectionRequestRejected"),
@@ -298,6 +301,9 @@ struct ConnectionRequestsView: View {
                 )
                 
                 print("✅ Accepted invitation from \(request.requesterProfile.name)")
+                
+                // 🆕 从缓存中移除该请求
+                LocalCacheManager.shared.invalidateConnectionRequest(userId: currentUser.id, requestId: request.id)
                 
                 // 同时保存到本地数据库
                 await MainActor.run {
@@ -343,6 +349,22 @@ struct ConnectionRequestsView: View {
         }
         
         isLoading = true
+        
+        // 🆕 先尝试从缓存加载
+        if let cachedData = LocalCacheManager.shared.loadConnectionRequestsData(userId: currentUser.id) {
+            print("📦 [ConnectionRequests] 从缓存加载数据")
+            self.requests = cachedData.requests
+            self.isLoading = false
+            updateUnreadTemporaryMessageCount()
+            
+            // 后台刷新缓存
+            Task {
+                await refreshConnectionRequestsInBackground(userId: currentUser.id)
+            }
+            return
+        }
+        
+        // 缓存未命中，从 Supabase 加载
         Task {
             do {
                 // 从 Supabase 获取收到的待处理邀请
@@ -485,6 +507,9 @@ struct ConnectionRequestsView: View {
                     print("✅ Loaded \(sortedRequests.count) connection requests from database (Pro prioritized)")
                 }
                 
+                // 🆕 保存到缓存
+                LocalCacheManager.shared.saveConnectionRequestsData(userId: currentUser.id, requests: sortedRequests)
+                
                 // 更新未读临时消息数
                 await updateUnreadTemporaryMessagesCount()
                 
@@ -495,6 +520,159 @@ struct ConnectionRequestsView: View {
                     self.isLoading = false
                 }
             }
+        }
+    }
+    
+    // MARK: - 后台刷新 Connection Requests（用于缓存后台更新）
+    private func refreshConnectionRequestsInBackground(userId: String) async {
+        print("🔄 [ConnectionRequests] 后台刷新数据中...")
+        do {
+            // 从 Supabase 获取收到的待处理邀请
+            let supabaseInvitations = try await supabaseService.getPendingInvitations(userId: userId)
+            
+            // 获取所有已匹配的用户ID，用于过滤
+            var matchedUserIds: Set<String> = []
+            do {
+                let matches = try await supabaseService.getActiveMatches(userId: userId)
+                for match in matches {
+                    if match.userId == userId {
+                        matchedUserIds.insert(match.matchedUserId)
+                    } else if match.matchedUserId == userId {
+                        matchedUserIds.insert(match.userId)
+                    }
+                }
+            } catch {
+                print("⚠️ Failed to fetch matches for filtering (background): \(error.localizedDescription)")
+            }
+            
+            // 过滤掉已经匹配的邀请
+            let filteredInvitations = supabaseInvitations.filter { invitation in
+                !matchedUserIds.contains(invitation.senderId)
+            }
+            
+            // 转换为 ConnectionRequest 模型
+            var convertedRequests: [ConnectionRequest] = []
+            
+            for invitation in filteredInvitations {
+                // 获取发送者的 profile 信息
+                var requesterProfile = ConnectionRequestProfile(
+                    profilePhoto: nil,
+                    name: "Unknown",
+                    jobTitle: "",
+                    company: "",
+                    location: "",
+                    bio: "",
+                    expertise: [],
+                    backgroundImage: nil
+                )
+                
+                // 从 senderProfile JSONB 中提取信息
+                if let senderProfile = invitation.senderProfile {
+                    requesterProfile = ConnectionRequestProfile(
+                        profilePhoto: senderProfile.profileImage,
+                        name: senderProfile.name,
+                        jobTitle: senderProfile.jobTitle ?? "",
+                        company: senderProfile.company ?? "",
+                        location: senderProfile.location ?? "",
+                        bio: senderProfile.bio ?? "",
+                        expertise: senderProfile.expertise ?? [],
+                        backgroundImage: nil
+                    )
+                } else {
+                    // 如果没有 senderProfile，尝试从 profile 表获取
+                    if let senderProfile = try? await supabaseService.getProfile(userId: invitation.senderId) {
+                        let brewNetProfile = senderProfile.toBrewNetProfile()
+                        requesterProfile = ConnectionRequestProfile(
+                            profilePhoto: brewNetProfile.coreIdentity.profileImage,
+                            name: brewNetProfile.coreIdentity.name,
+                            jobTitle: brewNetProfile.professionalBackground.jobTitle ?? "",
+                            company: brewNetProfile.professionalBackground.currentCompany ?? "",
+                            location: brewNetProfile.coreIdentity.location ?? "",
+                            bio: brewNetProfile.coreIdentity.bio ?? "",
+                            expertise: brewNetProfile.professionalBackground.skills,
+                            backgroundImage: nil
+                        )
+                    }
+                }
+                
+                // 解析创建时间
+                let dateFormatter = ISO8601DateFormatter()
+                let createdAt = dateFormatter.date(from: invitation.createdAt) ?? Date()
+                
+                // 加载该请求的临时消息
+                var temporaryMessages: [TemporaryMessage] = []
+                do {
+                    let messages = try await supabaseService.getTemporaryMessagesFromSender(
+                        receiverId: userId,
+                        senderId: invitation.senderId
+                    )
+                    var tempMessages = messages.map { TemporaryMessage(from: $0) }
+                    
+                    // 限制最多10条消息（保留最新的10条）
+                    if tempMessages.count > 10 {
+                        tempMessages.sort(by: { $0.timestamp < $1.timestamp })
+                        tempMessages = Array(tempMessages.suffix(10))
+                    }
+                    
+                    temporaryMessages = tempMessages
+                } catch {
+                    print("⚠️ [后台刷新] 加载临时消息失败: \(error.localizedDescription)")
+                }
+                
+                var connectionRequest = ConnectionRequest(
+                    id: invitation.id,
+                    requesterId: invitation.senderId,
+                    requesterName: requesterProfile.name,
+                    requesterProfile: requesterProfile,
+                    reasonForInterest: invitation.reasonForInterest,
+                    createdAt: createdAt,
+                    isFeatured: false
+                )
+                connectionRequest.temporaryMessages = temporaryMessages
+                
+                convertedRequests.append(connectionRequest)
+            }
+            
+            // 加载 Pro 状态并对结果排序
+            let requesterIds = convertedRequests.map { $0.requesterId }
+            let sortedRequests: [ConnectionRequest]
+            do {
+                let proUserIds = try await supabaseService.getProUserIds(from: requesterIds)
+                let requestsWithProFlag = convertedRequests.map { request -> ConnectionRequest in
+                    var updatedRequest = request
+                    updatedRequest.isRequesterPro = proUserIds.contains(request.requesterId)
+                    return updatedRequest
+                }
+                
+                sortedRequests = requestsWithProFlag.sorted { lhs, rhs in
+                    if lhs.isRequesterPro != rhs.isRequesterPro {
+                        return lhs.isRequesterPro && !rhs.isRequesterPro
+                    }
+                    return lhs.createdAt > rhs.createdAt
+                }
+            } catch {
+                print("⚠️ Failed to load Pro status for requests (background): \(error.localizedDescription)")
+                sortedRequests = convertedRequests.sorted(by: { $0.createdAt > $1.createdAt })
+            }
+            
+            // 保存到缓存
+            LocalCacheManager.shared.saveConnectionRequestsData(userId: userId, requests: sortedRequests)
+            
+            // 如果数据有变化，更新 UI
+            await MainActor.run {
+                if self.requests.count != sortedRequests.count {
+                    self.requests = sortedRequests
+                    print("🔄 [ConnectionRequests] 后台刷新完成，数据已更新")
+                } else {
+                    print("🔄 [ConnectionRequests] 后台刷新完成，数据无变化")
+                }
+            }
+            
+            // 更新未读临时消息数
+            await updateUnreadTemporaryMessagesCount()
+            
+        } catch {
+            print("❌ [ConnectionRequests] 后台刷新失败: \(error.localizedDescription)")
         }
     }
     
@@ -550,6 +728,18 @@ struct ConnectionRequestsView: View {
                 totalUnreadTemporaryMessagesCount = requests.reduce(0) { $0 + $1.unreadTemporaryMessageCount(currentUserId: currentUser.id) }
             }
         }
+    }
+    
+    // MARK: - Update Unread Count (同步版本，用于缓存加载后)
+    private func updateUnreadTemporaryMessageCount() {
+        guard let currentUser = authManager.currentUser else {
+            totalUnreadTemporaryMessagesCount = 0
+            return
+        }
+        
+        // 从 requests 中计算未读消息数
+        totalUnreadTemporaryMessagesCount = requests.reduce(0) { $0 + $1.unreadTemporaryMessageCount(currentUserId: currentUser.id) }
+        print("📊 [临时消息] 从缓存计算未读消息数: \(totalUnreadTemporaryMessagesCount)")
     }
 }
 
