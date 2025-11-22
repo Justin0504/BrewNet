@@ -743,7 +743,8 @@ class QueryParser {
         "very", "much", "more", "most", "many", "some", "any", "all",
         // 通用词汇（单独出现无意义）
         "experience", "exp", "experienced", "graduate", "graduated", "graduating",
-        "learn", "learning", "learned"  // ⭐ 添加 learn 相关词
+        "learn", "learning", "learned",  // ⭐ 添加 learn 相关词
+        "train", "training", "trained"   // ⭐ 添加 train 相关词
     ]
     
     private func tokenize(_ text: String) -> [String] {
