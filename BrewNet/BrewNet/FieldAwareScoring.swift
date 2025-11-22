@@ -263,6 +263,7 @@ class FieldAwareScoring {
         let zonedText = ZonedSearchableText.from(profile: profile)
         var score: Double = 0.0
         var matchDetails: [(token: String, zone: FieldZone)] = []
+        var matchedSynonymGroups: Set<String> = []  // ⭐ 记录已匹配的同义词组
         
         // 1. 找出所有短语（包含空格的token）
         let phrases = tokens.filter { $0.contains(" ") }
@@ -279,16 +280,26 @@ class FieldAwareScoring {
             // 如果这个词是某个短语的一部分，跳过（避免重复计分）
             if phraseWords.contains(token) { continue }
             
+            // ⭐ 检查是否已经为同义词组计分
+            // 如果这个 token 属于某个同义词组，且该组已经计分，则跳过
+            let synonymGroup = getSynonymGroupKey(for: token)
+            if matchedSynonymGroups.contains(synonymGroup) {
+                continue
+            }
+            
             // 在不同区域搜索，应用不同权重（支持同义词）
             if containsWithSynonyms(zonedText.zoneA, token: token) {
                 score += FieldZone.zoneA.weight
                 matchDetails.append((token, .zoneA))
+                matchedSynonymGroups.insert(synonymGroup)  // ⭐ 标记该同义词组已计分
             } else if containsWithSynonyms(zonedText.zoneB, token: token) {
                 score += FieldZone.zoneB.weight
                 matchDetails.append((token, .zoneB))
+                matchedSynonymGroups.insert(synonymGroup)  // ⭐ 标记该同义词组已计分
             } else if containsWithSynonyms(zonedText.zoneC, token: token) {
                 score += FieldZone.zoneC.weight
                 matchDetails.append((token, .zoneC))
+                matchedSynonymGroups.insert(synonymGroup)  // ⭐ 标记该同义词组已计分
             }
         }
         
@@ -304,6 +315,32 @@ class FieldAwareScoring {
         }
         
         return score
+    }
+    
+    /// 获取同义词组的唯一标识符
+    /// 同义词组内的所有词返回相同的key，非同义词返回自身
+    private func getSynonymGroupKey(for term: String) -> String {
+        let t = term.lowercased()
+        
+        // 检查是否在 commonSynonyms 中有定义
+        if let synonyms = commonSynonyms[t] {
+            // 返回该组中字典序最小的词作为 key（保证一致性）
+            var allTerms = synonyms
+            allTerms.insert(t)
+            return allTerms.sorted().first ?? t
+        }
+        
+        // 反向查找：是否作为某个词的同义词出现
+        for (key, values) in commonSynonyms {
+            if values.contains(t) {
+                var allTerms = values
+                allTerms.insert(key)
+                return allTerms.sorted().first ?? t
+            }
+        }
+        
+        // 不是同义词，返回自身
+        return t
     }
     
     /// 特定实体的精确匹配（用于结构化查询）
@@ -431,6 +468,44 @@ class FieldAwareScoring {
             let skillScore = min(Double(matchedSkills.count), 5.0)
             score += skillScore
             print("  🛠️  Skill matches: \(matchedSkills.prefix(3).joined(separator: ", ")) (+\(String(format: "%.1f", skillScore)))")
+        }
+        
+        // ⭐ 行业匹配（当前行业 +6分，过往行业经验 +3分）
+        if !entities.industries.isEmpty {
+            // 检查当前行业
+            if let currentIndustry = profile.professionalBackground.industry?.lowercased() {
+                for industry in entities.industries {
+                    if currentIndustry.contains(industry) || industry.contains(currentIndustry) {
+                        score += 6.0
+                        print("  🏭 Current industry match: \(industry) (+6.0)")
+                        break
+                    }
+                }
+            }
+            
+            // 检查工作经历中的行业关键词（从公司名、职位、职责中推断）
+            for experience in profile.professionalBackground.workExperiences.prefix(5) {
+                let expText = [
+                    experience.companyName,
+                    experience.position ?? "",
+                    experience.responsibilities ?? ""
+                ].joined(separator: " ").lowercased()
+                
+                for industry in entities.industries {
+                    if expText.contains(industry) {
+                        // 计算时间衰减
+                        let currentYear = Double(Calendar.current.component(.year, from: Date()))
+                        let endYear = experience.endYear.map { Double($0) } ?? currentYear
+                        let yearsAgo = currentYear - endYear
+                        let timeWeight = SoftMatching.timeDecay(yearsAgo: yearsAgo, halfLife: 3.0)
+                        let weightedScore = 3.0 * timeWeight
+                        
+                        score += weightedScore
+                        print("  🏭 Past industry experience: \(industry) (+\(String(format: "%.1f", weightedScore)))")
+                        break
+                    }
+                }
+            }
         }
         
         return score

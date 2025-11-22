@@ -25,6 +25,7 @@ struct QueryEntities {
     var hasRole: Bool { !roles.isEmpty }
     var hasSchool: Bool { !schools.isEmpty }
     var hasSkill: Bool { !skills.isEmpty }
+    var hasIndustry: Bool { !industries.isEmpty }
     var hasNumber: Bool { !numbers.isEmpty }
 }
 
@@ -131,6 +132,31 @@ class QueryParser {
         // Business
         "leadership", "marketing", "sales", "strategy", "consulting",
         "project management", "agile", "scrum"
+    ]
+    
+    // ⭐ 行业/领域词典
+    private let industryDictionary: Set<String> = [
+        // Tech & Finance
+        "fintech", "financial technology", "financial services", "banking",
+        "e-commerce", "ecommerce", "retail", "marketplace",
+        "adtech", "advertising technology", "martech", "marketing technology",
+        "insurtech", "insurance technology",
+        "proptech", "real estate technology",
+        // Healthcare & Bio
+        "healthtech", "healthcare", "biotech", "medtech", "pharma", "pharmaceutical",
+        // Enterprise & SaaS
+        "saas", "enterprise software", "b2b", "b2c",
+        // Emerging Tech
+        "crypto", "blockchain", "web3", "nft",
+        "gaming", "game development", "esports",
+        "edtech", "education technology",
+        // Traditional Industries
+        "automotive", "transportation", "logistics", "supply chain",
+        "energy", "renewable energy", "cleantech",
+        "manufacturing", "aerospace", "defense",
+        "media", "entertainment", "streaming",
+        "social media", "social network",
+        "telecommunications", "telecom"
     ]
     
     // MARK: - 同义词映射（扩展版）
@@ -434,15 +460,17 @@ class QueryParser {
         let rolePhrases = matchPhrases(in: text, dictionary: roleDictionary)
         let schoolPhrases = matchPhrases(in: text, dictionary: schoolDictionary)
         let skillPhrases = matchPhrases(in: text, dictionary: skillDictionary)
+        let industryPhrases = matchPhrases(in: text, dictionary: industryDictionary)
         
         entities.companies.append(contentsOf: companyPhrases)
         entities.roles.append(contentsOf: rolePhrases)
         entities.schools.append(contentsOf: schoolPhrases)
         entities.skills.append(contentsOf: skillPhrases)
+        entities.industries.append(contentsOf: industryPhrases)
         
         // 单词匹配（只在没有匹配到短语时）
         let matchedPhraseWords = Set(
-            (companyPhrases + rolePhrases + schoolPhrases + skillPhrases)
+            (companyPhrases + rolePhrases + schoolPhrases + skillPhrases + industryPhrases)
                 .flatMap { $0.split(separator: " ").map { String($0) } }
         )
         
@@ -462,6 +490,9 @@ class QueryParser {
             if skillDictionary.contains(token) {
                 entities.skills.append(token)
             }
+            if industryDictionary.contains(token) {
+                entities.industries.append(token)
+            }
         }
         
         // 去重
@@ -469,6 +500,7 @@ class QueryParser {
         entities.roles = Array(Set(entities.roles))
         entities.schools = Array(Set(entities.schools))
         entities.skills = Array(Set(entities.skills))
+        entities.industries = Array(Set(entities.industries))
         
         // 提取数字
         entities.numbers = extractNumbers(from: text)
@@ -561,6 +593,9 @@ class QueryParser {
         }
         if entities.hasSchool {
             print("  🎓 Schools: \(entities.schools.joined(separator: ", "))")
+        }
+        if entities.hasIndustry {
+            print("  🏭 Industries: \(entities.industries.joined(separator: ", "))")
         }
         if entities.hasSkill {
             print("  🛠️  Skills: \(entities.skills.joined(separator: ", "))")
