@@ -272,7 +272,7 @@ class QueryParser {
         
         // Finance
         "gs": ["goldman", "goldman sachs"],
-        "ms": ["morgan stanley"],
+        "morgan stanley": ["morgan stanley"],
         "jpm": ["jpmorgan", "jp morgan"],
         
         // ===== 学位 & 教育 =====

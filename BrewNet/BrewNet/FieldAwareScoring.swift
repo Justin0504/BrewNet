@@ -49,6 +49,11 @@ struct ZonedSearchableText {
             profile.professionalBackground.education ?? ""
         ]
         
+        // 添加职业自我介绍（Self Introduction）- 包含技术栈和职位信息
+        if let selfIntro = profile.personalitySocial.selfIntroduction {
+            zoneB.append(selfIntro)
+        }
+        
         // 教育经历
         if let educations = profile.professionalBackground.educations {
             for education in educations.prefix(3) {
@@ -60,21 +65,23 @@ struct ZonedSearchableText {
             }
         }
         
-        // 工作经历（最近3个）
+        // 工作经历（最近3个）- 包含所有关键字段
         for exp in profile.professionalBackground.workExperiences.prefix(3) {
             zoneB.append(exp.companyName)
             if let position = exp.position {
                 zoneB.append(position)
             }
-            zoneB.append(contentsOf: Array(exp.highlightedSkills.prefix(3)))
+            // 添加职责/角色亮点 (responsibilities = role highlights)
+            if let responsibilities = exp.responsibilities {
+                zoneB.append(responsibilities)
+            }
+            // 添加所有 highlighted skills (key skills)
+            zoneB.append(contentsOf: exp.highlightedSkills)
         }
         
         // Zone C: 爱好、兴趣、价值观（较低权重）
         var zoneC = profile.personalitySocial.hobbies
         zoneC.append(contentsOf: profile.personalitySocial.valuesTags)
-        if let intro = profile.personalitySocial.selfIntroduction {
-            zoneC.append(intro)
-        }
         
         return ZonedSearchableText(
             zoneA: zoneA.joined(separator: " ").lowercased(),
