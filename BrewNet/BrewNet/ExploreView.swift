@@ -1079,6 +1079,9 @@ private struct UserProfileCardPreview: View {
     let isVerifiedOverride: Bool?
     var onWorkExperienceTap: ((WorkExperience) -> Void)?
     
+    @EnvironmentObject var supabaseService: SupabaseService
+    @State private var credibilityScore: CredibilityScore?
+    
     var body: some View {
         ProfileCardContentView(
             profile: profile,
@@ -1087,11 +1090,87 @@ private struct UserProfileCardPreview: View {
             isVerified: isVerifiedOverride,
             currentUserLocation: nil,
             showDistance: false,
+            credibilityScore: credibilityScore,
             onWorkExperienceTap: onWorkExperienceTap
         )
         .background(Color.white)
         .cornerRadius(30)
         .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 6)
         .padding(.horizontal, 16)
+        .onAppear {
+            loadCredibilityScore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CredibilityScoreUpdated"))) { _ in
+            loadCredibilityScore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            loadCredibilityScore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserLoggedIn"))) { _ in
+            loadCredibilityScore()
+        }
+    }
+    
+    private func loadCredibilityScore() {
+        print("🔄 [HeadhuntingProfileCard] 开始加载信誉评分，userId: \(profile.userId)")
+        Task {
+            do {
+                // 尝试从缓存加载
+                if let cachedScore = CredibilityScoreCache.shared.getScore(for: profile.userId) {
+                    print("✅ [HeadhuntingProfileCard] 从缓存加载信誉评分: \(cachedScore.averageRating)")
+                    await MainActor.run {
+                        credibilityScore = cachedScore
+                    }
+                    // 并在后台刷新缓存
+                    Task { await refreshCredibilityScore(for: profile.userId) }
+                    return
+                }
+
+                // 强制使用小写格式查询，确保与数据库一致
+                if let score = try await supabaseService.getCredibilityScore(userId: profile.userId.lowercased()) {
+                    print("✅ [HeadhuntingProfileCard] 成功加载信誉评分: \(score.averageRating)")
+                    await MainActor.run {
+                        credibilityScore = score
+                        CredibilityScoreCache.shared.setScore(score, for: profile.userId)
+                    }
+                } else {
+                    print("⚠️ [HeadhuntingProfileCard] 未找到评分记录，尝试使用原始 userId 查询...")
+                    if let score = try? await supabaseService.getCredibilityScore(userId: profile.userId) {
+                        print("✅ [HeadhuntingProfileCard] 使用原始格式查询成功: \(score.averageRating)")
+                        await MainActor.run {
+                            credibilityScore = score
+                            CredibilityScoreCache.shared.setScore(score, for: profile.userId)
+                        }
+                    } else {
+                        print("⚠️ [HeadhuntingProfileCard] 未找到评分记录，使用默认值")
+                        await MainActor.run {
+                            let defaultScore = CredibilityScore(userId: profile.userId)
+                            credibilityScore = defaultScore
+                            CredibilityScoreCache.shared.setScore(defaultScore, for: profile.userId)
+                        }
+                    }
+                }
+            } catch {
+                print("❌ [HeadhuntingProfileCard] 无法加载信誉评分: \(error.localizedDescription)")
+                await MainActor.run {
+                    let defaultScore = CredibilityScore(userId: profile.userId)
+                    credibilityScore = defaultScore
+                    CredibilityScoreCache.shared.setScore(defaultScore, for: profile.userId)
+                }
+            }
+        }
+    }
+    
+    private func refreshCredibilityScore(for userId: String) async {
+        do {
+            if let score = try await supabaseService.getCredibilityScore(userId: userId.lowercased()) {
+                await MainActor.run {
+                    credibilityScore = score
+                    CredibilityScoreCache.shared.setScore(score, for: userId)
+                }
+            }
+        } catch {
+            print("⚠️ [HeadhuntingProfileCard] 刷新信誉评分失败: \(error.localizedDescription)")
+        }
     }
 }
