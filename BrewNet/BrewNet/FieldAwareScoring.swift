@@ -110,24 +110,49 @@ class FieldAwareScoring {
     
     // MARK: - 同义词映射（简化版，与 QueryParser 保持一致）
     
-    /// 常见同义词映射表（用于评分时的软匹配）
+    /// 常见同义词映射表（用于评分时的软匹配）⭐ 扩展版
     private let commonSynonyms: [String: Set<String>] = [
+        // 职位同义词
         "engineer": ["developer", "programmer", "swe", "sde"],
         "developer": ["engineer", "programmer", "swe", "sde"],
         "pm": ["product manager", "program manager"],
+        "swe": ["software engineer", "engineer", "developer"],
+        
+        // 技术栈同义词
         "frontend": ["front-end", "fe", "client side"],
         "backend": ["back-end", "be", "server side"],
         "fullstack": ["full-stack", "fs", "full stack"],
-        "ml": ["machine learning", "ai"],
-        "ai": ["artificial intelligence", "machine learning"],
+        
+        // ⭐ ML/AI 同义词组（完整映射）
+        "ml": ["machine learning", "ai", "artificial intelligence", "deep learning"],
+        "ai": ["artificial intelligence", "machine learning", "ml", "deep learning"],
+        "machine learning": ["ml", "ai", "artificial intelligence", "deep learning"],
+        "deep learning": ["ml", "ai", "machine learning", "artificial intelligence"],
+        "artificial intelligence": ["ai", "ml", "machine learning", "deep learning"],
+        
+        // 编程语言
         "js": ["javascript"],
+        "javascript": ["js"],
         "ts": ["typescript"],
+        "typescript": ["ts"],
         "py": ["python"],
+        "python": ["py"],
+        
+        // 框架和工具
         "react": ["reactjs"],
+        "reactjs": ["react"],
         "vue": ["vuejs"],
+        "vuejs": ["vue"],
         "k8s": ["kubernetes"],
+        "kubernetes": ["k8s"],
+        
+        // 云平台
         "aws": ["amazon web services"],
+        "amazon web services": ["aws"],
+        
+        // 公司
         "google": ["alphabet"],
+        "alphabet": ["google"],
         "facebook": ["meta"],
         "meta": ["facebook"]
     ]
@@ -248,7 +273,8 @@ class FieldAwareScoring {
         "want", "wanna", "looking", "find", "person", "someone", "anyone",
         "very", "much", "more", "most", "many", "some", "any", "all",
         // 通用词汇（单独出现无意义）
-        "experience", "exp", "experienced", "graduate", "graduated", "graduating"
+        "experience", "exp", "experienced", "graduate", "graduated", "graduating",
+        "learn", "learning", "learned"  // ⭐ 添加 learn 相关词
     ]
     
     /// 计算字段感知分数
