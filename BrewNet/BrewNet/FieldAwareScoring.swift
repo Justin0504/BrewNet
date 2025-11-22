@@ -267,6 +267,13 @@ class FieldAwareScoring {
         "take", "takes", "took", "taking",
         "give", "gives", "gave", "giving",
         "use", "uses", "used", "using",
+        "teach", "teaches", "taught", "teaching",  // ⭐ 添加 teach 相关词
+        "build", "builds", "built", "building",    // ⭐ 添加 build 相关词
+        "create", "creates", "created", "creating", // ⭐ 添加 create 相关词
+        "develop", "develops", "developed", "developing", // ⭐ 添加 develop 相关词
+        "design", "designs", "designed", "designing",     // ⭐ 添加 design 相关词 (注意: "designer" 是职位)
+        "manage", "manages", "managed", "managing",       // ⭐ 添加 manage 相关词 (注意: "manager" 是职位)
+        "lead", "leads", "led", "leading",                // ⭐ 添加 lead 相关词 (注意: "leader" 是职位)
         // 其他常见词
         "that", "this", "these", "those", "there", "here",
         "who", "what", "where", "when", "why", "how",
