@@ -175,6 +175,7 @@ struct ScheduleCardView: View {
     @State private var isCheckingDistance = false
     @State private var alertRefreshID = UUID()
     @State private var showingCelebration = false
+    @State private var showRatingSheet = false  // 🆕 评分界面显示状态
     @State private var hasMet: Bool
     @State private var viewRefreshID = UUID()
     @Binding var schedules: [CoffeeChatSchedule]
@@ -475,6 +476,16 @@ struct ScheduleCardView: View {
                         viewRefreshID = UUID()
                     }
                 }
+            }
+            // 🆕 评分界面
+            .sheet(isPresented: $showRatingSheet) {
+                MeetingRatingView(
+                    meetingId: schedule.id.uuidString,
+                    otherUserId: schedule.participantId,
+                    otherUserName: schedule.participantName
+                )
+                .environmentObject(authManager)
+                .environmentObject(supabaseService)
             }
     }
     
@@ -799,6 +810,12 @@ struct ScheduleCardView: View {
                         print("🔄 [We Met] 3秒后关闭庆祝视图")
                         withAnimation {
                             showingCelebration = false
+                        }
+                        
+                        // 🆕 庆祝动画结束后0.5秒，弹出评分界面
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            print("⭐ [评分] 弹出评分界面")
+                            showRatingSheet = true
                         }
                     }
                 }
