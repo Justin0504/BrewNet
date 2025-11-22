@@ -976,6 +976,8 @@ struct HeadhuntingProfileCardSheet: View {
     var shouldShowActions: Bool
     var hasEngaged: Bool
     
+    @State private var selectedWorkExperience: WorkExperience?
+    
     private var backgroundColor: Color { Color(red: 0.98, green: 0.97, blue: 0.95) }
     
     var body: some View {
@@ -989,7 +991,10 @@ struct HeadhuntingProfileCardSheet: View {
                         UserProfileCardPreview(
                             profile: profile,
                             isPro: isPro,
-                            isVerifiedOverride: isVerifiedOverride
+                            isVerifiedOverride: isVerifiedOverride,
+                            onWorkExperienceTap: { workExp in
+                                selectedWorkExperience = workExp
+                            }
                         )
                     }
                     .padding(.top, 24)
@@ -1016,6 +1021,13 @@ struct HeadhuntingProfileCardSheet: View {
                     }
                 }
             }
+        }
+        .sheet(item: $selectedWorkExperience) { workExp in
+            WorkExperienceDetailSheet(
+                workExperience: workExp,
+                allSkills: Array(profile.professionalBackground.skills.prefix(8)),
+                industry: profile.professionalBackground.industry
+            )
         }
     }
     
@@ -1065,6 +1077,7 @@ private struct UserProfileCardPreview: View {
     let profile: BrewNetProfile
     let isPro: Bool
     let isVerifiedOverride: Bool?
+    var onWorkExperienceTap: ((WorkExperience) -> Void)?
     
     var body: some View {
         ProfileCardContentView(
@@ -1074,7 +1087,7 @@ private struct UserProfileCardPreview: View {
             isVerified: isVerifiedOverride,
             currentUserLocation: nil,
             showDistance: false,
-            onWorkExperienceTap: nil
+            onWorkExperienceTap: onWorkExperienceTap
         )
         .background(Color.white)
         .cornerRadius(30)

@@ -28,23 +28,23 @@ class DynamicWeighting {
         let tokens = parsedQuery.tokens
         let entities = parsedQuery.entities
         
-        // 默认权重
-        var recWeight: Double = 0.3
-        var textWeight: Double = 0.7
+        // 默认权重（调整为更依赖文本匹配）
+        var recWeight: Double = 0.15
+        var textWeight: Double = 0.85
         
         // ===== 规则1: 查询长度 =====
         let queryLength = tokens.count
         
         if queryLength <= 2 {
-            // 查询很短（如 "Founder"）：更依赖推荐系统
-            recWeight = 0.5
-            textWeight = 0.5
-            print("  📏 Short query → balanced weights")
+            // 查询很短（如 "Founder"）：适度依赖推荐系统
+            recWeight = 0.3
+            textWeight = 0.7
+            print("  📏 Short query → text-focused weights")
         } else if queryLength >= 6 {
-            // 查询很长且具体：更依赖文本匹配
-            recWeight = 0.2
-            textWeight = 0.8
-            print("  📏 Long query → text-focused weights")
+            // 查询很长且具体：极度依赖文本匹配
+            recWeight = 0.1
+            textWeight = 0.9
+            print("  📏 Long query → highly text-focused weights")
         }
         
         // ===== 规则2: 实体信息 =====

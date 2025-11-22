@@ -87,6 +87,139 @@ struct ZonedSearchableText {
 /// 字段感知评分
 class FieldAwareScoring {
     
+    // MARK: - 同义词映射（简化版，与 QueryParser 保持一致）
+    
+    /// 常见同义词映射表（用于评分时的软匹配）
+    private let commonSynonyms: [String: Set<String>] = [
+        "engineer": ["developer", "programmer", "swe", "sde"],
+        "developer": ["engineer", "programmer", "swe", "sde"],
+        "pm": ["product manager", "program manager"],
+        "frontend": ["front-end", "fe", "client side"],
+        "backend": ["back-end", "be", "server side"],
+        "fullstack": ["full-stack", "fs", "full stack"],
+        "ml": ["machine learning", "ai"],
+        "ai": ["artificial intelligence", "machine learning"],
+        "js": ["javascript"],
+        "ts": ["typescript"],
+        "py": ["python"],
+        "react": ["reactjs"],
+        "vue": ["vuejs"],
+        "k8s": ["kubernetes"],
+        "aws": ["amazon web services"],
+        "google": ["alphabet"],
+        "facebook": ["meta"],
+        "meta": ["facebook"]
+    ]
+    
+    /// 检查两个词是否是同义词
+    private func areSynonyms(_ word1: String, _ word2: String) -> Bool {
+        let w1 = word1.lowercased()
+        let w2 = word2.lowercased()
+        
+        if w1 == w2 { return true }
+        
+        // 检查 w1 是否在 w2 的同义词集合中
+        if let synonyms = commonSynonyms[w1], synonyms.contains(w2) {
+            return true
+        }
+        
+        // 反向检查：w2 是否在 w1 的同义词集合中
+        if let synonyms = commonSynonyms[w2], synonyms.contains(w1) {
+            return true
+        }
+        
+        return false
+    }
+    
+    /// 检查 token 是否在文本中（支持同义词）
+    private func containsWithSynonyms(_ text: String, token: String) -> Bool {
+        // 1. 直接包含
+        if text.contains(token) {
+            return true
+        }
+        
+        // 2. 同义词匹配
+        let words = text.split(separator: " ").map { String($0) }
+        for word in words {
+            if areSynonyms(token, word) {
+                return true
+            }
+        }
+        
+        return false
+    }
+    
+    // MARK: - 相似度计算
+    
+    /// 计算字符串相似度（用于容错匹配）
+    /// - Parameters:
+    ///   - s1: 字符串1
+    ///   - s2: 字符串2
+    /// - Returns: 相似度 [0, 1]，1表示完全相同
+    private func similarity(_ s1: String, _ s2: String) -> Double {
+        let longer = s1.count > s2.count ? s1 : s2
+        let shorter = s1.count > s2.count ? s2 : s1
+        
+        if longer.isEmpty { return 1.0 }
+        
+        // 计算编辑距离
+        let distance = levenshteinDistance(shorter, longer)
+        return (Double(longer.count) - Double(distance)) / Double(longer.count)
+    }
+    
+    /// 计算编辑距离（Levenshtein Distance）
+    private func levenshteinDistance(_ s1: String, _ s2: String) -> Int {
+        let s1Array = Array(s1)
+        let s2Array = Array(s2)
+        var matrix = [[Int]](repeating: [Int](repeating: 0, count: s2Array.count + 1), count: s1Array.count + 1)
+        
+        for i in 0...s1Array.count {
+            matrix[i][0] = i
+        }
+        for j in 0...s2Array.count {
+            matrix[0][j] = j
+        }
+        
+        for i in 1...s1Array.count {
+            for j in 1...s2Array.count {
+                if s1Array[i-1] == s2Array[j-1] {
+                    matrix[i][j] = matrix[i-1][j-1]
+                } else {
+                    matrix[i][j] = min(
+                        matrix[i-1][j] + 1,      // deletion
+                        matrix[i][j-1] + 1,      // insertion
+                        matrix[i-1][j-1] + 1     // substitution
+                    )
+                }
+            }
+        }
+        
+        return matrix[s1Array.count][s2Array.count]
+    }
+    
+    // 停用词列表 - 常见的无意义词汇
+    private let stopWords: Set<String> = [
+        // 英文介词
+        "in", "at", "on", "to", "for", "of", "with", "from", "by", "as",
+        // 英文冠词
+        "a", "an", "the",
+        // 英文代词
+        "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them",
+        "my", "your", "his", "her", "its", "our", "their",
+        // 英文连词
+        "and", "or", "but", "so", "yet",
+        // 英文动词
+        "is", "am", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did",
+        "will", "would", "can", "could", "may", "might", "should",
+        // 其他常见词
+        "that", "this", "these", "those", "there", "here",
+        "who", "what", "where", "when", "why", "how",
+        "want", "wanna", "looking", "find", "person", "someone",
+        // 通用词汇（单独出现无意义）
+        "experience", "exp", "graduated", "graduate", "work", "working"
+    ]
+    
     /// 计算字段感知分数
     /// - Parameters:
     ///   - profile: 用户资料
@@ -100,17 +233,29 @@ class FieldAwareScoring {
         var score: Double = 0.0
         var matchDetails: [(token: String, zone: FieldZone)] = []
         
+        // 1. 找出所有短语（包含空格的token）
+        let phrases = tokens.filter { $0.contains(" ") }
+        
+        // 2. 找出短语中包含的单词
+        let phraseWords = Set(phrases.flatMap { $0.split(separator: " ").map { String($0) } })
+        
         for token in tokens {
             if token.count < 2 { continue }
             
-            // 在不同区域搜索，应用不同权重
-            if zonedText.zoneA.contains(token) {
+            // 过滤停用词
+            if stopWords.contains(token) { continue }
+            
+            // 如果这个词是某个短语的一部分，跳过（避免重复计分）
+            if phraseWords.contains(token) { continue }
+            
+            // 在不同区域搜索，应用不同权重（支持同义词）
+            if containsWithSynonyms(zonedText.zoneA, token: token) {
                 score += FieldZone.zoneA.weight
                 matchDetails.append((token, .zoneA))
-            } else if zonedText.zoneB.contains(token) {
+            } else if containsWithSynonyms(zonedText.zoneB, token: token) {
                 score += FieldZone.zoneB.weight
                 matchDetails.append((token, .zoneB))
-            } else if zonedText.zoneC.contains(token) {
+            } else if containsWithSynonyms(zonedText.zoneC, token: token) {
                 score += FieldZone.zoneC.weight
                 matchDetails.append((token, .zoneC))
             }
@@ -188,9 +333,56 @@ class FieldAwareScoring {
             for education in educations {
                 let schoolName = education.schoolName.lowercased()
                 for school in entities.schools {
+                    var isMatch = false
+                    
+                    // 1. 精确包含匹配
                     if schoolName.contains(school) || school.contains(schoolName) {
+                        isMatch = true
+                    }
+                    // 2. 特殊简称处理（使用模糊匹配容错拼写错误）
+                    else if school == "umich" {
+                        // 检查学校名称中是否包含 "michigan" 或类似词（容错拼写）
+                        let schoolWords = schoolName.split(separator: " ").map { String($0) }
+                        for word in schoolWords {
+                            if word == "michigan" || similarity(word, "michigan") > 0.85 {
+                                isMatch = true
+                                if word != "michigan" {
+                                    print("  🔍 Fuzzy word match: '\(word)' ≈ 'michigan' (similarity: \(String(format: "%.1f%%", similarity(word, "michigan") * 100)))")
+                                }
+                                break
+                            }
+                        }
+                    }
+                    else if school == "stanford" && (schoolName.contains("stanford") || similarity(schoolName, "stanford university") > 0.85) {
+                        isMatch = true
+                    }
+                    else if school == "mit" && (schoolName.contains("massachusetts institute") || schoolName.contains("mit")) {
+                        isMatch = true
+                    }
+                    else if school == "berkeley" && (schoolName.contains("berkeley") || similarity(schoolName, "uc berkeley") > 0.85) {
+                        isMatch = true
+                    }
+                    else if school == "fudan" {
+                        let schoolWords = schoolName.split(separator: " ").map { String($0) }
+                        for word in schoolWords {
+                            if word == "fudan" || similarity(word, "fudan") > 0.85 {
+                                isMatch = true
+                                break
+                            }
+                        }
+                    }
+                    // 3. 完整短语的模糊匹配（容错拼写错误，相似度 > 85%）
+                    if !isMatch {
+                        let sim = similarity(school, schoolName)
+                        if sim > 0.85 {
+                            isMatch = true
+                            print("  🔍 Fuzzy school match: '\(school)' ≈ '\(education.schoolName)' (similarity: \(String(format: "%.1f%%", sim * 100)))")
+                        }
+                    }
+                    
+                    if isMatch {
                         score += 3.0
-                        print("  🎓 School match: \(school) (+3.0)")
+                        print("  🎓 School match: \(school) → \(education.schoolName) (+3.0)")
                         break
                     }
                 }
