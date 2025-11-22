@@ -677,27 +677,37 @@ class QueryParser {
     
     // MARK: - 辅助函数
     
-    // 停用词列表 - 常见的无意义词汇
+    // 停用词列表 - 常见的无意义词汇（扩展版）
     private let stopWords: Set<String> = [
         // 英文介词
         "in", "at", "on", "to", "for", "of", "with", "from", "by", "as",
+        "across", "through", "into", "over", "under", "between", "among",
+        "within", "without", "during", "before", "after", "above", "below",
         // 英文冠词
         "a", "an", "the",
         // 英文代词
-        "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them",
+        "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them",
         "my", "your", "his", "her", "its", "our", "their",
         // 英文连词
-        "and", "or", "but", "so", "yet",
-        // 英文动词
+        "and", "or", "but", "so", "yet", "nor",
+        // 英文动词（常见无意义动词）
         "is", "am", "are", "was", "were", "be", "been", "being",
         "have", "has", "had", "do", "does", "did",
-        "will", "would", "can", "could", "may", "might", "should",
+        "will", "would", "can", "could", "may", "might", "should", "must",
+        "get", "got", "getting", "make", "made", "making",
+        "work", "works", "worked", "working",  // ⭐ 添加 works
+        "go", "goes", "went", "going",
+        "come", "comes", "came", "coming",
+        "take", "takes", "took", "taking",
+        "give", "gives", "gave", "giving",
+        "use", "uses", "used", "using",
         // 其他常见词
         "that", "this", "these", "those", "there", "here",
         "who", "what", "where", "when", "why", "how",
-        "want", "wanna", "looking", "find", "person", "someone",
+        "want", "wanna", "looking", "find", "person", "someone", "anyone",
+        "very", "much", "more", "most", "many", "some", "any", "all",
         // 通用词汇（单独出现无意义）
-        "experience", "exp", "graduated", "graduate", "work", "working"
+        "experience", "exp", "experienced", "graduate", "graduated", "graduating"
     ]
     
     private func tokenize(_ text: String) -> [String] {

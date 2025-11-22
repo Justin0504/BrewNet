@@ -33,23 +33,38 @@ struct ZonedSearchableText {
     
     /// 构建分区文本
     static func from(profile: BrewNetProfile) -> ZonedSearchableText {
-        // Zone A: 当前职位、公司、核心技能（最重要）
+        // Zone A: 当前职位、公司、核心技能、About Me、工作技能和职责（最重要）⭐
         var zoneA = [
             profile.professionalBackground.jobTitle ?? "",
             profile.professionalBackground.currentCompany ?? "",
             profile.professionalBackground.industry ?? ""
         ]
-        // 只取前5个技能
+        
+        // ⭐ 提升 About Me (bio) 到 Zone A - 包含关键职业信息
+        if let bio = profile.coreIdentity.bio {
+            zoneA.append(bio)
+        }
+        
+        // 核心技能（前5个）
         zoneA.append(contentsOf: Array(profile.professionalBackground.skills.prefix(5)))
         
-        // Zone B: 简介、过往经历、教育（中等重要）
+        // ⭐ 提升最近工作经历的 Role Highlights 和 Skills 到 Zone A（最近1个）
+        if let recentExp = profile.professionalBackground.workExperiences.first {
+            // 最近工作的职责/角色亮点 - 最重要的信息
+            if let responsibilities = recentExp.responsibilities {
+                zoneA.append(responsibilities)
+            }
+            // 最近工作的所有关键技能
+            zoneA.append(contentsOf: recentExp.highlightedSkills)
+        }
+        
+        // Zone B: 职业介绍、过往经历、教育（中等重要）
         var zoneB = [
-            profile.coreIdentity.bio ?? "",
             profile.coreIdentity.location ?? "",
             profile.professionalBackground.education ?? ""
         ]
         
-        // 添加职业自我介绍（Self Introduction）- 包含技术栈和职位信息
+        // 添加职业自我介绍（Self Introduction）
         if let selfIntro = profile.personalitySocial.selfIntroduction {
             zoneB.append(selfIntro)
         }
@@ -65,17 +80,16 @@ struct ZonedSearchableText {
             }
         }
         
-        // 工作经历（最近3个）- 包含所有关键字段
-        for exp in profile.professionalBackground.workExperiences.prefix(3) {
+        // 过往工作经历（第2-3个）- 公司和职位
+        for exp in profile.professionalBackground.workExperiences.dropFirst().prefix(2) {
             zoneB.append(exp.companyName)
             if let position = exp.position {
                 zoneB.append(position)
             }
-            // 添加职责/角色亮点 (responsibilities = role highlights)
+            // 过往工作的职责和技能权重稍低
             if let responsibilities = exp.responsibilities {
                 zoneB.append(responsibilities)
             }
-            // 添加所有 highlighted skills (key skills)
             zoneB.append(contentsOf: exp.highlightedSkills)
         }
         
@@ -204,27 +218,37 @@ class FieldAwareScoring {
         return matrix[s1Array.count][s2Array.count]
     }
     
-    // 停用词列表 - 常见的无意义词汇
+    // 停用词列表 - 常见的无意义词汇（扩展版）
     private let stopWords: Set<String> = [
         // 英文介词
         "in", "at", "on", "to", "for", "of", "with", "from", "by", "as",
+        "across", "through", "into", "over", "under", "between", "among",
+        "within", "without", "during", "before", "after", "above", "below",
         // 英文冠词
         "a", "an", "the",
         // 英文代词
         "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them",
         "my", "your", "his", "her", "its", "our", "their",
         // 英文连词
-        "and", "or", "but", "so", "yet",
-        // 英文动词
+        "and", "or", "but", "so", "yet", "nor",
+        // 英文动词（常见无意义动词）
         "is", "am", "are", "was", "were", "be", "been", "being",
         "have", "has", "had", "do", "does", "did",
-        "will", "would", "can", "could", "may", "might", "should",
+        "will", "would", "can", "could", "may", "might", "should", "must",
+        "get", "got", "getting", "make", "made", "making",
+        "work", "works", "worked", "working",  // ⭐ 添加 works
+        "go", "goes", "went", "going",
+        "come", "comes", "came", "coming",
+        "take", "takes", "took", "taking",
+        "give", "gives", "gave", "giving",
+        "use", "uses", "used", "using",
         // 其他常见词
         "that", "this", "these", "those", "there", "here",
         "who", "what", "where", "when", "why", "how",
-        "want", "wanna", "looking", "find", "person", "someone",
+        "want", "wanna", "looking", "find", "person", "someone", "anyone",
+        "very", "much", "more", "most", "many", "some", "any", "all",
         // 通用词汇（单独出现无意义）
-        "experience", "exp", "graduated", "graduate", "work", "working"
+        "experience", "exp", "experienced", "graduate", "graduated", "graduating"
     ]
     
     /// 计算字段感知分数
