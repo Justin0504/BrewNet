@@ -2671,12 +2671,7 @@ struct NetworkingIntentionStep: View {
                     ForEach(orderedSelectedSubIntentions(), id: \.self) { subIntention in
                         switch subIntention {
                         case .industryTransition:
-                            IndustryTransitionForm(
-                                industries: $industries,
-                                onUpdate: {
-                                    updateIndustryTransitionData()
-                                }
-                            )
+                            EmptyView()
                         default:
                             EmptyView()
                         }

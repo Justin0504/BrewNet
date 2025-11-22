@@ -536,7 +536,7 @@ struct ProfileCardContentView: View {
                 FlowLayout(spacing: 8) {
                     ForEach(profile.professionalBackground.skills, id: \.self) { skill in
                         Text(skill)
-                            .font(.system(size: 15))
+                            .font(.system(size: 16))
                             .foregroundColor(.white)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
@@ -1533,7 +1533,7 @@ struct UserProfileCardView: View {
                     FlowLayout(spacing: 8) {
                         ForEach(profile.professionalBackground.skills, id: \.self) { skill in
                             Text(skill)
-                                .font(.system(size: 15))
+                                .font(.system(size: 16))
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 8)
@@ -2281,7 +2281,7 @@ struct LegacyPublicProfileCardView: View {
                     FlowLayout(spacing: 8) {
                         ForEach(profile.professionalBackground.skills, id: \.self) { skill in
                             Text(skill)
-                                .font(.system(size: 15))
+                                .font(.system(size: 16))
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 8)
@@ -2485,7 +2485,7 @@ struct WorkExperienceDetailSheet: View {
                             FlowLayout(spacing: 8) {
                                 ForEach(displaySkills, id: \.self) { skill in
                                     Text(skill)
-                                        .font(.system(size: 15))
+                                        .font(.system(size: 16))
                                         .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
                                         .padding(.horizontal, 14)
                                         .padding(.vertical, 8)

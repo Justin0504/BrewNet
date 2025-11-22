@@ -80,7 +80,10 @@ class QueryParser {
         "stanford", "mit", "berkeley", "caltech", "uchicago", "duke",
         "northwestern", "johns hopkins", "carnegie mellon",
         // Top International
-        "oxford", "cambridge", "imperial", "eth zurich", "tsinghua", "peking"
+        "oxford", "cambridge", "imperial", "eth zurich",
+        // Top China
+        "tsinghua", "peking", "fudan", "sjtu", "shanghai jiao tong",
+        "zhejiang", "zju", "ustc", "nanjing", "nju"
     ]
     
     private let skillDictionary: Set<String> = [
