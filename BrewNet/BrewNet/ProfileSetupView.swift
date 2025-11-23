@@ -3589,6 +3589,7 @@ struct IndustryRow: View {
 struct PersonalitySocialStep: View {
     @Binding var profileData: ProfileCreationData
     @State private var selfIntroduction = ""
+    @State private var newHobby = "" // 用于自定义 hobby 输入
     @StateObject private var selectionHelper = SelectionHelper()
     @State private var scrollOffset: CGFloat = 0
     @State private var pickerFrame: CGRect = .zero
@@ -3617,56 +3618,8 @@ struct PersonalitySocialStep: View {
                     )
             }
             
-            // Values Tags
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Values that describe you *")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                
-                Text("Select up to 6 values (tap to add/remove)")
-                    .font(.system(size: 12))
-                    .foregroundColor(.gray)
-                
-                // All available values
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
-                    ForEach(ValuesOptions.allValues, id: \.self) { value in
-                        Button(action: {
-                            if selectionHelper.selectedValues.contains(value) {
-                                selectionHelper.removeValue(value)
-                            } else {
-                                selectionHelper.addValue(value)
-                            }
-                        }) {
-                            HStack {
-                                Text(value)
-                                    .font(.system(size: 14))
-                                    .foregroundColor(selectionHelper.selectedValues.contains(value) ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
-                                
-                                if selectionHelper.selectedValues.contains(value) {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.white)
-                                }
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(selectionHelper.selectedValues.contains(value) ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
-                            .cornerRadius(16)
-                        }
-                        .disabled(selectionHelper.selectedValues.count >= 6 && !selectionHelper.selectedValues.contains(value))
-                        .opacity(selectionHelper.selectedValues.count >= 6 && !selectionHelper.selectedValues.contains(value) ? 0.5 : 1.0)
-                    }
-                }
-                
-                if !selectionHelper.selectedValues.isEmpty {
-                    Text("Selected: \(selectionHelper.selectedValues.count)/6")
-                        .font(.system(size: 12))
-                        .foregroundColor(.gray)
-                }
-            }
-            
             // Hobbies
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text("Hobbies & Interests")
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
@@ -3675,41 +3628,99 @@ struct PersonalitySocialStep: View {
                     .font(.system(size: 12))
                     .foregroundColor(.gray)
                 
-                // All available hobbies
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
-                    ForEach(HobbiesOptions.allHobbies, id: \.self) { hobby in
-                        Button(action: {
-                            if selectionHelper.selectedHobbies.contains(hobby) {
-                                selectionHelper.removeHobby(hobby)
-                            } else {
-                                selectionHelper.addHobby(hobby)
-                            }
-                        }) {
-                            HStack {
+                // Add custom hobby input
+                HStack(spacing: 12) {
+                    TextField("Add custom hobby", text: $newHobby)
+                        .textFieldStyle(CustomTextFieldStyle())
+                        .autocorrectionDisabled()
+                    
+                    Button(action: {
+                        let trimmedHobby = newHobby.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmedHobby.isEmpty && 
+                           !selectionHelper.selectedHobbies.contains(trimmedHobby) &&
+                           selectionHelper.selectedHobbies.count < 6 {
+                            selectionHelper.addHobby(trimmedHobby)
+                            newHobby = ""
+                        }
+                    }) {
+                        Text("Add")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            .cornerRadius(8)
+                    }
+                    .disabled(newHobby.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectionHelper.selectedHobbies.count >= 6)
+                    .opacity(newHobby.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectionHelper.selectedHobbies.count >= 6 ? 0.5 : 1.0)
+                }
+                
+                // Suggested hobbies (only show those not already selected)
+                let availableSuggestions = HobbiesOptions.popularHobbies.filter { !selectionHelper.selectedHobbies.contains($0) }
+                if !availableSuggestions.isEmpty {
+                    Text("Suggested:")
+                        .font(.system(size: 13))
+                        .foregroundColor(.gray)
+                    
+                    FlowLayout(spacing: 8) {
+                        ForEach(availableSuggestions, id: \.self) { hobby in
+                            Button(action: {
+                                if selectionHelper.selectedHobbies.count < 6 {
+                                    selectionHelper.addHobby(hobby)
+                                }
+                            }) {
                                 Text(hobby)
                                     .font(.system(size: 14))
-                                    .foregroundColor(selectionHelper.selectedHobbies.contains(hobby) ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
-                                
-                                if selectionHelper.selectedHobbies.contains(hobby) {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.white)
-                                }
+                                    .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.1))
+                                    .cornerRadius(16)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .stroke(Color(red: 0.6, green: 0.4, blue: 0.2).opacity(0.3), lineWidth: 1)
+                                    )
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(selectionHelper.selectedHobbies.contains(hobby) ? Color(red: 0.6, green: 0.4, blue: 0.2) : Color.gray.opacity(0.1))
-                            .cornerRadius(16)
+                            .disabled(selectionHelper.selectedHobbies.count >= 6)
+                            .opacity(selectionHelper.selectedHobbies.count >= 6 ? 0.5 : 1.0)
                         }
-                        .disabled(selectionHelper.selectedHobbies.count >= 6 && !selectionHelper.selectedHobbies.contains(hobby))
-                        .opacity(selectionHelper.selectedHobbies.count >= 6 && !selectionHelper.selectedHobbies.contains(hobby) ? 0.5 : 1.0)
                     }
                 }
                 
+                // Selected hobbies
                 if !selectionHelper.selectedHobbies.isEmpty {
-                    Text("Selected: \(selectionHelper.selectedHobbies.count)/6")
-                        .font(.system(size: 12))
-                        .foregroundColor(.gray)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Selected:")
+                                .font(.system(size: 13))
+                                .foregroundColor(.gray)
+                            Text("\(selectionHelper.selectedHobbies.count)/6")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                        }
+                        
+                        FlowLayout(spacing: 8) {
+                            ForEach(Array(selectionHelper.selectedHobbies).sorted(), id: \.self) { hobby in
+                                HStack(spacing: 6) {
+                                    Text(hobby)
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.white)
+                                    
+                                    Button(action: {
+                                        selectionHelper.removeHobby(hobby)
+                                    }) {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundColor(.white)
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                .cornerRadius(16)
+                            }
+                        }
+                    }
                 }
             }
             
@@ -3717,12 +3728,10 @@ struct PersonalitySocialStep: View {
         .onAppear {
             // Load existing data if available
             if let personalitySocial = profileData.personalitySocial {
-                selectionHelper.selectedValues = Set(personalitySocial.valuesTags)
                 selectionHelper.selectedHobbies = Set(personalitySocial.hobbies)
                 selfIntroduction = personalitySocial.selfIntroduction ?? ""
             }
         }
-        .onChange(of: selectionHelper.selectedValues) { _ in updateProfileData() }
         .onChange(of: selectionHelper.selectedHobbies) { _ in updateProfileData() }
         .onChange(of: selfIntroduction) { _ in updateProfileData() }
     }
@@ -3731,7 +3740,7 @@ struct PersonalitySocialStep: View {
         let existingPersonality = profileData.personalitySocial
         let personalitySocial = PersonalitySocial(
             icebreakerPrompts: [],
-            valuesTags: Array(selectionHelper.selectedValues),
+            valuesTags: [], // 清空 values
             hobbies: Array(selectionHelper.selectedHobbies),
             preferredMeetingVibe: existingPersonality?.preferredMeetingVibe ?? .casual,
             preferredMeetingVibes: existingPersonality?.preferredMeetingVibes ?? [],
@@ -4807,6 +4816,7 @@ struct AddWorkExperienceView: View {
                                 }
                             }
                             .pickerStyle(MenuPickerStyle())
+                            .fixedSize(horizontal: true, vertical: false) // 🎯 强制单行显示
                             .frame(minWidth: 80, maxWidth: .infinity, minHeight: 44)
                             .lineLimit(1)
                             .layoutPriority(1)
@@ -4831,6 +4841,7 @@ struct AddWorkExperienceView: View {
                                 }
                             }
                             .pickerStyle(MenuPickerStyle())
+                            .fixedSize(horizontal: true, vertical: false) // 🎯 强制单行显示
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
@@ -4884,6 +4895,7 @@ struct AddWorkExperienceView: View {
                                     }
                                 }
                                 .pickerStyle(MenuPickerStyle())
+                                .fixedSize(horizontal: true, vertical: false) // 🎯 强制单行显示
                                 .frame(minWidth: 80, maxWidth: .infinity, minHeight: 44)
                                 .lineLimit(1)
                                 .layoutPriority(1)
@@ -4908,6 +4920,7 @@ struct AddWorkExperienceView: View {
                                     }
                                 }
                                 .pickerStyle(MenuPickerStyle())
+                                .fixedSize(horizontal: true, vertical: false) // 🎯 强制单行显示
                                 .frame(maxWidth: .infinity, minHeight: 44)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
@@ -5053,6 +5066,7 @@ struct AddEducationView: View {
                                 }
                             }
                             .pickerStyle(MenuPickerStyle())
+                            .fixedSize(horizontal: true, vertical: false) // 🎯 强制单行显示
                             .frame(minWidth: 80, maxWidth: .infinity, minHeight: 44)
                             .lineLimit(1)
                             .layoutPriority(1)
@@ -5077,6 +5091,7 @@ struct AddEducationView: View {
                                 }
                             }
                             .pickerStyle(MenuPickerStyle())
+                            .fixedSize(horizontal: true, vertical: false) // 🎯 强制单行显示
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
@@ -5130,6 +5145,7 @@ struct AddEducationView: View {
                                     }
                                 }
                                 .pickerStyle(MenuPickerStyle())
+                                .fixedSize(horizontal: true, vertical: false) // 🎯 强制单行显示
                                 .frame(minWidth: 80, maxWidth: .infinity, minHeight: 44)
                                 .lineLimit(1)
                                 .layoutPriority(1)
@@ -5154,6 +5170,7 @@ struct AddEducationView: View {
                                     }
                                 }
                                 .pickerStyle(MenuPickerStyle())
+                                .fixedSize(horizontal: true, vertical: false) // 🎯 强制单行显示
                                 .frame(maxWidth: .infinity, minHeight: 44)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
