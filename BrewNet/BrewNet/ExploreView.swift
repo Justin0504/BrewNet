@@ -27,6 +27,7 @@ struct ExploreMainView: View {
     @FocusState private var textEditorFocused: Bool
     @State private var showHeaderAnimation = false
     @State private var showResults = false
+    @State private var currentUserIsPro: Bool? = nil  // ⭐ 缓存当前用户的 Pro 状态
     
     private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
     private var backgroundColor: Color { Color(red: 0.98, green: 0.97, blue: 0.95) }
@@ -96,7 +97,14 @@ struct ExploreMainView: View {
             if let userId = authManager.currentUser?.id {
                 SubscriptionPaymentView(currentUserId: userId) {
                     Task {
+                        // 刷新用户信息
                         await authManager.refreshUser()
+                        // 清除 Pro 状态缓存，强制重新检查
+                        await MainActor.run {
+                            currentUserIsPro = nil
+                        }
+                        // 重新加载 Pro 状态
+                        preloadCurrentUserProStatus()
                     }
                 }
             }
@@ -111,6 +119,17 @@ struct ExploreMainView: View {
             }
         } message: {
             Text("You've used all 10 connects for today. Upgrade to BrewNet Pro for unlimited connections and more exclusive features.")
+        }
+        .onAppear {
+            // 预加载当前用户的 Pro 状态，加快后续临时聊天检查速度
+            preloadCurrentUserProStatus()
+        }
+        .onChange(of: authManager.currentUser?.isProActive) { isPro in
+            // 当用户的 Pro 状态变化时，更新缓存
+            if let isPro = isPro {
+                currentUserIsPro = isPro
+                print("✅ [Talent Scout] Pro 状态已更新: \(isPro ? "Pro用户" : "普通用户")")
+            }
         }
     }
     
@@ -595,8 +614,8 @@ struct ExploreMainView: View {
             score += expScore
         }
         
-        // 5. Mentor/Mentoring 意图匹配（确保所有文本比较都转换为小写）
-        if parsedQuery.tokens.contains(where: { $0.lowercased().contains("mentor") || $0.lowercased().contains("mentoring") }) {
+        // 5. Mentor/Mentoring 意图匹配
+        if parsedQuery.tokens.contains(where: { $0.contains("mentor") || $0.contains("mentoring") }) {
             if profile.networkingIntention.selectedIntention == .learnGrow ||
                 profile.networkingIntention.selectedSubIntentions.contains(.skillDevelopment) ||
                 profile.networkingIntention.selectedSubIntentions.contains(.careerDirection) {
@@ -605,8 +624,8 @@ struct ExploreMainView: View {
             }
         }
         
-        // 6. 校友匹配（增强版，确保所有文本比较都转换为小写）
-        if parsedQuery.tokens.contains(where: { $0.lowercased().contains("alum") }) {
+        // 6. 校友匹配（增强版）
+        if parsedQuery.tokens.contains(where: { $0.contains("alum") }) {
             let alumniScore = computeAlumniScore(
                 profile: profile,
                 parsedQuery: parsedQuery,
@@ -615,12 +634,8 @@ struct ExploreMainView: View {
             score += alumniScore
         }
         
-        // 7. Founder/Startup 匹配（确保所有文本比较都转换为小写）
-        if parsedQuery.tokens.contains(where: { 
-            $0.lowercased().contains("founder") || 
-            $0.lowercased().contains("startup") || 
-            $0.lowercased().contains("entrepreneur") 
-        }) {
+        // 7. Founder/Startup 匹配
+        if parsedQuery.tokens.contains(where: { $0.contains("founder") || $0.contains("startup") || $0.contains("entrepreneur") }) {
             if profile.professionalBackground.careerStage == .founder ||
                 profile.networkingIntention.selectedIntention == .buildCollaborate {
                 score += 1.0
@@ -628,12 +643,11 @@ struct ExploreMainView: View {
             }
         }
         
-        // 8. 否定词处理（降权，确保所有文本比较都转换为小写）
+        // 8. 否定词处理（降权）
         for negation in parsedQuery.modifiers.negations {
             let zonedText = ZonedSearchableText.from(profile: profile)
             let allText = [zonedText.zoneA, zonedText.zoneB, zonedText.zoneC].joined(separator: " ")
-            // 确保否定词也转换为小写进行比较
-            if allText.contains(negation.lowercased()) {
+            if allText.contains(negation) {
                 score -= 2.0
                 print("  ⚠️ Negation match: '\(negation)' (-2.0)")
             }
@@ -822,15 +836,13 @@ struct ExploreMainView: View {
             }
         }
         
-        // 查询中指定学校（无需当前用户也是校友，确保所有文本比较都转换为小写）
+        // 查询中指定学校（无需当前用户也是校友）
         if !parsedQuery.entities.schools.isEmpty {
             if let targetEducations = profile.professionalBackground.educations {
                 for targetEducation in targetEducations {
-                    let targetSchool = targetEducation.schoolName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                    let targetSchool = targetEducation.schoolName.lowercased()
                     for querySchool in parsedQuery.entities.schools {
-                        // 确保查询中的学校名称也转换为小写进行比较
-                        let lowercasedQuerySchool = querySchool.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                        if targetSchool.contains(lowercasedQuerySchool) || lowercasedQuerySchool.contains(targetSchool) {
+                        if targetSchool.contains(querySchool) || querySchool.contains(targetSchool) {
                             score += 2.0
                             print("  🎓 School match: \(querySchool) (+2.0)")
                             break
@@ -910,10 +922,29 @@ struct ExploreMainView: View {
     private func openTemporaryChat(profile: BrewNetProfile) {
         guard let currentUser = authManager.currentUser else { return }
         
+        // 如果已经缓存了 Pro 状态，立即决定显示哪个界面
+        if let isPro = currentUserIsPro {
+            if isPro {
+                selectedProfileForChat = profile
+                showingTemporaryChat = true
+            } else {
+                showSubscriptionPayment = true
+            }
+            return
+        }
+        
+        // 如果没有缓存，先检查 Pro 状态（优化：使用更快的检查方法）
         Task {
+            let checkStart = Date()
             do {
                 let canChat = try await supabaseService.canSendTemporaryChat(userId: currentUser.id)
+                let checkTime = Date().timeIntervalSince(checkStart) * 1000
+                print("⏱️ [Talent Scout] Pro 状态检查耗时: \(String(format: "%.1f", checkTime))ms")
+                
                 await MainActor.run {
+                    // 缓存 Pro 状态
+                    currentUserIsPro = canChat
+                    
                     if canChat {
                         selectedProfileForChat = profile
                         showingTemporaryChat = true
@@ -923,6 +954,30 @@ struct ExploreMainView: View {
                 }
             } catch {
                 print("❌ Talent Scout: failed to check temporary chat eligibility: \(error.localizedDescription)")
+                // 如果检查失败，假设是 Pro 用户，保持界面打开
+                await MainActor.run {
+                    currentUserIsPro = true  // 假设是 Pro，避免重复检查
+                    selectedProfileForChat = profile
+                    showingTemporaryChat = true
+                }
+            }
+        }
+    }
+    
+    /// 预加载当前用户的 Pro 状态（在界面加载时调用）
+    private func preloadCurrentUserProStatus() {
+        guard let currentUser = authManager.currentUser else { return }
+        guard currentUserIsPro == nil else { return }  // 如果已有缓存，跳过
+        
+        Task {
+            do {
+                let canChat = try await supabaseService.canSendTemporaryChat(userId: currentUser.id)
+                await MainActor.run {
+                    currentUserIsPro = canChat
+                    print("✅ [Talent Scout] Pro 状态已预加载: \(canChat ? "Pro用户" : "普通用户")")
+                }
+            } catch {
+                print("⚠️ [Talent Scout] 预加载 Pro 状态失败: \(error.localizedDescription)")
             }
         }
     }

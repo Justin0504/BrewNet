@@ -121,6 +121,12 @@ struct ConnectionRequestsView: View {
                     await updateUnreadTemporaryMessagesCount()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                // 当应用回到前台时，强制刷新 Pro 状态
+                Task {
+                    await refreshProStatusForRequests()
+                }
+            }
         }
     }
     
@@ -363,7 +369,12 @@ struct ConnectionRequestsView: View {
             self.isLoading = false
             updateUnreadTemporaryMessageCount()
             
-            // 后台刷新缓存
+            // 立即刷新 Pro 状态（确保 badge 正确显示）
+            Task {
+                await refreshProStatusForRequests()
+            }
+            
+            // 后台刷新完整数据
             Task {
                 await refreshConnectionRequestsInBackground(userId: currentUser.id)
             }
@@ -664,13 +675,14 @@ struct ConnectionRequestsView: View {
             // 保存到缓存
             LocalCacheManager.shared.saveConnectionRequestsData(userId: userId, requests: sortedRequests)
             
-            // 如果数据有变化，更新 UI
+            // 如果数据有变化，更新 UI（包括 Pro 状态）
             await MainActor.run {
+                // 即使数量相同，也更新 Pro 状态（可能 Pro 状态有变化）
+                self.requests = sortedRequests
                 if self.requests.count != sortedRequests.count {
-                    self.requests = sortedRequests
                     print("🔄 [ConnectionRequests] 后台刷新完成，数据已更新")
                 } else {
-                    print("🔄 [ConnectionRequests] 后台刷新完成，数据无变化")
+                    print("🔄 [ConnectionRequests] 后台刷新完成，Pro 状态已更新")
                 }
             }
             
@@ -679,6 +691,38 @@ struct ConnectionRequestsView: View {
             
         } catch {
             print("❌ [ConnectionRequests] 后台刷新失败: \(error.localizedDescription)")
+        }
+    }
+    
+    // MARK: - 刷新 Pro 状态（用于从缓存加载后立即更新）
+    private func refreshProStatusForRequests() async {
+        guard !requests.isEmpty else { return }
+        
+        let requesterIds = requests.map { $0.requesterId }
+        
+        do {
+            let proUserIds = try await supabaseService.getProUserIds(from: requesterIds)
+            
+            await MainActor.run {
+                // 更新每个请求的 Pro 状态
+                var updatedRequests = requests
+                for i in 0..<updatedRequests.count {
+                    updatedRequests[i].isRequesterPro = proUserIds.contains(updatedRequests[i].requesterId)
+                }
+                
+                // 重新排序（Pro 用户优先）
+                updatedRequests.sort { lhs, rhs in
+                    if lhs.isRequesterPro != rhs.isRequesterPro {
+                        return lhs.isRequesterPro && !rhs.isRequesterPro
+                    }
+                    return lhs.createdAt > rhs.createdAt
+                }
+                
+                self.requests = updatedRequests
+                print("✅ [ConnectionRequests] Pro 状态已刷新，\(proUserIds.count) 个 Pro 用户")
+            }
+        } catch {
+            print("⚠️ Failed to refresh Pro status: \(error.localizedDescription)")
         }
     }
     

@@ -123,12 +123,14 @@ class FieldAwareScoring {
         "backend": ["back-end", "be", "server side"],
         "fullstack": ["full-stack", "fs", "full stack"],
         
-        // ⭐ ML/AI 同义词组（完整映射）
-        "ml": ["machine learning", "ai", "artificial intelligence", "deep learning"],
-        "ai": ["artificial intelligence", "machine learning", "ml", "deep learning"],
-        "machine learning": ["ml", "ai", "artificial intelligence", "deep learning"],
-        "deep learning": ["ml", "ai", "machine learning", "artificial intelligence"],
-        "artificial intelligence": ["ai", "ml", "machine learning", "deep learning"],
+        // ⭐ ML/AI 同义词组（完整映射，包含框架）
+        "ml": ["machine learning", "ai", "artificial intelligence", "deep learning", "tensorflow", "pytorch"],
+        "ai": ["artificial intelligence", "machine learning", "ml", "deep learning", "tensorflow", "pytorch"],
+        "machine learning": ["ml", "ai", "artificial intelligence", "deep learning", "tensorflow", "pytorch"],
+        "deep learning": ["ml", "ai", "machine learning", "artificial intelligence", "tensorflow", "pytorch"],
+        "artificial intelligence": ["ai", "ml", "machine learning", "deep learning", "tensorflow", "pytorch"],
+        "tensorflow": ["ml", "ai", "machine learning", "deep learning", "artificial intelligence", "pytorch"],
+        "pytorch": ["ml", "ai", "machine learning", "deep learning", "artificial intelligence", "tensorflow"],
         
         // 编程语言
         "js": ["javascript"],
@@ -281,8 +283,10 @@ class FieldAwareScoring {
         "very", "much", "more", "most", "many", "some", "any", "all",
         // 通用词汇（单独出现无意义）
         "experience", "exp", "experienced", "graduate", "graduated", "graduating",
-        "learn", "learning", "learned",  // ⭐ 添加 learn 相关词
-        "train", "training", "trained"   // ⭐ 添加 train 相关词
+        "learn", "learning", "learned",  // ⭐ 添加 learn 相关词（但 "machine learning" 中的 "learning" 会被短语匹配覆盖）
+        "train", "training", "trained",  // ⭐ 添加 train 相关词
+        "machine",  // ⭐ 添加 machine（但 "machine learning" 中的 "machine" 会被短语匹配覆盖）
+        "education", "educational"  // ⭐ 添加 education 相关词（通用词汇，不应单独计分）
     ]
     
     /// 计算字段感知分数
@@ -302,15 +306,55 @@ class FieldAwareScoring {
         // 1. 找出所有短语（包含空格的token）
         let phrases = tokens.filter { $0.contains(" ") }
         
-        // 2. 找出短语中包含的单词
-        let phraseWords = Set(phrases.flatMap { $0.split(separator: " ").map { String($0) } })
+        // 2. 找出短语中包含的单词（用于过滤，避免重复计分）
+        let phraseWords = Set(phrases.flatMap { $0.split(separator: " ").map { String($0).lowercased() } })
         
-        // 确保所有 tokens 都转换为小写进行比较
+        // 3. 先处理短语匹配（优先级更高）
+        for phrase in phrases {
+            let lowercasedPhrase = phrase.lowercased()
+            let synonymGroup = getSynonymGroupKey(for: phrase)
+            
+            // 如果该同义词组已经匹配过，跳过
+            if matchedSynonymGroups.contains(synonymGroup) {
+                continue
+            }
+            
+            // 检查短语是否在文本中
+            if zonedText.zoneA.contains(lowercasedPhrase) {
+                score += FieldZone.zoneA.weight
+                matchDetails.append((phrase, .zoneA))
+                matchedSynonymGroups.insert(synonymGroup)
+            } else if zonedText.zoneB.contains(lowercasedPhrase) {
+                score += FieldZone.zoneB.weight
+                matchDetails.append((phrase, .zoneB))
+                matchedSynonymGroups.insert(synonymGroup)
+            } else if zonedText.zoneC.contains(lowercasedPhrase) {
+                score += FieldZone.zoneC.weight
+                matchDetails.append((phrase, .zoneC))
+                matchedSynonymGroups.insert(synonymGroup)
+            }
+        }
+        
+        // 4. 处理单词匹配（跳过短语中的单词和停用词）
         for token in tokens {
             if token.count < 2 { continue }
             
-            // 将 token 转换为小写以确保不区分大小写的匹配
             let lowercasedToken = token.lowercased()
+            
+            // 跳过停用词
+            if stopWords.contains(lowercasedToken) {
+                continue
+            }
+            
+            // 跳过短语中的单词（避免重复计分）
+            if phraseWords.contains(lowercasedToken) {
+                continue
+            }
+            
+            // 跳过短语本身（已在上面处理）
+            if token.contains(" ") {
+                continue
+            }
             
             // 获取同义词组 key
             let synonymGroup = getSynonymGroupKey(for: token)
@@ -435,16 +479,33 @@ class FieldAwareScoring {
             }
         }
         
-        // 学校匹配（+3分每个，确保所有文本比较都转换为小写）
+        // 学校匹配（+3分每个，支持模糊匹配和缩写匹配）
         if let educations = profile.professionalBackground.educations {
             for education in educations {
-                let schoolName = education.schoolName.lowercased()
+                let schoolName = education.schoolName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
                 for school in entities.schools {
-                    // 确保查询中的学校名称也转换为小写进行比较
-                    let lowercasedSchool = school.lowercased()
+                    let lowercasedSchool = school.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                    
+                    // 1. 精确匹配（包含关系）
                     if schoolName.contains(lowercasedSchool) || lowercasedSchool.contains(schoolName) {
                         score += 3.0
-                        print("  🎓 School match: \(school) → \(education.schoolName) (+3.0)")
+                        print("  🎓 School match (exact): \(school) → \(education.schoolName) (+3.0)")
+                        break
+                    }
+                    
+                    // 2. 模糊匹配（处理拼写错误，如 "michiga" vs "michigan"）
+                    let similarity = SoftMatching.fuzzySimilarity(string1: schoolName, string2: lowercasedSchool)
+                    if similarity > 0.85 {
+                        score += 3.0
+                        print("  🎓 School match (fuzzy): \(school) → \(education.schoolName) (similarity: \(String(format: "%.2f", similarity))) (+3.0)")
+                        break
+                    }
+                    
+                    // 3. 缩写匹配（如 "umich" 匹配 "university of michigan"）
+                    // 检查查询是否是学校名的缩写
+                    if isAbbreviationMatch(query: lowercasedSchool, fullName: schoolName) {
+                        score += 3.0
+                        print("  🎓 School match (abbreviation): \(school) → \(education.schoolName) (+3.0)")
                         break
                     }
                 }
@@ -505,6 +566,68 @@ class FieldAwareScoring {
         }
         
         return score
+    }
+    
+    /// 检查查询是否是学校全名的缩写
+    /// 例如: "umich" 匹配 "university of michigan"
+    private func isAbbreviationMatch(query: String, fullName: String) -> Bool {
+        // 移除常见的前缀词
+        let prefixes = ["university of", "university", "college of", "college"]
+        var cleanedFullName = fullName
+        for prefix in prefixes {
+            if cleanedFullName.hasPrefix(prefix) {
+                cleanedFullName = String(cleanedFullName.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        
+        // 提取全名的首字母缩写
+        let fullNameWords = cleanedFullName.split(separator: " ").map { String($0) }
+        let abbreviation = fullNameWords.compactMap { $0.first?.lowercased() }.joined()
+        
+        // 检查查询是否匹配缩写或包含关键部分
+        if query == abbreviation || abbreviation.contains(query) {
+            return true
+        }
+        
+        // 检查查询是否包含全名的关键部分（如 "umich" 包含 "mich"）
+        let keyWords = fullNameWords.filter { $0.count > 3 } // 只考虑长度大于3的词
+        for keyWord in keyWords {
+            if query.contains(keyWord.lowercased()) || keyWord.lowercased().contains(query) {
+                // 进一步检查相似度
+                let similarity = SoftMatching.fuzzySimilarity(string1: query, string2: keyWord.lowercased())
+                if similarity > 0.7 {
+                    return true
+                }
+            }
+        }
+        
+        // 特殊缩写映射
+        let abbreviationMap: [String: [String]] = [
+            "umich": ["university of michigan", "michigan"],
+            "mit": ["massachusetts institute of technology"],
+            "uc berkeley": ["university of california berkeley", "berkeley"],
+            "ucla": ["university of california los angeles"],
+            "uva": ["university of virginia", "virginia"],
+            "unc": ["university of north carolina", "north carolina"],
+            "ut austin": ["university of texas", "texas"],
+            "ucsd": ["university of california san diego"],
+            "uw": ["university of washington", "washington"],
+            "pku": ["peking university", "peking"],
+            "sjtu": ["shanghai jiao tong university", "shanghai jiao tong"],
+            "zju": ["zhejiang university", "zhejiang"],
+            "ustc": ["university of science and technology of china"],
+            "nju": ["nanjing university", "nanjing"]
+        ]
+        
+        if let possibleMatches = abbreviationMap[query] {
+            for match in possibleMatches {
+                if fullName.contains(match) || match.contains(fullName) {
+                    return true
+                }
+            }
+        }
+        
+        return false
     }
 }
 
