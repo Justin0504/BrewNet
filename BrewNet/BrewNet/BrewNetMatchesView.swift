@@ -43,6 +43,7 @@ struct BrewNetMatchesView: View {
     @State private var isProcessingLike = false
     @State private var isTransitioning = false // 标记是否正在过渡
     @State private var nextProfileOffset: CGFloat = 0 // 下一个 profile 的偏移量
+    @State private var currentUserIsPro: Bool? = nil // 缓存当前用户的 Pro 状态
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -248,6 +249,9 @@ struct BrewNetMatchesView: View {
             Text("You've used all 10 connects for today. Upgrade to BrewNet Pro for unlimited connections and more exclusive features.")
         }
         .onAppear {
+            // 预加载当前用户的 Pro 状态，优化临时聊天打开速度
+            preloadCurrentUserProStatus()
+            
             // 加载保存的filter
             loadSavedFilter()
             
@@ -505,23 +509,39 @@ struct BrewNetMatchesView: View {
         guard currentIndex < profiles.count else { return }
         guard let currentUser = authManager.currentUser else { return }
         
-        // Check if user is Pro to send temporary chat
+        let profile = profiles[currentIndex]
+        selectedProfileForChat = profile
+        
+        // 如果已经缓存了 Pro 状态，立即显示界面
+        if let isPro = currentUserIsPro {
+            if isPro {
+                showingTemporaryChat = true
+            } else {
+                showSubscriptionPayment = true
+            }
+            return
+        }
+        
+        // 立即显示界面，在后台检查 Pro 状态
+        showingTemporaryChat = true
+        
+        // 在后台检查 Pro 状态
         Task {
             do {
                 let canChat = try await supabaseService.canSendTemporaryChat(userId: currentUser.id)
                 await MainActor.run {
+                    // 缓存 Pro 状态
+                    currentUserIsPro = canChat
+                    
+                    // 如果不是 Pro 用户，关闭临时聊天界面并显示订阅页面
                     if !canChat {
-                        // Show subscription payment for non-Pro users
+                        showingTemporaryChat = false
                         showSubscriptionPayment = true
-                    } else {
-                        // Allow temporary chat for Pro users
-                        let profile = profiles[currentIndex]
-                        selectedProfileForChat = profile
-                        showingTemporaryChat = true
                     }
                 }
             } catch {
                 print("❌ Failed to check Pro status: \(error.localizedDescription)")
+                // 如果检查失败，假设是 Pro 用户，保持界面打开
             }
         }
     }
@@ -1630,6 +1650,24 @@ struct BrewNetMatchesView: View {
                 } else {
                     isLoadingMore = false
                 }
+            }
+        }
+    }
+    
+    // MARK: - Preload Current User Pro Status
+    private func preloadCurrentUserProStatus() {
+        guard let currentUser = authManager.currentUser else { return }
+        guard currentUserIsPro == nil else { return } // 如果已经加载过，不再重复加载
+        
+        Task {
+            do {
+                let canChat = try await supabaseService.canSendTemporaryChat(userId: currentUser.id)
+                await MainActor.run {
+                    currentUserIsPro = canChat
+                    print("✅ [临时聊天] 预加载 Pro 状态: \(canChat ? "Pro用户" : "普通用户")")
+                }
+            } catch {
+                print("⚠️ [临时聊天] 预加载 Pro 状态失败: \(error.localizedDescription)")
             }
         }
     }
