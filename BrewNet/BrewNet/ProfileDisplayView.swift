@@ -11,6 +11,7 @@ struct MinimalProfileHeaderView: View {
 
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var isUploadingImage = false
+    @State private var credibilityScore: CredibilityScore?  // 🆕 信誉评分
 
     private var verificationColor: Color {
         isVerified ? Color(red: 0.15, green: 0.43, blue: 0.85) : Color.gray.opacity(0.5)
@@ -45,6 +46,13 @@ struct MinimalProfileHeaderView: View {
                     .clipShape(Circle())
                     .shadow(color: Color.black.opacity(0.1), radius: 3, x: 0, y: 1)
                     .offset(x: 8, y: 8)
+            }
+            .overlay(alignment: .topTrailing) {
+                // 🆕 右上角显示评分
+                if let score = credibilityScore {
+                    RatingBadgeView(rating: score.averageRating, size: .small)
+                        .offset(x: 8, y: -8)
+                }
             }
 
             VStack(spacing: 8) {
@@ -82,6 +90,111 @@ struct MinimalProfileHeaderView: View {
         .onChange(of: selectedPhotoItem) { newItem in
             Task {
                 await handlePhotoSelection(newItem)
+            }
+        }
+        .onAppear {
+            // 🆕 强制刷新评分（每次显示时都重新加载）
+            print("🔄 [ProfileDisplay] onAppear 触发，强制刷新评分...")
+            loadCredibilityScore()
+        }
+        .onChange(of: profile.userId) { newUserId in
+            // 🆕 当 profile.userId 变化时，重新加载评分
+            print("🔄 [ProfileDisplay] profile.userId 变化: \(newUserId)，重新加载评分...")
+            loadCredibilityScore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CredibilityScoreUpdated"))) { notification in
+            // 🆕 当评分更新时，清除缓存并重新加载评分
+            if let userId = notification.userInfo?["userId"] as? String,
+               userId.lowercased() == profile.userId.lowercased() {
+                print("🔄 [ProfileDisplay] 收到评分更新通知，清除缓存并重新加载评分...")
+                CredibilityScoreCache.shared.invalidateScore(for: profile.userId)
+                loadCredibilityScore()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            // 🆕 当应用从后台返回时，重新加载评分
+            print("🔄 [ProfileDisplay] 应用返回前台，重新加载评分...")
+            loadCredibilityScore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserLoggedIn"))) { _ in
+            // 🆕 当用户登录时，重新加载评分
+            print("🔄 [ProfileDisplay] 用户登录，重新加载评分...")
+            loadCredibilityScore()
+        }
+    }
+    
+    // MARK: - Load Credibility Score
+    private func loadCredibilityScore() {
+        print("🔄 [ProfileDisplay] 开始加载信誉评分，userId: \(profile.userId)")
+        Task {
+            do {
+                // 🆕 先尝试从缓存加载
+                if let cachedScore = CredibilityScoreCache.shared.getScore(for: profile.userId) {
+                    print("✅ [ProfileDisplay] 从缓存加载评分: \(cachedScore.averageRating)")
+                    await MainActor.run {
+                        credibilityScore = cachedScore
+                    }
+                    // 后台刷新缓存
+                    Task {
+                        if let score = try? await supabaseService.getCredibilityScore(userId: profile.userId.lowercased()) {
+                            CredibilityScoreCache.shared.setScore(score, for: profile.userId)
+                            await MainActor.run {
+                                if credibilityScore?.averageRating != score.averageRating {
+                                    credibilityScore = score
+                                    print("🔄 [ProfileDisplay] 缓存已刷新: \(score.averageRating)")
+                                }
+                            }
+                        }
+                    }
+                } else if let score = try await supabaseService.getCredibilityScore(userId: profile.userId.lowercased()) {
+                    print("✅ [ProfileDisplay] 成功加载信誉评分:")
+                    print("   - average_rating: \(score.averageRating)")
+                    print("   - overall_score: \(score.overallScore)")
+                    print("   - userId: \(score.userId)")
+                    // 🆕 保存到缓存
+                    CredibilityScoreCache.shared.setScore(score, for: profile.userId)
+                    await MainActor.run {
+                        // 强制更新，即使值相同也要触发视图刷新
+                        let oldScore = credibilityScore?.averageRating
+                        credibilityScore = score
+                        if oldScore != score.averageRating {
+                            print("🔄 [ProfileDisplay] 评分已更新: \(oldScore ?? 0) -> \(score.averageRating)")
+                        }
+                    }
+                } else {
+                    print("⚠️ [ProfileDisplay] 未找到评分记录，尝试使用原始 userId 查询...")
+                    // 如果小写格式查询失败，尝试原始格式
+                    if let score = try? await supabaseService.getCredibilityScore(userId: profile.userId) {
+                        print("✅ [ProfileDisplay] 使用原始格式查询成功: \(score.averageRating)")
+                        CredibilityScoreCache.shared.setScore(score, for: profile.userId)
+                        await MainActor.run {
+                            credibilityScore = score
+                        }
+                    } else {
+                        print("⚠️ [ProfileDisplay] 未找到评分记录，使用默认值")
+                        // 如果用户还没有评分记录，使用默认值
+                        let defaultScore = CredibilityScore(userId: profile.userId)
+                        CredibilityScoreCache.shared.setScore(defaultScore, for: profile.userId)
+                        await MainActor.run {
+                            credibilityScore = defaultScore
+                        }
+                    }
+                }
+            } catch {
+                print("❌ [ProfileDisplay] 无法加载信誉评分: \(error.localizedDescription)")
+                print("❌ [ProfileDisplay] 错误详情: \(error)")
+                // 尝试从缓存加载
+                if let cachedScore = CredibilityScoreCache.shared.getScore(for: profile.userId) {
+                    print("✅ [ProfileDisplay] 从缓存加载评分（查询失败时）: \(cachedScore.averageRating)")
+                    await MainActor.run {
+                        credibilityScore = cachedScore
+                    }
+                } else {
+                    let defaultScore = CredibilityScore(userId: profile.userId)
+                    await MainActor.run {
+                        credibilityScore = defaultScore
+                    }
+                }
             }
         }
     }
@@ -327,11 +440,104 @@ class LocalCacheManager {
         return decoded
     }
     
+    // MARK: - Connection Requests Cache (含 Temporary Chat)
+    func saveConnectionRequestsData(userId: String, requests: [ConnectionRequest]) {
+        let key = "connection_requests_cache_\(userId)"
+        let cacheData = ConnectionRequestsCacheData(requests: requests, timestamp: Date())
+        if let encoded = try? JSONEncoder().encode(cacheData) {
+            userDefaults.set(encoded, forKey: key)
+            print("💾 [Cache] 已保存 Connection Requests 数据到本地缓存（包含 \(requests.count) 个请求）")
+            
+            // 统计临时消息数量
+            let totalMessages = requests.reduce(0) { $0 + $1.temporaryMessages.count }
+            if totalMessages > 0 {
+                print("   📩 包含 \(totalMessages) 条临时消息")
+            }
+        }
+    }
+    
+    func loadConnectionRequestsData(userId: String) -> ConnectionRequestsCacheData? {
+        let key = "connection_requests_cache_\(userId)"
+        guard let data = userDefaults.data(forKey: key),
+              let decoded = try? JSONDecoder().decode(ConnectionRequestsCacheData.self, from: data) else {
+            return nil
+        }
+        
+        // 检查缓存是否过期（5分钟，因为临时消息更新频繁）
+        if let timestamp = decoded.timestamp {
+            let timeSinceCache = Date().timeIntervalSince(timestamp)
+            if timeSinceCache > 300 { // 5分钟
+                print("⏰ [Cache] Connection Requests 缓存已过期 (\(Int(timeSinceCache)) 秒前)")
+                return nil
+            }
+            print("📦 [Cache] 从本地缓存加载 Connection Requests 数据（\(decoded.requests.count) 个请求，\(Int(timeSinceCache)) 秒前）")
+            
+            // 统计临时消息数量
+            let totalMessages = decoded.requests.reduce(0) { $0 + $1.temporaryMessages.count }
+            if totalMessages > 0 {
+                print("   📩 包含 \(totalMessages) 条临时消息")
+            }
+        }
+        
+        return decoded
+    }
+    
+    // 快速更新单个请求的临时消息（不重新加载整个列表）
+    func updateConnectionRequestMessages(userId: String, requestId: String, messages: [TemporaryMessage]) {
+        let key = "connection_requests_cache_\(userId)"
+        guard let data = userDefaults.data(forKey: key),
+              var decoded = try? JSONDecoder().decode(ConnectionRequestsCacheData.self, from: data) else {
+            return
+        }
+        
+        // 找到对应的请求并更新消息
+        if let index = decoded.requests.firstIndex(where: { $0.id == requestId }) {
+            var updatedRequest = decoded.requests[index]
+            updatedRequest.temporaryMessages = messages
+            decoded.requests[index] = updatedRequest
+            
+            // 保存更新后的缓存，保持原时间戳（因为只是部分更新）
+            let updatedData = ConnectionRequestsCacheData(
+                requests: decoded.requests,
+                timestamp: decoded.timestamp
+            )
+            
+            if let encoded = try? JSONEncoder().encode(updatedData) {
+                userDefaults.set(encoded, forKey: key)
+                print("💾 [Cache] 已快速更新请求 \(requestId) 的临时消息: \(messages.count) 条")
+            }
+        }
+    }
+    
+    // 清除单个连接请求的缓存（当接受/拒绝请求时使用）
+    func invalidateConnectionRequest(userId: String, requestId: String) {
+        let key = "connection_requests_cache_\(userId)"
+        guard let data = userDefaults.data(forKey: key),
+              var decoded = try? JSONDecoder().decode(ConnectionRequestsCacheData.self, from: data) else {
+            return
+        }
+        
+        // 移除对应的请求
+        decoded.requests.removeAll { $0.id == requestId }
+        
+        // 保存更新后的缓存
+        let updatedData = ConnectionRequestsCacheData(
+            requests: decoded.requests,
+            timestamp: Date() // 使用新的时间戳
+        )
+        
+        if let encoded = try? JSONEncoder().encode(updatedData) {
+            userDefaults.set(encoded, forKey: key)
+            print("🗑️ [Cache] 已从缓存中移除请求: \(requestId)")
+        }
+    }
+    
     // MARK: - Clear Cache
     func clearCache(userId: String) {
         userDefaults.removeObject(forKey: "credit_cache_\(userId)")
         userDefaults.removeObject(forKey: "redeem_cache_\(userId)")
         userDefaults.removeObject(forKey: "chats_cache_\(userId)")
+        userDefaults.removeObject(forKey: "connection_requests_cache_\(userId)")
         print("🗑️ [Cache] 已清除用户缓存")
     }
 }
@@ -339,6 +545,12 @@ class LocalCacheManager {
 // MARK: - Chats Cache Data Model
 struct ChatsCacheData: Codable {
     let schedules: [CoffeeChatSchedule]
+    let timestamp: Date?
+}
+
+// MARK: - Connection Requests Cache Data Model
+struct ConnectionRequestsCacheData: Codable {
+    var requests: [ConnectionRequest]
     let timestamp: Date?
 }
 
@@ -2715,6 +2927,7 @@ struct UserProfileCardSheetView: View {
     @State private var selectedWorkExperience: WorkExperience?
     @State private var resolvedVerifiedStatus: Bool?
     @State private var currentUserLocation: String?
+    @State private var credibilityScore: CredibilityScore?  // 🆕 信誉评分
     
     private var displayIsPro: Bool {
         if let currentUser = authManager.currentUser, currentUser.id == profile.userId {
@@ -2737,6 +2950,7 @@ struct UserProfileCardSheetView: View {
                     isVerified: resolvedVerifiedStatus,
                         currentUserLocation: currentUserLocation,
                         showDistance: true,
+                        credibilityScore: credibilityScore,  // 🆕 传递信誉评分
                         onWorkExperienceTap: { workExp in
                             selectedWorkExperience = workExp
                         }
@@ -2760,6 +2974,7 @@ struct UserProfileCardSheetView: View {
             .onAppear {
                 loadCurrentUserLocation()
                 resolveVerifiedStatusIfNeeded()
+                loadCredibilityScore()  // 🆕 加载信誉评分
             }
         }
         .sheet(item: $selectedWorkExperience) { workExp in
@@ -2771,6 +2986,16 @@ struct UserProfileCardSheetView: View {
         }
         .onAppear {
             resolveVerifiedStatusIfNeeded()
+            loadCredibilityScore()  // 🆕 加载信誉评分
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CredibilityScoreUpdated"))) { notification in
+            // 🆕 当评分更新时，清除缓存并重新加载评分
+            if let userId = notification.userInfo?["userId"] as? String,
+               userId.lowercased() == profile.userId.lowercased() {
+                print("🔄 [UserProfileCardSheet] 收到评分更新通知，清除缓存并重新加载评分...")
+                CredibilityScoreCache.shared.invalidateScore(for: profile.userId)
+                loadCredibilityScore()
+            }
         }
     }
     
@@ -2846,6 +3071,61 @@ struct UserProfileCardSheetView: View {
                 }
             } catch {
                 print("⚠️ [UserProfileCardSheet] 加载当前用户位置失败: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    // MARK: - Load Credibility Score
+    private func loadCredibilityScore() {
+        print("🔄 [UserProfileCardSheet] 开始加载信誉评分，userId: \(profile.userId)")
+        Task {
+            do {
+                // 🆕 使用缓存或 SupabaseService 的方法获取用户信誉评分
+                if let cachedScore = CredibilityScoreCache.shared.getScore(for: profile.userId) {
+                    print("✅ [UserProfileCardSheet] 从缓存加载评分: \(cachedScore.averageRating)")
+                    await MainActor.run {
+                        credibilityScore = cachedScore
+                    }
+                } else if let score = try await supabaseService.getCredibilityScore(userId: profile.userId.lowercased()) {
+                    print("✅ [UserProfileCardSheet] 成功加载信誉评分:")
+                    print("   - average_rating: \(score.averageRating)")
+                    print("   - overall_score: \(score.overallScore)")
+                    // 🆕 保存到缓存
+                    CredibilityScoreCache.shared.setScore(score, for: profile.userId)
+                    await MainActor.run {
+                        credibilityScore = score
+                    }
+                } else {
+                    print("⚠️ [UserProfileCardSheet] 未找到评分记录，尝试使用原始 userId 查询...")
+                    if let score = try? await supabaseService.getCredibilityScore(userId: profile.userId) {
+                        print("✅ [UserProfileCardSheet] 使用原始格式查询成功: \(score.averageRating)")
+                        CredibilityScoreCache.shared.setScore(score, for: profile.userId)
+                        await MainActor.run {
+                            credibilityScore = score
+                        }
+                    } else {
+                        print("⚠️ [UserProfileCardSheet] 未找到评分记录，使用默认值")
+                        let defaultScore = CredibilityScore(userId: profile.userId)
+                        CredibilityScoreCache.shared.setScore(defaultScore, for: profile.userId)
+                        await MainActor.run {
+                            credibilityScore = defaultScore
+                        }
+                    }
+                }
+            } catch {
+                print("❌ [UserProfileCardSheet] 无法加载信誉评分: \(error.localizedDescription)")
+                // 尝试从缓存加载
+                if let cachedScore = CredibilityScoreCache.shared.getScore(for: profile.userId) {
+                    print("✅ [UserProfileCardSheet] 从缓存加载评分（查询失败时）: \(cachedScore.averageRating)")
+                    await MainActor.run {
+                        credibilityScore = cachedScore
+                    }
+                } else {
+                    let defaultScore = CredibilityScore(userId: profile.userId)
+                    await MainActor.run {
+                        credibilityScore = defaultScore
+                    }
+                }
             }
         }
     }

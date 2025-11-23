@@ -13,6 +13,12 @@ struct CoffeeChatScheduleView: View {
     @State private var cachedSchedules: [CoffeeChatSchedule] = []
     @State private var lastSchedulesHash: Int = 0
     
+    // 🆕 评分界面状态（移到父视图）
+    @State private var showRatingSheet = false
+    @State private var ratingMeetingId: String = ""
+    @State private var ratingOtherUserId: String = ""
+    @State private var ratingOtherUserName: String = ""
+    
     var body: some View {
         NavigationView {
             ZStack {
@@ -56,6 +62,47 @@ struct CoffeeChatScheduleView: View {
                 if newHash != lastSchedulesHash {
                     cachedSchedules = newSchedules
                     lastSchedulesHash = newHash
+                }
+            }
+            // 🆕 监听评分界面显示通知（优化：立即响应）
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ShowRatingView"))) { notification in
+                if let userInfo = notification.userInfo,
+                   let meetingId = userInfo["meetingId"] as? String,
+                   let otherUserId = userInfo["otherUserId"] as? String,
+                   let otherUserName = userInfo["otherUserName"] as? String {
+                    print("🎯🎯🎯 [父视图] 收到显示评分界面通知")
+                    print("🎯🎯🎯 [父视图] meetingId: \(meetingId)")
+                    print("🎯🎯🎯 [父视图] otherUserId: \(otherUserId)")
+                    print("🎯🎯🎯 [父视图] otherUserName: \(otherUserName)")
+                    
+                    // 🆕 立即设置状态（onReceive 已在主线程）
+                    ratingMeetingId = meetingId
+                    ratingOtherUserId = otherUserId
+                    ratingOtherUserName = otherUserName
+                    
+                    // 立即显示，不使用延迟
+                    showRatingSheet = true
+                    print("🎯🎯🎯 [父视图] showRatingSheet 立即设置为 true")
+                }
+            }
+            // 🆕 评分界面 - 在父视图中显示（优化：立即构建，不等待条件）
+            .fullScreenCover(isPresented: $showRatingSheet) {
+                MeetingRatingView(
+                    meetingId: ratingMeetingId.isEmpty ? "" : ratingMeetingId,
+                    otherUserId: ratingOtherUserId.isEmpty ? "" : ratingOtherUserId,
+                    otherUserName: ratingOtherUserName.isEmpty ? "" : ratingOtherUserName
+                )
+                .environmentObject(authManager)
+                .environmentObject(supabaseService)
+                .onAppear {
+                    print("✅✅✅ [父视图] MeetingRatingView 已显示！")
+                }
+                .onDisappear {
+                    print("❌❌❌ [父视图] MeetingRatingView 已关闭")
+                    // 重置状态
+                    ratingMeetingId = ""
+                    ratingOtherUserId = ""
+                    ratingOtherUserName = ""
                 }
             }
         }
@@ -175,6 +222,8 @@ struct ScheduleCardView: View {
     @State private var isCheckingDistance = false
     @State private var alertRefreshID = UUID()
     @State private var showingCelebration = false
+    @State private var shouldShowRating = false  // 🆕 标记是否应该显示评分界面
+    @State private var showReviewSheet = false  // 🆕 显示评分查看界面
     @State private var hasMet: Bool
     @State private var viewRefreshID = UUID()
     @Binding var schedules: [CoffeeChatSchedule]
@@ -200,13 +249,38 @@ struct ScheduleCardView: View {
     @ViewBuilder
     private var metStatusView: some View {
         if shouldShowCheckmark {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 20))
-                .foregroundColor(Color(red: 0.4, green: 0.6, blue: 0.3))
-                .id("met-status-\(shouldShowCheckmark)")
-                .onAppear {
-                    print("✅ [UI] ✅ 图标已显示，hasMet = \(hasMet), currentSchedule.hasMet = \(currentSchedule.hasMet)")
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(Color(red: 0.4, green: 0.6, blue: 0.3))
+                
+                // 🆕 Review 按钮
+                Button(action: {
+                    showReviewSheet = true
+                }) {
+                    Text("Review")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.6, green: 0.4, blue: 0.2),
+                                    Color(red: 0.5, green: 0.3, blue: 0.15)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .cornerRadius(8)
+                        .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
                 }
+            }
+            .id("met-status-\(shouldShowCheckmark)")
+            .onAppear {
+                print("✅ [UI] ✅ 图标已显示，hasMet = \(hasMet), currentSchedule.hasMet = \(currentSchedule.hasMet)")
+            }
         } else {
             Button(action: {
                 markAsMet(scheduleId: schedule.id.uuidString)
@@ -475,6 +549,19 @@ struct ScheduleCardView: View {
                         viewRefreshID = UUID()
                     }
                 }
+            }
+            // 🆕 评分界面现在由父视图（CoffeeChatScheduleView）管理
+            // 通过 NotificationCenter 发送通知来触发显示
+            
+            // 🆕 评分查看界面
+            .sheet(isPresented: $showReviewSheet) {
+                RatingReviewView(
+                    meetingId: schedule.id.uuidString,
+                    participantId: schedule.participantId,
+                    participantName: schedule.participantName
+                )
+                .environmentObject(authManager)
+                .environmentObject(supabaseService)
             }
     }
     
@@ -782,17 +869,22 @@ struct ScheduleCardView: View {
                     viewRefreshID = UUID()
                     print("✅ [We Met] viewRefreshID 已更新: \(viewRefreshID)")
                     
-                    // 显示庆祝视图
-                    print("🎉 [We Met] 显示庆祝视图")
+                    // 🆕 立即发送通知显示评分界面（不等待，立即弹出）
+                    print("📢📢📢 [评分] 立即发送通知显示评分界面")
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("ShowRatingView"),
+                        object: nil,
+                        userInfo: [
+                            "meetingId": schedule.id.uuidString,
+                            "otherUserId": schedule.participantId,
+                            "otherUserName": schedule.participantName
+                        ]
+                    )
+                    print("✅✅✅ [评分] 通知已立即发送！")
+                    
+                    // 显示庆祝视图（后台显示，不阻塞评分界面）
+                    print("🎉 [We Met] 显示庆祝视图（后台）")
                     showingCelebration = true
-                    
-                    // 立即发送通知触发重新加载（不等待3秒）
-                    print("🔄 [We Met] 立即发送通知触发重新加载")
-                    NotificationCenter.default.post(name: NSNotification.Name("CoffeeChatScheduleUpdated"), object: nil)
-                    
-                    // 注意：loadSchedules 是 CoffeeChatScheduleView 的方法，不是 ScheduleCardView 的方法
-                    // 这里通过通知机制触发父视图重新加载
-                    // 父视图的 onReceive 会处理重新加载
                     
                     // 3秒后自动关闭庆祝视图
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
@@ -801,6 +893,10 @@ struct ScheduleCardView: View {
                             showingCelebration = false
                         }
                     }
+                    
+                    // 立即发送通知触发重新加载
+                    print("🔄 [We Met] 立即发送通知触发重新加载")
+                    NotificationCenter.default.post(name: NSNotification.Name("CoffeeChatScheduleUpdated"), object: nil)
                 }
             } catch {
                 print("❌ [We Met] 标记失败: \(error.localizedDescription)")

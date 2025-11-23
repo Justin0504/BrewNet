@@ -48,3 +48,4 @@ WHERE user_id = '7a9380a5-d34d-40de-8e44-f1002aa5512a';
 -- LEFT JOIN profiles p ON p.user_id = u.id
 -- WHERE u.id = '7a9380a5-d34d-40de-8e44-f1002aa5512a';
 
+

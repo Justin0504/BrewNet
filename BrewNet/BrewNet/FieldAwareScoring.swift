@@ -33,21 +33,41 @@ struct ZonedSearchableText {
     
     /// 构建分区文本
     static func from(profile: BrewNetProfile) -> ZonedSearchableText {
-        // Zone A: 当前职位、公司、核心技能（最重要）
+        // Zone A: 当前职位、公司、核心技能、About Me、工作技能和职责（最重要）⭐
         var zoneA = [
             profile.professionalBackground.jobTitle ?? "",
             profile.professionalBackground.currentCompany ?? "",
             profile.professionalBackground.industry ?? ""
         ]
-        // 只取前5个技能
+        
+        // ⭐ 提升 About Me (bio) 到 Zone A - 包含关键职业信息
+        if let bio = profile.coreIdentity.bio {
+            zoneA.append(bio)
+        }
+        
+        // 核心技能（前5个）
         zoneA.append(contentsOf: Array(profile.professionalBackground.skills.prefix(5)))
         
-        // Zone B: 简介、过往经历、教育（中等重要）
+        // ⭐ 提升最近工作经历的 Role Highlights 和 Skills 到 Zone A（最近1个）
+        if let recentExp = profile.professionalBackground.workExperiences.first {
+            // 最近工作的职责/角色亮点 - 最重要的信息
+            if let responsibilities = recentExp.responsibilities {
+                zoneA.append(responsibilities)
+            }
+            // 最近工作的所有关键技能
+            zoneA.append(contentsOf: recentExp.highlightedSkills)
+        }
+        
+        // Zone B: 职业介绍、过往经历、教育（中等重要）
         var zoneB = [
-            profile.coreIdentity.bio ?? "",
             profile.coreIdentity.location ?? "",
             profile.professionalBackground.education ?? ""
         ]
+        
+        // 添加职业自我介绍（Self Introduction）
+        if let selfIntro = profile.personalitySocial.selfIntroduction {
+            zoneB.append(selfIntro)
+        }
         
         // 教育经历
         if let educations = profile.professionalBackground.educations {
@@ -60,21 +80,22 @@ struct ZonedSearchableText {
             }
         }
         
-        // 工作经历（最近3个）
-        for exp in profile.professionalBackground.workExperiences.prefix(3) {
+        // 过往工作经历（第2-3个）- 公司和职位
+        for exp in profile.professionalBackground.workExperiences.dropFirst().prefix(2) {
             zoneB.append(exp.companyName)
             if let position = exp.position {
                 zoneB.append(position)
             }
-            zoneB.append(contentsOf: Array(exp.highlightedSkills.prefix(3)))
+            // 过往工作的职责和技能权重稍低
+            if let responsibilities = exp.responsibilities {
+                zoneB.append(responsibilities)
+            }
+            zoneB.append(contentsOf: exp.highlightedSkills)
         }
         
         // Zone C: 爱好、兴趣、价值观（较低权重）
         var zoneC = profile.personalitySocial.hobbies
         zoneC.append(contentsOf: profile.personalitySocial.valuesTags)
-        if let intro = profile.personalitySocial.selfIntroduction {
-            zoneC.append(intro)
-        }
         
         return ZonedSearchableText(
             zoneA: zoneA.joined(separator: " ").lowercased(),
@@ -86,6 +107,183 @@ struct ZonedSearchableText {
 
 /// 字段感知评分
 class FieldAwareScoring {
+    
+    // MARK: - 同义词映射（简化版，与 QueryParser 保持一致）
+    
+    /// 常见同义词映射表（用于评分时的软匹配）⭐ 扩展版
+    private let commonSynonyms: [String: Set<String>] = [
+        // 职位同义词
+        "engineer": ["developer", "programmer", "swe", "sde"],
+        "developer": ["engineer", "programmer", "swe", "sde"],
+        "pm": ["product manager", "program manager"],
+        "swe": ["software engineer", "engineer", "developer"],
+        
+        // 技术栈同义词
+        "frontend": ["front-end", "fe", "client side"],
+        "backend": ["back-end", "be", "server side"],
+        "fullstack": ["full-stack", "fs", "full stack"],
+        
+        // ⭐ ML/AI 同义词组（完整映射）
+        "ml": ["machine learning", "ai", "artificial intelligence", "deep learning"],
+        "ai": ["artificial intelligence", "machine learning", "ml", "deep learning"],
+        "machine learning": ["ml", "ai", "artificial intelligence", "deep learning"],
+        "deep learning": ["ml", "ai", "machine learning", "artificial intelligence"],
+        "artificial intelligence": ["ai", "ml", "machine learning", "deep learning"],
+        
+        // 编程语言
+        "js": ["javascript"],
+        "javascript": ["js"],
+        "ts": ["typescript"],
+        "typescript": ["ts"],
+        "py": ["python"],
+        "python": ["py"],
+        
+        // 框架和工具
+        "react": ["reactjs"],
+        "reactjs": ["react"],
+        "vue": ["vuejs"],
+        "vuejs": ["vue"],
+        "k8s": ["kubernetes"],
+        "kubernetes": ["k8s"],
+        
+        // 云平台
+        "aws": ["amazon web services"],
+        "amazon web services": ["aws"],
+        
+        // 公司
+        "google": ["alphabet"],
+        "alphabet": ["google"],
+        "facebook": ["meta"],
+        "meta": ["facebook"]
+    ]
+    
+    /// 检查两个词是否是同义词
+    private func areSynonyms(_ word1: String, _ word2: String) -> Bool {
+        let w1 = word1.lowercased()
+        let w2 = word2.lowercased()
+        
+        if w1 == w2 { return true }
+        
+        // 检查 w1 是否在 w2 的同义词集合中
+        if let synonyms = commonSynonyms[w1], synonyms.contains(w2) {
+            return true
+        }
+        
+        // 反向检查：w2 是否在 w1 的同义词集合中
+        if let synonyms = commonSynonyms[w2], synonyms.contains(w1) {
+            return true
+        }
+        
+        return false
+    }
+    
+    /// 检查 token 是否在文本中（支持同义词）
+    private func containsWithSynonyms(_ text: String, token: String) -> Bool {
+        // 1. 直接包含
+        if text.contains(token) {
+            return true
+        }
+        
+        // 2. 同义词匹配
+        let words = text.split(separator: " ").map { String($0) }
+        for word in words {
+            if areSynonyms(token, word) {
+                return true
+            }
+        }
+        
+        return false
+    }
+    
+    // MARK: - 相似度计算
+    
+    /// 计算字符串相似度（用于容错匹配）
+    /// - Parameters:
+    ///   - s1: 字符串1
+    ///   - s2: 字符串2
+    /// - Returns: 相似度 [0, 1]，1表示完全相同
+    private func similarity(_ s1: String, _ s2: String) -> Double {
+        let longer = s1.count > s2.count ? s1 : s2
+        let shorter = s1.count > s2.count ? s2 : s1
+        
+        if longer.isEmpty { return 1.0 }
+        
+        // 计算编辑距离
+        let distance = levenshteinDistance(shorter, longer)
+        return (Double(longer.count) - Double(distance)) / Double(longer.count)
+    }
+    
+    /// 计算编辑距离（Levenshtein Distance）
+    private func levenshteinDistance(_ s1: String, _ s2: String) -> Int {
+        let s1Array = Array(s1)
+        let s2Array = Array(s2)
+        var matrix = [[Int]](repeating: [Int](repeating: 0, count: s2Array.count + 1), count: s1Array.count + 1)
+        
+        for i in 0...s1Array.count {
+            matrix[i][0] = i
+        }
+        for j in 0...s2Array.count {
+            matrix[0][j] = j
+        }
+        
+        for i in 1...s1Array.count {
+            for j in 1...s2Array.count {
+                if s1Array[i-1] == s2Array[j-1] {
+                    matrix[i][j] = matrix[i-1][j-1]
+                } else {
+                    matrix[i][j] = min(
+                        matrix[i-1][j] + 1,      // deletion
+                        matrix[i][j-1] + 1,      // insertion
+                        matrix[i-1][j-1] + 1     // substitution
+                    )
+                }
+            }
+        }
+        
+        return matrix[s1Array.count][s2Array.count]
+    }
+    
+    // 停用词列表 - 常见的无意义词汇（扩展版）
+    private let stopWords: Set<String> = [
+        // 英文介词
+        "in", "at", "on", "to", "for", "of", "with", "from", "by", "as",
+        "across", "through", "into", "over", "under", "between", "among",
+        "within", "without", "during", "before", "after", "above", "below",
+        // 英文冠词
+        "a", "an", "the",
+        // 英文代词
+        "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them",
+        "my", "your", "his", "her", "its", "our", "their",
+        // 英文连词
+        "and", "or", "but", "so", "yet", "nor",
+        // 英文动词（常见无意义动词）
+        "is", "am", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did",
+        "will", "would", "can", "could", "may", "might", "should", "must",
+        "get", "got", "getting", "make", "made", "making",
+        "work", "works", "worked", "working",  // ⭐ 添加 works
+        "go", "goes", "went", "going",
+        "come", "comes", "came", "coming",
+        "take", "takes", "took", "taking",
+        "give", "gives", "gave", "giving",
+        "use", "uses", "used", "using",
+        "teach", "teaches", "taught", "teaching",  // ⭐ 添加 teach 相关词
+        "build", "builds", "built", "building",    // ⭐ 添加 build 相关词
+        "create", "creates", "created", "creating", // ⭐ 添加 create 相关词
+        "develop", "develops", "developed", "developing", // ⭐ 添加 develop 相关词
+        "design", "designs", "designed", "designing",     // ⭐ 添加 design 相关词 (注意: "designer" 是职位)
+        "manage", "manages", "managed", "managing",       // ⭐ 添加 manage 相关词 (注意: "manager" 是职位)
+        "lead", "leads", "led", "leading",                // ⭐ 添加 lead 相关词 (注意: "leader" 是职位)
+        // 其他常见词
+        "that", "this", "these", "those", "there", "here",
+        "who", "what", "where", "when", "why", "how",
+        "want", "wanna", "looking", "find", "person", "someone", "anyone",
+        "very", "much", "more", "most", "many", "some", "any", "all",
+        // 通用词汇（单独出现无意义）
+        "experience", "exp", "experienced", "graduate", "graduated", "graduating",
+        "learn", "learning", "learned",  // ⭐ 添加 learn 相关词
+        "train", "training", "trained"   // ⭐ 添加 train 相关词
+    ]
     
     /// 计算字段感知分数
     /// - Parameters:
@@ -99,6 +297,13 @@ class FieldAwareScoring {
         let zonedText = ZonedSearchableText.from(profile: profile)
         var score: Double = 0.0
         var matchDetails: [(token: String, zone: FieldZone)] = []
+        var matchedSynonymGroups: Set<String> = []  // ⭐ 记录已匹配的同义词组
+        
+        // 1. 找出所有短语（包含空格的token）
+        let phrases = tokens.filter { $0.contains(" ") }
+        
+        // 2. 找出短语中包含的单词
+        let phraseWords = Set(phrases.flatMap { $0.split(separator: " ").map { String($0) } })
         
         // 确保所有 tokens 都转换为小写进行比较
         for token in tokens {
@@ -117,6 +322,7 @@ class FieldAwareScoring {
             } else if zonedText.zoneC.contains(lowercasedToken) {
                 score += FieldZone.zoneC.weight
                 matchDetails.append((token, .zoneC))
+                matchedSynonymGroups.insert(synonymGroup)  // ⭐ 标记该同义词组已计分
             }
         }
         
@@ -132,6 +338,32 @@ class FieldAwareScoring {
         }
         
         return score
+    }
+    
+    /// 获取同义词组的唯一标识符
+    /// 同义词组内的所有词返回相同的key，非同义词返回自身
+    private func getSynonymGroupKey(for term: String) -> String {
+        let t = term.lowercased()
+        
+        // 检查是否在 commonSynonyms 中有定义
+        if let synonyms = commonSynonyms[t] {
+            // 返回该组中字典序最小的词作为 key（保证一致性）
+            var allTerms = synonyms
+            allTerms.insert(t)
+            return allTerms.sorted().first ?? t
+        }
+        
+        // 反向查找：是否作为某个词的同义词出现
+        for (key, values) in commonSynonyms {
+            if values.contains(t) {
+                var allTerms = values
+                allTerms.insert(key)
+                return allTerms.sorted().first ?? t
+            }
+        }
+        
+        // 不是同义词，返回自身
+        return t
     }
     
     /// 特定实体的精确匹配（用于结构化查询）
@@ -202,7 +434,7 @@ class FieldAwareScoring {
                     let lowercasedSchool = school.lowercased()
                     if schoolName.contains(lowercasedSchool) || lowercasedSchool.contains(schoolName) {
                         score += 3.0
-                        print("  🎓 School match: \(school) (+3.0)")
+                        print("  🎓 School match: \(school) → \(education.schoolName) (+3.0)")
                         break
                     }
                 }
@@ -222,6 +454,44 @@ class FieldAwareScoring {
             let skillScore = min(Double(matchedSkills.count), 5.0)
             score += skillScore
             print("  🛠️  Skill matches: \(matchedSkills.prefix(3).joined(separator: ", ")) (+\(String(format: "%.1f", skillScore)))")
+        }
+        
+        // ⭐ 行业匹配（当前行业 +6分，过往行业经验 +3分）
+        if !entities.industries.isEmpty {
+            // 检查当前行业
+            if let currentIndustry = profile.professionalBackground.industry?.lowercased() {
+                for industry in entities.industries {
+                    if currentIndustry.contains(industry) || industry.contains(currentIndustry) {
+                        score += 6.0
+                        print("  🏭 Current industry match: \(industry) (+6.0)")
+                        break
+                    }
+                }
+            }
+            
+            // 检查工作经历中的行业关键词（从公司名、职位、职责中推断）
+            for experience in profile.professionalBackground.workExperiences.prefix(5) {
+                let expText = [
+                    experience.companyName,
+                    experience.position ?? "",
+                    experience.responsibilities ?? ""
+                ].joined(separator: " ").lowercased()
+                
+                for industry in entities.industries {
+                    if expText.contains(industry) {
+                        // 计算时间衰减
+                        let currentYear = Double(Calendar.current.component(.year, from: Date()))
+                        let endYear = experience.endYear.map { Double($0) } ?? currentYear
+                        let yearsAgo = currentYear - endYear
+                        let timeWeight = SoftMatching.timeDecay(yearsAgo: yearsAgo, halfLife: 3.0)
+                        let weightedScore = 3.0 * timeWeight
+                        
+                        score += weightedScore
+                        print("  🏭 Past industry experience: \(industry) (+\(String(format: "%.1f", weightedScore)))")
+                        break
+                    }
+                }
+            }
         }
         
         return score

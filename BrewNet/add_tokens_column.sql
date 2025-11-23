@@ -41,3 +41,4 @@ AND column_name = 'tokens';
 -- 6. 可选：给现有用户赠送初始 tokens（欢迎奖励）
 -- UPDATE users SET tokens = 10 WHERE tokens = 0;
 
+

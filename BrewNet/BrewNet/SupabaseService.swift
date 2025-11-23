@@ -7,6 +7,7 @@ class SupabaseService: ObservableObject {
     static let shared = SupabaseService()
     
     private let client: SupabaseClient
+    var supabase: SupabaseClient { client }  // 🆕 公开访问 client
     private weak var databaseManager: DatabaseManager?
     
     private init() {
@@ -2813,79 +2814,37 @@ class SupabaseService: ObservableObject {
         // 使用更通用的参数名，因为这是双向查询
         let userId1 = receiverId
         let userId2 = senderId
-        print("🔍 [临时消息] 开始双向查询: userId1=\(userId1), userId2=\(userId2)")
+        print("🔍 [临时消息-优化] 开始快速查询: userId1=\(userId1), userId2=\(userId2)")
         
-        // 检查是否已匹配
-        var isMatched = false
-        do {
-            let matches = try await getActiveMatches(userId: userId1)
-            isMatched = matches.contains { match in
-                (match.userId == userId1 && match.matchedUserId == userId2) ||
-                (match.userId == userId2 && match.matchedUserId == userId1)
-            }
-            print("🔍 [临时消息] 匹配状态: \(isMatched ? "已匹配" : "未匹配")")
-        } catch {
-            print("⚠️ [临时消息] 检查匹配状态失败: \(error.localizedDescription)")
-        }
-        
-        // 如果已匹配，则没有临时消息（所有消息都是正常消息）
-        if isMatched {
-            print("ℹ️ [临时消息] 用户已匹配，返回空列表")
-            return []
-        }
-        
-        // 双向查询：获取两个用户之间的所有消息（无论谁发给谁）
-        // 使用和 getMessages 完全相同的查询方式
+        // 🆕 优化：使用简化的查询，只查询 message_type = 'temporary' 的消息
+        // 这样不需要检查匹配状态，大大提升速度
         let response = try await client
             .from(SupabaseTable.messages.rawValue)
             .select()
-            .or("sender_id.eq.\(userId1),receiver_id.eq.\(userId1)")
-            .or("sender_id.eq.\(userId2),receiver_id.eq.\(userId2)")
+            .eq("message_type", value: "temporary")
+            .or("and(sender_id.eq.\(userId1),receiver_id.eq.\(userId2)),and(sender_id.eq.\(userId2),receiver_id.eq.\(userId1))")
             .order("timestamp", ascending: true)
             .execute()
         
         let data = response.data
         
-        // 解析 JSON 数组（使用和 getMessages 相同的解析方式）
+        // 🆕 简化解析：只解析 message_type = 'temporary' 的消息
         guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-            print("❌ [临时消息] 解析响应失败")
+            print("❌ [临时消息-优化] 解析响应失败")
             throw ProfileError.fetchFailed("Failed to parse temporary messages response")
         }
         
-        print("🔍 [临时消息] 查询到 \(jsonArray.count) 条原始消息")
+        print("✅ [临时消息-优化] 查询到 \(jsonArray.count) 条临时消息（已优化）")
         
         var messages: [SupabaseMessage] = []
         for json in jsonArray {
-            // 只包含涉及这两个用户的消息（和 getMessages 相同的过滤逻辑）
-            let msgSenderId = json["sender_id"] as? String ?? ""
-            let msgReceiverId = json["receiver_id"] as? String ?? ""
-            
-            // 确保消息只涉及这两个用户
-            if (msgSenderId == userId1 && msgReceiverId == userId2) ||
-               (msgSenderId == userId2 && msgReceiverId == userId1) {
-                
-                if let messageData = try? JSONSerialization.data(withJSONObject: json),
-                   let message = try? JSONDecoder().decode(SupabaseMessage.self, from: messageData) {
-                    
-                    let messageType = message.messageType
-                    print("🔍 [临时消息] 消息类型: \(messageType), 发送者: \(msgSenderId), 接收者: \(msgReceiverId), 内容: \(message.content.prefix(30))...")
-                    
-                    // 如果消息类型明确标记为 "temporary"，或者未匹配时发送的所有消息都视为临时消息
-                    if messageType == "temporary" {
-                        messages.append(message)
-                        print("✅ [临时消息] 添加临时消息: \(message.content.prefix(30))...")
-                    } else if !isMatched {
-                        // 如果还未匹配，所有消息都视为临时消息
-                        messages.append(message)
-                        print("✅ [临时消息] 添加未匹配时的消息: \(message.content.prefix(30))...")
-                    } else {
-                        print("ℹ️ [临时消息] 跳过已匹配后的消息: \(message.content.prefix(30))...")
-                    }
-                }
+            if let messageData = try? JSONSerialization.data(withJSONObject: json),
+               let message = try? JSONDecoder().decode(SupabaseMessage.self, from: messageData) {
+                messages.append(message)
             }
         }
         
-        print("✅ [临时消息] 最终返回 \(messages.count) 条临时消息（双向）")
+        print("✅ [临时消息-优化] 返回 \(messages.count) 条临时消息（耗时更短）")
         return messages
     }
     
@@ -5792,6 +5751,102 @@ extension SupabaseService {
         print("✅ Found \(profiles.count) mentor candidates")
 
         return profiles
+    }
+    
+    // MARK: - Credibility System
+    
+    /// 获取用户信誉评分
+    func getCredibilityScore(userId: String) async throws -> CredibilityScore? {
+        print("🔍 [SupabaseService] 查询信誉评分，userId: \(userId)")
+        do {
+            // 使用小写格式查询（数据库通常存储为小写）
+            let response = try await client
+                .from("credibility_scores")
+                .select("*")
+                .eq("user_id", value: userId.lowercased())
+                .single()
+                .execute()
+            
+            print("✅ [SupabaseService] 查询成功，状态码: \(response.response.statusCode)")
+            print("📊 [SupabaseService] 响应数据: \(String(data: response.data, encoding: .utf8) ?? "无法解析")")
+            
+            let decoder = JSONDecoder()
+            // 不使用 convertFromSnakeCase，因为 CredibilityScore 已经定义了完整的 CodingKeys
+            // 也不设置 dateDecodingStrategy，因为 CredibilityScore 的自定义 init(from decoder:) 会处理日期
+            decoder.keyDecodingStrategy = .useDefaultKeys
+            
+            let score = try decoder.decode(CredibilityScore.self, from: response.data)
+            print("✅ [SupabaseService] 解码成功:")
+            print("   - average_rating: \(score.averageRating)")
+            print("   - overall_score: \(score.overallScore)")
+            return score
+        } catch {
+            print("❌ [SupabaseService] 无法获取信誉评分: \(error.localizedDescription)")
+            print("❌ [SupabaseService] 错误类型: \(type(of: error))")
+            print("❌ [SupabaseService] 完整错误: \(error)")
+            return nil
+        }
+    }
+    
+    /// 获取见面评分记录
+    func getMeetingRating(meetingId: String, raterId: String, ratedUserId: String) async throws -> MeetingRating? {
+        do {
+            print("🔍 [SupabaseService] 查询评分记录:")
+            print("   - meetingId (原始): \(meetingId)")
+            print("   - meetingId (小写): \(meetingId.lowercased())")
+            print("   - raterId (原始): \(raterId)")
+            print("   - raterId (小写): \(raterId.lowercased())")
+            print("   - ratedUserId (原始): \(ratedUserId)")
+            print("   - ratedUserId (小写): \(ratedUserId.lowercased())")
+            
+            // 不使用 .single()，先查询所有匹配的记录
+            // 使用小写格式查询（数据库通常存储为小写）
+            let response = try await client
+                .from("meeting_ratings")
+                .select("*")
+                .eq("meeting_id", value: meetingId.lowercased())
+                .eq("rater_id", value: raterId.lowercased())
+                .eq("rated_user_id", value: ratedUserId.lowercased())
+                .execute()
+            
+            print("✅ [SupabaseService] 查询成功，状态码: \(response.response.statusCode)")
+            print("📊 [SupabaseService] 响应数据大小: \(response.data.count) bytes")
+            
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            
+            // 处理日期格式
+            let dateFormatter = ISO8601DateFormatter()
+            dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            
+            decoder.dateDecodingStrategy = .custom { decoder in
+                let container = try decoder.singleValueContainer()
+                let dateString = try container.decode(String.self)
+                
+                if let date = dateFormatter.date(from: dateString) {
+                    return date
+                }
+                
+                dateFormatter.formatOptions = [.withInternetDateTime]
+                if let date = dateFormatter.date(from: dateString) {
+                    return date
+                }
+                
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid date format: \(dateString)")
+            }
+            
+            // 尝试解码为数组
+            let ratings = try decoder.decode([MeetingRating].self, from: response.data)
+            print("✅ [SupabaseService] 找到 \(ratings.count) 条评分记录")
+            
+            // 返回第一条记录（应该只有一条）
+            return ratings.first
+        } catch {
+            print("❌ [SupabaseService] 无法获取评分记录: \(error.localizedDescription)")
+            print("❌ [SupabaseService] 错误类型: \(type(of: error))")
+            print("❌ [SupabaseService] 完整错误: \(error)")
+            return nil
+        }
     }
 }
 

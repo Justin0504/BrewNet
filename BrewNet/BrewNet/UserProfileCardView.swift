@@ -180,6 +180,7 @@ struct ProfileCardContentView: View {
     let isVerified: Bool?
     let currentUserLocation: String?
     var showDistance: Bool = true
+    var credibilityScore: CredibilityScore? = nil  // 🆕 信誉评分（可选，默认nil）
     var onWorkExperienceTap: ((WorkExperience) -> Void)?
     
     private let themeBrown = Color(red: 0.4, green: 0.2, blue: 0.1)
@@ -316,6 +317,13 @@ struct ProfileCardContentView: View {
         VStack(spacing: 16) {
             ZStack(alignment: .topLeading) {
                 profileImageView
+                    .overlay(alignment: .topTrailing) {
+                        // 🆕 头像右上角显示平均评分
+                        if let score = credibilityScore {
+                            RatingBadgeView(rating: score.averageRating, size: .small)
+                                .offset(x: 8, y: -8)
+                        }
+                    }
                 
                 Image(systemName: "person.badge.shield.checkmark.fill")
                     .font(.system(size: 18))
@@ -1033,6 +1041,7 @@ struct UserProfileCardView: View {
     
     @State private var currentUserLocation: String?
     @State private var selectedWorkExperience: WorkExperience?
+    @State private var credibilityScore: CredibilityScore?  // 🆕 信誉评分
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -1090,6 +1099,7 @@ struct UserProfileCardView: View {
                     isVerified: isVerified,
                     currentUserLocation: currentUserLocation,
                     showDistance: true,
+                    credibilityScore: credibilityScore,  // 🆕 传递评分
                     onWorkExperienceTap: { workExp in
                         selectedWorkExperience = workExp
                     }
@@ -1119,6 +1129,10 @@ struct UserProfileCardView: View {
         }
         .offset(dragOffset)
         .rotationEffect(.degrees(rotationAngle))
+        .onAppear {
+            // 🆕 加载用户信誉评分
+            loadCredibilityScore()
+        }
         .gesture(
             DragGesture()
                 .onChanged { value in
@@ -1164,6 +1178,109 @@ struct UserProfileCardView: View {
         }
         .onAppear {
             loadCurrentUserLocation()
+            // 🆕 强制刷新评分（每次显示时都重新加载）
+            print("🔄 [UserProfileCard] onAppear 触发，强制刷新评分...")
+            loadCredibilityScore()
+        }
+        .onChange(of: profile.userId) { newUserId in
+            // 🆕 当 profile.userId 变化时，重新加载评分
+            print("🔄 [UserProfileCard] profile.userId 变化: \(newUserId)，重新加载评分...")
+            loadCredibilityScore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CredibilityScoreUpdated"))) { notification in
+            // 🆕 当评分更新时，清除缓存并重新加载评分
+            if let userId = notification.userInfo?["userId"] as? String,
+               userId.lowercased() == profile.userId.lowercased() {
+                print("🔄 [UserProfileCard] 收到评分更新通知，清除缓存并重新加载评分...")
+                CredibilityScoreCache.shared.invalidateScore(for: profile.userId)
+                loadCredibilityScore()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            // 🆕 当应用从后台返回时，重新加载评分
+            print("🔄 [UserProfileCard] 应用返回前台，重新加载评分...")
+            loadCredibilityScore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserLoggedIn"))) { _ in
+            // 🆕 当用户登录时，重新加载评分
+            print("🔄 [UserProfileCard] 用户登录，重新加载评分...")
+            loadCredibilityScore()
+        }
+    }
+    
+    // MARK: - Load Credibility Score
+    private func loadCredibilityScore() {
+        print("🔄 [UserProfileCard] 开始加载信誉评分，userId: \(profile.userId)")
+        Task {
+            do {
+                // 🆕 先尝试从缓存加载
+                if let cachedScore = CredibilityScoreCache.shared.getScore(for: profile.userId) {
+                    print("✅ [UserProfileCard] 从缓存加载评分: \(cachedScore.averageRating)")
+                    await MainActor.run {
+                        credibilityScore = cachedScore
+                    }
+                    // 后台刷新缓存
+                    Task {
+                        if let score = try? await supabaseService.getCredibilityScore(userId: profile.userId.lowercased()) {
+                            CredibilityScoreCache.shared.setScore(score, for: profile.userId)
+                            await MainActor.run {
+                                if credibilityScore?.averageRating != score.averageRating {
+                                    credibilityScore = score
+                                    print("🔄 [UserProfileCard] 缓存已刷新: \(score.averageRating)")
+                                }
+                            }
+                        }
+                    }
+                } else if let score = try await supabaseService.getCredibilityScore(userId: profile.userId.lowercased()) {
+                    print("✅ [UserProfileCard] 成功加载信誉评分:")
+                    print("   - average_rating: \(score.averageRating)")
+                    print("   - overall_score: \(score.overallScore)")
+                    print("   - userId: \(score.userId)")
+                    // 🆕 保存到缓存
+                    CredibilityScoreCache.shared.setScore(score, for: profile.userId)
+                    await MainActor.run {
+                        // 强制更新，即使值相同也要触发视图刷新
+                        let oldScore = credibilityScore?.averageRating
+                        credibilityScore = score
+                        if oldScore != score.averageRating {
+                            print("🔄 [UserProfileCard] 评分已更新: \(oldScore ?? 0) -> \(score.averageRating)")
+                        }
+                    }
+                } else {
+                    print("⚠️ [UserProfileCard] 未找到评分记录，尝试使用原始 userId 查询...")
+                    // 如果小写格式查询失败，尝试原始格式
+                    if let score = try? await supabaseService.getCredibilityScore(userId: profile.userId) {
+                        print("✅ [UserProfileCard] 使用原始格式查询成功: \(score.averageRating)")
+                        CredibilityScoreCache.shared.setScore(score, for: profile.userId)
+                        await MainActor.run {
+                            credibilityScore = score
+                        }
+                    } else {
+                        print("⚠️ [UserProfileCard] 未找到评分记录，使用默认值")
+                        // 如果用户还没有评分记录，使用默认值
+                        let defaultScore = CredibilityScore(userId: profile.userId)
+                        CredibilityScoreCache.shared.setScore(defaultScore, for: profile.userId)
+                        await MainActor.run {
+                            credibilityScore = defaultScore
+                        }
+                    }
+                }
+            } catch {
+                print("❌ [UserProfileCard] 无法加载信誉评分: \(error.localizedDescription)")
+                print("❌ [UserProfileCard] 错误详情: \(error)")
+                // 尝试从缓存加载
+                if let cachedScore = CredibilityScoreCache.shared.getScore(for: profile.userId) {
+                    print("✅ [UserProfileCard] 从缓存加载评分（查询失败时）: \(cachedScore.averageRating)")
+                    await MainActor.run {
+                        credibilityScore = cachedScore
+                    }
+                } else {
+                    let defaultScore = CredibilityScore(userId: profile.userId)
+                    await MainActor.run {
+                        credibilityScore = defaultScore
+                    }
+                }
+            }
         }
     }
     
@@ -1822,6 +1939,8 @@ struct PublicProfileCardView: View {
     @State private var currentUserLocation: String?
     @State private var resolvedProStatus: Bool?
     @State private var resolvedVerifiedStatus: Bool?
+    @State private var credibilityScore: CredibilityScore?
+    @State private var selectedWorkExperience: WorkExperience?
     
     private var displayIsPro: Bool {
         isProUser ?? resolvedProStatus ?? false
@@ -1840,7 +1959,10 @@ struct PublicProfileCardView: View {
                 isVerified: displayIsVerified,
                 currentUserLocation: currentUserLocation,
                 showDistance: showDistance,
-                onWorkExperienceTap: nil
+                credibilityScore: credibilityScore,
+                onWorkExperienceTap: { workExp in
+                    selectedWorkExperience = workExp
+                }
             )
             .background(Color.white)
             .cornerRadius(28)
@@ -1854,6 +1976,23 @@ struct PublicProfileCardView: View {
             loadCurrentUserLocation()
             resolveProStatusIfNeeded()
             resolveVerifiedStatusIfNeeded()
+            loadCredibilityScore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CredibilityScoreUpdated"))) { _ in
+            loadCredibilityScore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            loadCredibilityScore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserLoggedIn"))) { _ in
+            loadCredibilityScore()
+        }
+        .sheet(item: $selectedWorkExperience) { workExp in
+            WorkExperienceDetailSheet(
+                workExperience: workExp,
+                allSkills: Array(profile.professionalBackground.skills.prefix(8)),
+                industry: profile.professionalBackground.industry
+            )
         }
     }
     
@@ -1901,6 +2040,69 @@ struct PublicProfileCardView: View {
             } catch {
                 print("⚠️ [PublicProfileCard] Failed to resolve verification status: \(error.localizedDescription)")
             }
+        }
+    }
+    
+    private func loadCredibilityScore() {
+        print("🔄 [PublicProfileCard] 开始加载信誉评分，userId: \(profile.userId)")
+        Task {
+            do {
+                // 尝试从缓存加载
+                if let cachedScore = CredibilityScoreCache.shared.getScore(for: profile.userId) {
+                    print("✅ [PublicProfileCard] 从缓存加载信誉评分: \(cachedScore.averageRating)")
+                    await MainActor.run {
+                        credibilityScore = cachedScore
+                    }
+                    // 并在后台刷新缓存
+                    Task { await refreshCredibilityScore(for: profile.userId) }
+                    return
+                }
+
+                // 强制使用小写格式查询，确保与数据库一致
+                if let score = try await supabaseService.getCredibilityScore(userId: profile.userId.lowercased()) {
+                    print("✅ [PublicProfileCard] 成功加载信誉评分: \(score.averageRating)")
+                    await MainActor.run {
+                        credibilityScore = score
+                        CredibilityScoreCache.shared.setScore(score, for: profile.userId)
+                    }
+                } else {
+                    print("⚠️ [PublicProfileCard] 未找到评分记录，尝试使用原始 userId 查询...")
+                    if let score = try? await supabaseService.getCredibilityScore(userId: profile.userId) {
+                        print("✅ [PublicProfileCard] 使用原始格式查询成功: \(score.averageRating)")
+                        await MainActor.run {
+                            credibilityScore = score
+                            CredibilityScoreCache.shared.setScore(score, for: profile.userId)
+                        }
+                    } else {
+                        print("⚠️ [PublicProfileCard] 未找到评分记录，使用默认值")
+                        await MainActor.run {
+                            let defaultScore = CredibilityScore(userId: profile.userId)
+                            credibilityScore = defaultScore
+                            CredibilityScoreCache.shared.setScore(defaultScore, for: profile.userId)
+                        }
+                    }
+                }
+            } catch {
+                print("❌ [PublicProfileCard] 无法加载信誉评分: \(error.localizedDescription)")
+                await MainActor.run {
+                    let defaultScore = CredibilityScore(userId: profile.userId)
+                    credibilityScore = defaultScore
+                    CredibilityScoreCache.shared.setScore(defaultScore, for: profile.userId)
+                }
+            }
+        }
+    }
+    
+    private func refreshCredibilityScore(for userId: String) async {
+        do {
+            if let score = try await supabaseService.getCredibilityScore(userId: userId.lowercased()) {
+                await MainActor.run {
+                    credibilityScore = score
+                    CredibilityScoreCache.shared.setScore(score, for: userId)
+                }
+            }
+        } catch {
+            print("⚠️ [PublicProfileCard] 刷新信誉评分失败: \(error.localizedDescription)")
         }
     }
 }

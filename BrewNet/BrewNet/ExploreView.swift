@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Headhunting Main View
+// MARK: - Talent Scout Main View
 struct ExploreMainView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var supabaseService: SupabaseService
@@ -25,6 +25,8 @@ struct ExploreMainView: View {
     @State private var showingInviteLimitAlert = false
     @State private var currentUserProfile: BrewNetProfile? = nil
     @FocusState private var textEditorFocused: Bool
+    @State private var showHeaderAnimation = false
+    @State private var showResults = false
     
     private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
     private var backgroundColor: Color { Color(red: 0.98, green: 0.97, blue: 0.95) }
@@ -51,7 +53,7 @@ struct ExploreMainView: View {
             .navigationBarHidden(true)
         }
         .sheet(item: $selectedProfile) { profile in
-            HeadhuntingProfileCardSheet(
+            TalentScoutProfileCardSheet(
                 profile: profile,
                 isPro: proUserIds.contains(profile.userId),
                 isVerifiedOverride: verifiedUserIds.contains(profile.userId) ? true : nil,
@@ -115,16 +117,34 @@ struct ExploreMainView: View {
     // MARK: - Sections
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Headhunting")
-                .font(.system(size: 32, weight: .bold))
-                .foregroundColor(themeColor)
+            HStack(spacing: 12) {
+                Image(systemName: "sparkle.magnifyingglass")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundColor(themeColor)
+                    .modifier(PulseAnimationModifier())
+                
+                Text("Talent Scout")
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundColor(themeColor)
+            }
+        }
+        .opacity(showHeaderAnimation ? 1 : 0)
+        .scaleEffect(showHeaderAnimation ? 1 : 0.8)
+        .animation(.spring(response: 0.6, dampingFraction: 0.8), value: showHeaderAnimation)
+        .onAppear {
+            withAnimation {
+                showHeaderAnimation = true
+            }
         }
     }
     
     private var descriptionSection: some View {
-        Text("Describe who you wanna connect with, we do headhunting for you!")
+        Text("Describe who you want to connect with, and we'll scout the perfect talent for you!")
             .font(.system(size: 16, weight: .semibold))
             .foregroundColor(themeColor)
+            .opacity(showHeaderAnimation ? 1 : 0)
+            .offset(y: showHeaderAnimation ? 0 : 10)
+            .animation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.1), value: showHeaderAnimation)
     }
     
     private var inputSection: some View {
@@ -133,9 +153,10 @@ struct ExploreMainView: View {
                 .fill(Color.white)
                 .overlay(
                     RoundedRectangle(cornerRadius: 20)
-                        .stroke(textEditorFocused ? themeColor.opacity(0.7) : Color.gray.opacity(0.2), lineWidth: 1.5)
+                        .stroke(textEditorFocused ? themeColor.opacity(0.7) : Color.gray.opacity(0.2), lineWidth: textEditorFocused ? 2 : 1.5)
                 )
-                .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+                .shadow(color: textEditorFocused ? themeColor.opacity(0.2) : Color.black.opacity(0.05), radius: textEditorFocused ? 12 : 8, x: 0, y: 4)
+                .scaleEffect(textEditorFocused ? 1.01 : 1.0)
             
             TextEditor(text: $descriptionText)
                 .focused($textEditorFocused)
@@ -152,24 +173,59 @@ struct ExploreMainView: View {
                     .foregroundColor(Color.gray.opacity(0.6))
                     .padding(.horizontal, 22)
                     .padding(.vertical, 16)
+                    .allowsHitTesting(false)
             }
         }
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: textEditorFocused)
+        .opacity(showHeaderAnimation ? 1 : 0)
+        .offset(y: showHeaderAnimation ? 0 : 20)
+        .animation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.2), value: showHeaderAnimation)
     }
     
     private var actionButton: some View {
-        Button(action: runHeadhuntingSearch) {
-            HStack {
-                Image(systemName: "sparkle.magnifyingglass")
-                Text(isLoading ? "Headhunting..." : "Start Hunting")
+        Button(action: {
+            // 添加触觉反馈
+            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+            impactFeedback.impactOccurred()
+            runTalentScoutSearch()
+        }) {
+            HStack(spacing: 10) {
+                if isLoading {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(0.8)
+                } else {
+                    Image(systemName: "sparkle.magnifyingglass")
+                        .modifier(PulseAnimationModifier())
+                }
+                Text(isLoading ? "Scouting..." : "Start Scouting")
                     .fontWeight(.bold)
             }
             .frame(maxWidth: .infinity)
             .padding()
             .foregroundColor(.white)
-            .background(isSearchDisabled ? Color.gray : themeColor)
+            .background(
+                Group {
+                    if isLoading {
+                        LinearGradient(
+                            gradient: Gradient(colors: [themeColor, themeColor.opacity(0.8)]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    } else {
+                        isSearchDisabled ? Color.gray : themeColor
+                    }
+                }
+            )
             .cornerRadius(16)
+            .shadow(color: isSearchDisabled ? Color.clear : themeColor.opacity(0.3), radius: isLoading ? 8 : 4, x: 0, y: 4)
+            .scaleEffect(isLoading ? 0.98 : 1.0)
         }
         .disabled(isSearchDisabled)
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isLoading)
+        .opacity(showHeaderAnimation ? 1 : 0)
+        .offset(y: showHeaderAnimation ? 0 : 20)
+        .animation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.3), value: showHeaderAnimation)
     }
     
     private var statusSection: some View {
@@ -178,43 +234,62 @@ struct ExploreMainView: View {
                 HStack(spacing: 12) {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: themeColor))
+                        .scaleEffect(1.1)
                     Text("Scanning BrewNet profiles for the best matches...")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundColor(.gray)
                 }
                 .padding(.top, 8)
+                .transition(.opacity.combined(with: .move(edge: .top)))
             } else if let errorMessage = errorMessage {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundColor(.orange)
+                        .modifier(ShakeAnimationModifier())
                     Text(errorMessage)
                         .font(.system(size: 15))
                         .foregroundColor(.orange)
                 }
                 .padding(.top, 4)
+                .transition(.opacity.combined(with: .scale))
             } else if hasSearched && recommendedProfiles.isEmpty {
                 HStack(spacing: 8) {
                     Image(systemName: "sparkles")
                         .foregroundColor(themeColor)
+                        .modifier(PulseAnimationModifier())
                     Text("No perfect fits yet. Try tweaking the description or include more details like company, industry, or seniority.")
                         .font(.system(size: 15))
                         .foregroundColor(.gray)
                 }
                 .padding(.top, 4)
+                .transition(.opacity.combined(with: .scale))
             }
         }
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isLoading)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: errorMessage)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: hasSearched)
     }
     
     private var resultsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             if !recommendedProfiles.isEmpty {
-                Text("Top 5 matches")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(themeColor)
+                HStack(spacing: 8) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(themeColor)
+                        .modifier(PulseAnimationModifier())
+                    
+                    Text("Top 5 matches")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(themeColor)
+                }
+                .opacity(showResults ? 1 : 0)
+                .offset(x: showResults ? 0 : -20)
+                .animation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.1), value: showResults)
                 
                 ForEach(Array(recommendedProfiles.enumerated()), id: \.element.id) { entry in
                     let profile = entry.element
-                    HeadhuntingResultCard(
+                    TalentScoutResultCard(
                         profile: profile,
                         rank: entry.offset + 1,
                         isEngaged: engagedProfileIds.contains(profile.userId),
@@ -222,10 +297,27 @@ struct ExploreMainView: View {
                             selectedProfile = profile
                         }
                     )
+                    .opacity(showResults ? 1 : 0)
+                    .offset(y: showResults ? 0 : 30)
+                    .scaleEffect(showResults ? 1 : 0.9)
+                    .animation(
+                        .spring(response: 0.6, dampingFraction: 0.75)
+                        .delay(Double(entry.offset) * 0.1 + 0.2),
+                        value: showResults
+                    )
                 }
             }
         }
         .padding(.top, recommendedProfiles.isEmpty ? 0 : 8)
+        .onChange(of: recommendedProfiles.isEmpty) { isEmpty in
+            if !isEmpty {
+                withAnimation {
+                    showResults = true
+                }
+            } else {
+                showResults = false
+            }
+        }
     }
     
     private var isSearchDisabled: Bool {
@@ -233,7 +325,7 @@ struct ExploreMainView: View {
     }
     
     // MARK: - Actions
-    private func runHeadhuntingSearch() {
+    private func runTalentScoutSearch() {
         let trimmed = descriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
         
         guard !trimmed.isEmpty else {
@@ -298,13 +390,13 @@ struct ExploreMainView: View {
                 do {
                     fetchedProIds = try await supabaseService.getProUserIds(from: topIds)
                 } catch {
-                    print("⚠️ Headhunting: failed to fetch Pro statuses: \(error.localizedDescription)")
+                    print("⚠️ Talent Scout: failed to fetch Pro statuses: \(error.localizedDescription)")
                 }
                 
                 do {
                     fetchedVerifiedIds = try await supabaseService.getVerifiedUserIds(from: topIds)
                 } catch {
-                    print("⚠️ Headhunting: failed to fetch verification statuses: \(error.localizedDescription)")
+                    print("⚠️ Talent Scout: failed to fetch verification statuses: \(error.localizedDescription)")
                 }
                 
                 print("  ⏱️  Total time: \(Date().timeIntervalSince(searchStart) * 1000)ms")
@@ -312,6 +404,12 @@ struct ExploreMainView: View {
                 
                 await MainActor.run {
                     self.recommendedProfiles = topProfiles
+                    // 触发结果动画
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        withAnimation {
+                            self.showResults = true
+                        }
+                    }
                     self.proUserIds = fetchedProIds
                     self.verifiedUserIds = fetchedVerifiedIds
                     self.isLoading = false
@@ -320,8 +418,9 @@ struct ExploreMainView: View {
                 await MainActor.run {
                     self.isLoading = false
                     self.recommendedProfiles = []
-                    self.errorMessage = "Unable to complete the headhunting request. Please try again shortly."
-                    print("❌ Headhunting search failed: \(error.localizedDescription)")
+                    self.showResults = false
+                    self.errorMessage = "Unable to complete the talent scout request. Please try again shortly."
+                    print("❌ Talent Scout search failed: \(error.localizedDescription)")
                 }
             }
         }
@@ -746,7 +845,7 @@ struct ExploreMainView: View {
                     engagedProfileIds.insert(profile.userId)
                 }
             } catch {
-                print("❌ Headhunting: failed to send temporary message: \(error.localizedDescription)")
+                print("❌ Talent Scout: failed to send temporary message: \(error.localizedDescription)")
             }
         }
     }
@@ -766,7 +865,7 @@ struct ExploreMainView: View {
                     }
                 }
             } catch {
-                print("❌ Headhunting: failed to check temporary chat eligibility: \(error.localizedDescription)")
+                print("❌ Talent Scout: failed to check temporary chat eligibility: \(error.localizedDescription)")
             }
         }
     }
@@ -791,7 +890,7 @@ struct ExploreMainView: View {
             _ = try await supabaseService.sendInvitation(
                 senderId: currentUser.id,
                 receiverId: profile.userId,
-                reasonForInterest: "Headhunting coffee chat",
+                reasonForInterest: "Talent Scout coffee chat",
                 senderProfile: senderProfile
             )
             
@@ -799,7 +898,7 @@ struct ExploreMainView: View {
                 engagedProfileIds.insert(profile.userId)
             }
         } catch {
-            print("❌ Headhunting: failed to send coffee chat connect request: \(error.localizedDescription)")
+            print("❌ Talent Scout: failed to send coffee chat connect request: \(error.localizedDescription)")
         }
     }
     
@@ -812,7 +911,7 @@ struct ExploreMainView: View {
 }
 
 // MARK: - Result Card
-struct HeadhuntingResultCard: View {
+struct TalentScoutResultCard: View {
     let profile: BrewNetProfile
     let rank: Int
     var isEngaged: Bool
@@ -976,7 +1075,7 @@ struct ExploreView_Previews: PreviewProvider {
 }
 
 // MARK: - Profile Card Sheet
-struct HeadhuntingProfileCardSheet: View {
+struct TalentScoutProfileCardSheet: View {
     @Environment(\.dismiss) private var dismiss
     
     let profile: BrewNetProfile
@@ -987,6 +1086,8 @@ struct HeadhuntingProfileCardSheet: View {
     var onRequestConnect: (BrewNetProfile) -> Void
     var shouldShowActions: Bool
     var hasEngaged: Bool
+    
+    @State private var selectedWorkExperience: WorkExperience?
     
     private var backgroundColor: Color { Color(red: 0.98, green: 0.97, blue: 0.95) }
     
@@ -1001,7 +1102,10 @@ struct HeadhuntingProfileCardSheet: View {
                         UserProfileCardPreview(
                             profile: profile,
                             isPro: isPro,
-                            isVerifiedOverride: isVerifiedOverride
+                            isVerifiedOverride: isVerifiedOverride,
+                            onWorkExperienceTap: { workExp in
+                                selectedWorkExperience = workExp
+                            }
                         )
                     }
                     .padding(.top, 24)
@@ -1028,6 +1132,13 @@ struct HeadhuntingProfileCardSheet: View {
                     }
                 }
             }
+        }
+        .sheet(item: $selectedWorkExperience) { workExp in
+            WorkExperienceDetailSheet(
+                workExperience: workExp,
+                allSkills: Array(profile.professionalBackground.skills.prefix(8)),
+                industry: profile.professionalBackground.industry
+            )
         }
     }
     
@@ -1077,6 +1188,10 @@ private struct UserProfileCardPreview: View {
     let profile: BrewNetProfile
     let isPro: Bool
     let isVerifiedOverride: Bool?
+    var onWorkExperienceTap: ((WorkExperience) -> Void)?
+    
+    @EnvironmentObject var supabaseService: SupabaseService
+    @State private var credibilityScore: CredibilityScore?
     
     var body: some View {
         ProfileCardContentView(
@@ -1086,11 +1201,117 @@ private struct UserProfileCardPreview: View {
             isVerified: isVerifiedOverride,
             currentUserLocation: nil,
             showDistance: false,
-            onWorkExperienceTap: nil
+            credibilityScore: credibilityScore,
+            onWorkExperienceTap: onWorkExperienceTap
         )
         .background(Color.white)
         .cornerRadius(30)
         .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 6)
         .padding(.horizontal, 16)
+        .onAppear {
+            loadCredibilityScore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CredibilityScoreUpdated"))) { _ in
+            loadCredibilityScore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            loadCredibilityScore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserLoggedIn"))) { _ in
+            loadCredibilityScore()
+        }
+    }
+    
+    private func loadCredibilityScore() {
+        print("🔄 [TalentScoutProfileCard] 开始加载信誉评分，userId: \(profile.userId)")
+        Task {
+            do {
+                // 尝试从缓存加载
+                if let cachedScore = CredibilityScoreCache.shared.getScore(for: profile.userId) {
+                    print("✅ [TalentScoutProfileCard] 从缓存加载信誉评分: \(cachedScore.averageRating)")
+                    await MainActor.run {
+                        credibilityScore = cachedScore
+                    }
+                    // 并在后台刷新缓存
+                    Task { await refreshCredibilityScore(for: profile.userId) }
+                    return
+                }
+
+                // 强制使用小写格式查询，确保与数据库一致
+                if let score = try await supabaseService.getCredibilityScore(userId: profile.userId.lowercased()) {
+                    print("✅ [TalentScoutProfileCard] 成功加载信誉评分: \(score.averageRating)")
+                    await MainActor.run {
+                        credibilityScore = score
+                        CredibilityScoreCache.shared.setScore(score, for: profile.userId)
+                    }
+                } else {
+                        print("⚠️ [TalentScoutProfileCard] 未找到评分记录，尝试使用原始 userId 查询...")
+                    if let score = try? await supabaseService.getCredibilityScore(userId: profile.userId) {
+                        print("✅ [TalentScoutProfileCard] 使用原始格式查询成功: \(score.averageRating)")
+                        await MainActor.run {
+                            credibilityScore = score
+                            CredibilityScoreCache.shared.setScore(score, for: profile.userId)
+                        }
+                    } else {
+                        print("⚠️ [TalentScoutProfileCard] 未找到评分记录，使用默认值")
+                        await MainActor.run {
+                            let defaultScore = CredibilityScore(userId: profile.userId)
+                            credibilityScore = defaultScore
+                            CredibilityScoreCache.shared.setScore(defaultScore, for: profile.userId)
+                        }
+                    }
+                }
+            } catch {
+                print("❌ [TalentScoutProfileCard] 无法加载信誉评分: \(error.localizedDescription)")
+                await MainActor.run {
+                    let defaultScore = CredibilityScore(userId: profile.userId)
+                    credibilityScore = defaultScore
+                    CredibilityScoreCache.shared.setScore(defaultScore, for: profile.userId)
+                }
+            }
+        }
+    }
+    
+    private func refreshCredibilityScore(for userId: String) async {
+        do {
+            if let score = try await supabaseService.getCredibilityScore(userId: userId.lowercased()) {
+                await MainActor.run {
+                    credibilityScore = score
+                    CredibilityScoreCache.shared.setScore(score, for: userId)
+                }
+            }
+        } catch {
+            print("⚠️ [TalentScoutProfileCard] 刷新信誉评分失败: \(error.localizedDescription)")
+        }
+    }
+}
+
+// MARK: - Animation Modifiers for iOS Compatibility
+struct PulseAnimationModifier: ViewModifier {
+    @State private var isAnimating = false
+    
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(isAnimating ? 1.1 : 1.0)
+            .opacity(isAnimating ? 0.7 : 1.0)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
+                    isAnimating = true
+                }
+            }
+    }
+}
+
+struct ShakeAnimationModifier: ViewModifier {
+    @State private var isShaking = false
+    
+    func body(content: Content) -> some View {
+        content
+            .offset(x: isShaking ? -5 : 5)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.1).repeatCount(6, autoreverses: true)) {
+                    isShaking = true
+                }
+            }
     }
 }

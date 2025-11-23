@@ -26,7 +26,7 @@ struct MainView: View {
                 }
                 .tag(0)
             
-            // Headhunting
+            // Talent Scout
             ExploreView()
                 .tabItem {
                     Image(systemName: "person.crop.rectangle.stack.fill")
