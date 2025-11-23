@@ -5231,7 +5231,7 @@ extension SupabaseService {
             
             let update = ProExpireUpdate(
                 is_pro: false,
-                likes_remaining: 10
+                likes_remaining: 6  // 修改为 6 次点赞（非 Pro 用户默认）
             )
             
             try await client
@@ -5284,21 +5284,22 @@ extension SupabaseService {
                 let hoursPassed = Date().timeIntervalSince(depletedDate) / 3600
                 if hoursPassed >= 24 {
                     // Reset likes
-                    print("🔄 [Likes] 24小时已过，重置点赞数为 10")
+                    print("🔄 [Likes] 24小时已过，重置点赞数为 6")
                     struct LikesReset: Encodable {
                         let likes_remaining: Int
                         let likes_depleted_at: String?
                     }
                     
-                    let reset = LikesReset(likes_remaining: 10, likes_depleted_at: nil)
+                    let reset = LikesReset(likes_remaining: 6, likes_depleted_at: nil)  // 修改为 6 次点赞
                     try await client
                         .from("users")
                         .update(reset)
                         .eq("id", value: userId)
                         .execute()
                     
-                    // After reset, decrement one
-                    try await decrementLikesDirectly(userId: userId, newCount: 9)
+                    // After reset, decrement one (6 - 1 = 5)
+                    try await decrementLikesDirectly(userId: userId, newCount: 5)
+                    print("✅ [Likes] 重置后扣减当前点赞，剩余: 5")
                     return true
                 }
             }
@@ -5365,6 +5366,83 @@ extension SupabaseService {
         }
         
         return likesRemaining
+    }
+    
+    /// 检查并重置普通用户的 likes（如果已过24小时）
+    /// 这个函数可以在应用启动、用户登录或定期调用
+    func checkAndResetUserLikesIfNeeded(userId: String) async throws {
+        print("🔍 [Likes] 检查用户 \(userId) 的点赞是否需要重置")
+        
+        let response = try await client
+            .from("users")
+            .select("is_pro, likes_remaining, likes_depleted_at")
+            .eq("id", value: userId)
+            .single()
+            .execute()
+        
+        let data = response.data
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            print("❌ [Likes] 无法获取用户数据")
+            return
+        }
+        
+        let isPro = json["is_pro"] as? Bool ?? false
+        
+        // Pro 用户无需重置
+        if isPro {
+            print("✅ [Likes] Pro 用户，无需重置")
+            return
+        }
+        
+        let likesRemaining = json["likes_remaining"] as? Int ?? 0
+        let likesDepletedStr = json["likes_depleted_at"] as? String
+        
+        // 只在点赞耗尽时检查是否需要重置
+        guard let depletedStr = likesDepletedStr else {
+            print("✅ [Likes] 点赞未耗尽（remaining: \(likesRemaining)），无需重置")
+            return
+        }
+        
+        // 解析耗尽时间
+        let formatter = ISO8601DateFormatter()
+        guard let depletedDate = formatter.date(from: depletedStr) else {
+            print("⚠️ [Likes] 无法解析 likes_depleted_at 时间")
+            return
+        }
+        
+        // 检查是否已过 24 小时
+        let hoursPassed = Date().timeIntervalSince(depletedDate) / 3600
+        print("🔍 [Likes] 点赞耗尽已过 \(String(format: "%.1f", hoursPassed)) 小时")
+        
+        if hoursPassed >= 24 {
+            print("🔄 [Likes] 已过 24 小时，重置点赞数为 6")
+            
+            struct LikesReset: Encodable {
+                let likes_remaining: Int
+                let likes_depleted_at: String?
+            }
+            
+            let reset = LikesReset(likes_remaining: 6, likes_depleted_at: nil)
+            
+            try await client
+                .from("users")
+                .update(reset)
+                .eq("id", value: userId)
+                .execute()
+            
+            print("✅ [Likes] 点赞数已重置: 0 -> 6")
+            
+            // 发送通知，触发 UI 更新
+            await MainActor.run {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("UserLikesReset"),
+                    object: nil,
+                    userInfo: ["userId": userId, "newLikesRemaining": 6]
+                )
+            }
+        } else {
+            print("✅ [Likes] 未满 24 小时（还需 \(String(format: "%.1f", 24 - hoursPassed)) 小时），暂不重置")
+        }
     }
     
     /// Check if user can send temporary chat (Pro users only)

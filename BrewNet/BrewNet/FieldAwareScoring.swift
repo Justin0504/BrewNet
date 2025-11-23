@@ -305,32 +305,21 @@ class FieldAwareScoring {
         // 2. 找出短语中包含的单词
         let phraseWords = Set(phrases.flatMap { $0.split(separator: " ").map { String($0) } })
         
+        // 确保所有 tokens 都转换为小写进行比较
         for token in tokens {
             if token.count < 2 { continue }
             
-            // 过滤停用词
-            if stopWords.contains(token) { continue }
+            // 将 token 转换为小写以确保不区分大小写的匹配
+            let lowercasedToken = token.lowercased()
             
-            // 如果这个词是某个短语的一部分，跳过（避免重复计分）
-            if phraseWords.contains(token) { continue }
-            
-            // ⭐ 检查是否已经为同义词组计分
-            // 如果这个 token 属于某个同义词组，且该组已经计分，则跳过
-            let synonymGroup = getSynonymGroupKey(for: token)
-            if matchedSynonymGroups.contains(synonymGroup) {
-                continue
-            }
-            
-            // 在不同区域搜索，应用不同权重（支持同义词）
-            if containsWithSynonyms(zonedText.zoneA, token: token) {
+            // 在不同区域搜索，应用不同权重
+            if zonedText.zoneA.contains(lowercasedToken) {
                 score += FieldZone.zoneA.weight
                 matchDetails.append((token, .zoneA))
-                matchedSynonymGroups.insert(synonymGroup)  // ⭐ 标记该同义词组已计分
-            } else if containsWithSynonyms(zonedText.zoneB, token: token) {
+            } else if zonedText.zoneB.contains(lowercasedToken) {
                 score += FieldZone.zoneB.weight
                 matchDetails.append((token, .zoneB))
-                matchedSynonymGroups.insert(synonymGroup)  // ⭐ 标记该同义词组已计分
-            } else if containsWithSynonyms(zonedText.zoneC, token: token) {
+            } else if zonedText.zoneC.contains(lowercasedToken) {
                 score += FieldZone.zoneC.weight
                 matchDetails.append((token, .zoneC))
                 matchedSynonymGroups.insert(synonymGroup)  // ⭐ 标记该同义词组已计分
@@ -388,10 +377,12 @@ class FieldAwareScoring {
     ) -> Double {
         var score: Double = 0.0
         
-        // 公司匹配（当前公司 +5分，过往公司 +2分）
+        // 公司匹配（当前公司 +5分，过往公司 +2分，确保所有文本比较都转换为小写）
         if let currentCompany = profile.professionalBackground.currentCompany?.lowercased() {
             for company in entities.companies {
-                if currentCompany.contains(company) || company.contains(currentCompany) {
+                // 确保查询中的公司名称也转换为小写进行比较
+                let lowercasedCompany = company.lowercased()
+                if currentCompany.contains(lowercasedCompany) || lowercasedCompany.contains(currentCompany) {
                     score += 5.0
                     print("  🏢 Current company match: \(company) (+5.0)")
                     break
@@ -399,11 +390,13 @@ class FieldAwareScoring {
             }
         }
         
-        // 检查过往公司
+        // 检查过往公司（确保所有文本比较都转换为小写）
         for experience in profile.professionalBackground.workExperiences.prefix(5) {
             let pastCompany = experience.companyName.lowercased()
             for company in entities.companies {
-                if pastCompany.contains(company) || company.contains(pastCompany) {
+                // 确保查询中的公司名称也转换为小写进行比较
+                let lowercasedCompany = company.lowercased()
+                if pastCompany.contains(lowercasedCompany) || lowercasedCompany.contains(pastCompany) {
                     // 计算时间衰减
                     let currentYear = Double(Calendar.current.component(.year, from: Date()))
                     let endYear = experience.endYear.map { Double($0) } ?? currentYear
@@ -418,11 +411,13 @@ class FieldAwareScoring {
             }
         }
         
-        // 职位匹配（当前职位 +4分）
+        // 职位匹配（当前职位 +4分，确保所有文本比较都转换为小写）
         if let currentRole = profile.professionalBackground.jobTitle?.lowercased() {
             for role in entities.roles {
-                if currentRole.contains(role) || role.contains(currentRole) ||
-                   SoftMatching.fuzzySimilarity(string1: currentRole, string2: role) > 0.7 {
+                // 确保查询中的职位名称也转换为小写进行比较
+                let lowercasedRole = role.lowercased()
+                if currentRole.contains(lowercasedRole) || lowercasedRole.contains(currentRole) ||
+                   SoftMatching.fuzzySimilarity(string1: currentRole, string2: lowercasedRole) > 0.7 {
                     score += 4.0
                     print("  💼 Current role match: \(role) (+4.0)")
                     break
@@ -430,59 +425,14 @@ class FieldAwareScoring {
             }
         }
         
-        // 学校匹配（+3分每个）
+        // 学校匹配（+3分每个，确保所有文本比较都转换为小写）
         if let educations = profile.professionalBackground.educations {
             for education in educations {
                 let schoolName = education.schoolName.lowercased()
                 for school in entities.schools {
-                    var isMatch = false
-                    
-                    // 1. 精确包含匹配
-                    if schoolName.contains(school) || school.contains(schoolName) {
-                        isMatch = true
-                    }
-                    // 2. 特殊简称处理（使用模糊匹配容错拼写错误）
-                    else if school == "umich" {
-                        // 检查学校名称中是否包含 "michigan" 或类似词（容错拼写）
-                        let schoolWords = schoolName.split(separator: " ").map { String($0) }
-                        for word in schoolWords {
-                            if word == "michigan" || similarity(word, "michigan") > 0.85 {
-                                isMatch = true
-                                if word != "michigan" {
-                                    print("  🔍 Fuzzy word match: '\(word)' ≈ 'michigan' (similarity: \(String(format: "%.1f%%", similarity(word, "michigan") * 100)))")
-                                }
-                                break
-                            }
-                        }
-                    }
-                    else if school == "stanford" && (schoolName.contains("stanford") || similarity(schoolName, "stanford university") > 0.85) {
-                        isMatch = true
-                    }
-                    else if school == "mit" && (schoolName.contains("massachusetts institute") || schoolName.contains("mit")) {
-                        isMatch = true
-                    }
-                    else if school == "berkeley" && (schoolName.contains("berkeley") || similarity(schoolName, "uc berkeley") > 0.85) {
-                        isMatch = true
-                    }
-                    else if school == "fudan" {
-                        let schoolWords = schoolName.split(separator: " ").map { String($0) }
-                        for word in schoolWords {
-                            if word == "fudan" || similarity(word, "fudan") > 0.85 {
-                                isMatch = true
-                                break
-                            }
-                        }
-                    }
-                    // 3. 完整短语的模糊匹配（容错拼写错误，相似度 > 85%）
-                    if !isMatch {
-                        let sim = similarity(school, schoolName)
-                        if sim > 0.85 {
-                            isMatch = true
-                            print("  🔍 Fuzzy school match: '\(school)' ≈ '\(education.schoolName)' (similarity: \(String(format: "%.1f%%", sim * 100)))")
-                        }
-                    }
-                    
-                    if isMatch {
+                    // 确保查询中的学校名称也转换为小写进行比较
+                    let lowercasedSchool = school.lowercased()
+                    if schoolName.contains(lowercasedSchool) || lowercasedSchool.contains(schoolName) {
                         score += 3.0
                         print("  🎓 School match: \(school) → \(education.schoolName) (+3.0)")
                         break
@@ -491,10 +441,12 @@ class FieldAwareScoring {
             }
         }
         
-        // 技能匹配（+1分每个，最多+5分）
+        // 技能匹配（+1分每个，最多+5分，确保所有文本比较都转换为小写）
         let matchedSkills = profile.professionalBackground.skills.filter { skill in
-            entities.skills.contains(where: { querySkill in
-                skill.lowercased().contains(querySkill) || querySkill.contains(skill.lowercased())
+            let lowercasedSkill = skill.lowercased()
+            return entities.skills.contains(where: { querySkill in
+                let lowercasedQuerySkill = querySkill.lowercased()
+                return lowercasedSkill.contains(lowercasedQuerySkill) || lowercasedQuerySkill.contains(lowercasedSkill)
             })
         }
         
