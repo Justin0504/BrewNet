@@ -72,7 +72,7 @@ struct SupabaseUser: Codable, Identifiable {
         isPro: Bool = false,
         proStart: String? = nil,
         proEnd: String? = nil,
-        likesRemaining: Int = 10,
+        likesRemaining: Int = 6,
         likesDepletedAt: String? = nil
     ) {
         self.id = id
@@ -121,7 +121,7 @@ struct SupabaseUser: Codable, Identifiable {
         isPro = try container.decodeIfPresent(Bool.self, forKey: .isPro) ?? false
         proStart = try container.decodeIfPresent(String.self, forKey: .proStart)
         proEnd = try container.decodeIfPresent(String.self, forKey: .proEnd)
-        likesRemaining = try container.decodeIfPresent(Int.self, forKey: .likesRemaining) ?? 10
+        likesRemaining = try container.decodeIfPresent(Int.self, forKey: .likesRemaining) ?? 6
         likesDepletedAt = try container.decodeIfPresent(String.self, forKey: .likesDepletedAt)
     }
     

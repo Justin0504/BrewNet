@@ -538,8 +538,8 @@ struct ExploreMainView: View {
             score += expScore
         }
         
-        // 5. Mentor/Mentoring 意图匹配
-        if parsedQuery.tokens.contains(where: { $0.contains("mentor") || $0.contains("mentoring") }) {
+        // 5. Mentor/Mentoring 意图匹配（确保所有文本比较都转换为小写）
+        if parsedQuery.tokens.contains(where: { $0.lowercased().contains("mentor") || $0.lowercased().contains("mentoring") }) {
             if profile.networkingIntention.selectedIntention == .learnGrow ||
                 profile.networkingIntention.selectedSubIntentions.contains(.skillDevelopment) ||
                 profile.networkingIntention.selectedSubIntentions.contains(.careerDirection) {
@@ -548,8 +548,8 @@ struct ExploreMainView: View {
             }
         }
         
-        // 6. 校友匹配（增强版）
-        if parsedQuery.tokens.contains(where: { $0.contains("alum") }) {
+        // 6. 校友匹配（增强版，确保所有文本比较都转换为小写）
+        if parsedQuery.tokens.contains(where: { $0.lowercased().contains("alum") }) {
             let alumniScore = computeAlumniScore(
                 profile: profile,
                 parsedQuery: parsedQuery,
@@ -558,8 +558,12 @@ struct ExploreMainView: View {
             score += alumniScore
         }
         
-        // 7. Founder/Startup 匹配
-        if parsedQuery.tokens.contains(where: { $0.contains("founder") || $0.contains("startup") || $0.contains("entrepreneur") }) {
+        // 7. Founder/Startup 匹配（确保所有文本比较都转换为小写）
+        if parsedQuery.tokens.contains(where: { 
+            $0.lowercased().contains("founder") || 
+            $0.lowercased().contains("startup") || 
+            $0.lowercased().contains("entrepreneur") 
+        }) {
             if profile.professionalBackground.careerStage == .founder ||
                 profile.networkingIntention.selectedIntention == .buildCollaborate {
                 score += 1.0
@@ -567,11 +571,12 @@ struct ExploreMainView: View {
             }
         }
         
-        // 8. 否定词处理（降权）
+        // 8. 否定词处理（降权，确保所有文本比较都转换为小写）
         for negation in parsedQuery.modifiers.negations {
             let zonedText = ZonedSearchableText.from(profile: profile)
             let allText = [zonedText.zoneA, zonedText.zoneB, zonedText.zoneC].joined(separator: " ")
-            if allText.contains(negation) {
+            // 确保否定词也转换为小写进行比较
+            if allText.contains(negation.lowercased()) {
                 score -= 2.0
                 print("  ⚠️ Negation match: '\(negation)' (-2.0)")
             }
@@ -589,11 +594,14 @@ struct ExploreMainView: View {
     ) -> Double {
         var score: Double = 0.0
         let searchableText = aggregatedSearchableText(for: profile)
-        let tokenSet = Set(tokens)
+        // 确保所有 tokens 都转换为小写进行比较
+        let tokenSet = Set(tokens.map { $0.lowercased() })
         
         for token in tokenSet {
             if token.count < 2 { continue }
-            if searchableText.contains(token) {
+            // 确保 token 是小写后再进行比较
+            let lowercasedToken = token.lowercased()
+            if searchableText.contains(lowercasedToken) {
                 score += 1.0
             }
         }
@@ -606,7 +614,8 @@ struct ExploreMainView: View {
             }
         }
         
-        if tokenSet.contains(where: { $0.contains("mentor") || $0.contains("mentoring") }) {
+        // 确保所有硬编码字符串都转换为小写进行比较
+        if tokenSet.contains(where: { $0.lowercased().contains("mentor") || $0.lowercased().contains("mentoring") }) {
             if profile.networkingIntention.selectedIntention == .learnGrow ||
                 profile.networkingIntention.selectedSubIntentions.contains(.skillDevelopment) ||
                 profile.networkingIntention.selectedSubIntentions.contains(.careerDirection) {
@@ -615,7 +624,7 @@ struct ExploreMainView: View {
         }
         
         // 校友匹配逻辑：如果查询包含 alumni/alum 相关词汇
-        if tokenSet.contains(where: { $0.contains("alum") }) {
+        if tokenSet.contains(where: { $0.lowercased().contains("alum") }) {
             // 基础分：有教育经历的用户
             if let educations = profile.professionalBackground.educations, !educations.isEmpty {
                 score += 1.0
@@ -646,6 +655,7 @@ struct ExploreMainView: View {
             }
         }
         
+        // 确保所有硬编码字符串都转换为小写进行比较
         if tokenSet.contains("founder") || tokenSet.contains("startup") {
             if profile.professionalBackground.careerStage == .founder ||
                 profile.networkingIntention.selectedIntention == .buildCollaborate {
@@ -755,13 +765,15 @@ struct ExploreMainView: View {
             }
         }
         
-        // 查询中指定学校（无需当前用户也是校友）
+        // 查询中指定学校（无需当前用户也是校友，确保所有文本比较都转换为小写）
         if !parsedQuery.entities.schools.isEmpty {
             if let targetEducations = profile.professionalBackground.educations {
                 for targetEducation in targetEducations {
-                    let targetSchool = targetEducation.schoolName.lowercased()
+                    let targetSchool = targetEducation.schoolName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
                     for querySchool in parsedQuery.entities.schools {
-                        if targetSchool.contains(querySchool) || querySchool.contains(targetSchool) {
+                        // 确保查询中的学校名称也转换为小写进行比较
+                        let lowercasedQuerySchool = querySchool.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                        if targetSchool.contains(lowercasedQuerySchool) || lowercasedQuerySchool.contains(targetSchool) {
                             score += 2.0
                             print("  🎓 School match: \(querySchool) (+2.0)")
                             break

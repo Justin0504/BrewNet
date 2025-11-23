@@ -32,7 +32,6 @@ struct BrewNetMatchesView: View {
     @State private var shouldForceRefresh = false // 标记是否强制刷新（忽略缓存）
     @State private var showingTemporaryChat = false
     @State private var selectedProfileForChat: BrewNetProfile?
-    @State private var showingGroupMeet = false
     @State private var showingMatchFilter = false
     @State private var showingIncreaseExposure = false
     @State private var currentFilter: MatchFilter? = nil
@@ -58,33 +57,17 @@ struct BrewNetMatchesView: View {
             VStack(spacing: 0) {
                 // Header Buttons - 放在卡片上方
                 HStack {
-                    // 左上角按钮组
-                    HStack(spacing: 16) {
-                        // 群体 Meet 按钮
-                        Button(action: {
-                            showingGroupMeet = true
-                        }) {
-                            Image(systemName: "person.3.fill")
-                                .font(.system(size: 20, weight: .semibold))
-                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                                .frame(width: 44, height: 44)
-                                .background(Color.white)
-                                .clipShape(Circle())
-                                .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-                        }
-                        
-                        // Match Filter 按钮
-                        Button(action: {
-                            showingMatchFilter = true
-                        }) {
-                            Image(systemName: "slider.horizontal.3")
-                                .font(.system(size: 20, weight: .semibold))
-                                .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
-                                .frame(width: 44, height: 44)
-                                .background(Color.white)
-                                .clipShape(Circle())
-                                .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-                        }
+                    // 左上角按钮 - Match Filter
+                    Button(action: {
+                        showingMatchFilter = true
+                    }) {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            .frame(width: 44, height: 44)
+                            .background(Color.white)
+                            .clipShape(Circle())
+                            .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
                     }
                     .padding(.leading, 20)
                     .padding(.top, 35) // 避免状态栏重叠
@@ -212,11 +195,6 @@ struct BrewNetMatchesView: View {
                 .environmentObject(authManager)
                 .environmentObject(supabaseService)
             }
-        }
-        .sheet(isPresented: $showingGroupMeet) {
-            GroupMeetView()
-                .environmentObject(authManager)
-                .environmentObject(supabaseService)
         }
         .sheet(isPresented: $showingMatchFilter) {
             MatchFilterView()

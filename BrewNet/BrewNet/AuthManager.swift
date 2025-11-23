@@ -16,7 +16,7 @@ struct AppUser: Codable, Identifiable {
     let proEnd: String? // Pro subscription end date (ISO8601 string from Supabase)
     let likesRemaining: Int // Remaining likes for non-Pro users
     
-    init(id: String = UUID().uuidString, email: String, name: String, isGuest: Bool = false, profileSetupCompleted: Bool = false, isPro: Bool = false, proEnd: String? = nil, likesRemaining: Int = 10) {
+    init(id: String = UUID().uuidString, email: String, name: String, isGuest: Bool = false, profileSetupCompleted: Bool = false, isPro: Bool = false, proEnd: String? = nil, likesRemaining: Int = 6) {
         self.id = id
         self.email = email
         self.name = name
@@ -261,7 +261,7 @@ class AuthManager: ObservableObject {
             profileSetupCompleted: existingUser.profileSetupCompleted,
             isPro: false,
             proEnd: nil,
-            likesRemaining: 10
+            likesRemaining: 6
         )
         
         await MainActor.run {
@@ -432,7 +432,7 @@ class AuthManager: ObservableObject {
             profileSetupCompleted: false,
             isPro: false,
             proEnd: nil,
-            likesRemaining: 10
+            likesRemaining: 6
         )
         
         print("👤 Created guest user: \(user.name)")
@@ -510,7 +510,7 @@ class AuthManager: ObservableObject {
             profileSetupCompleted: false,
             isPro: false,
             proEnd: nil,
-            likesRemaining: 10
+            likesRemaining: 6
         )
         
         // Save user information (both to current user and Apple-specific storage)
@@ -598,7 +598,7 @@ class AuthManager: ObservableObject {
             profileSetupCompleted: false,
             isPro: false,
             proEnd: nil,
-            likesRemaining: 10
+            likesRemaining: 6
         )
         
         print("✅ 本地注册成功: \(user.name)")
