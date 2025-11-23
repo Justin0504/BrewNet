@@ -253,29 +253,86 @@ class SupabaseService: ObservableObject {
     
     /// 创建用户到 Supabase
     func createUser(user: SupabaseUser) async throws -> SupabaseUser {
-        let response = try await client
-            .from(SupabaseTable.users.rawValue)
-            .insert(user)
-            .select()
-            .single()
-            .execute()
-        
-        let data = response.data
-        let createdUser = try JSONDecoder().decode(SupabaseUser.self, from: data)
-        
-        // 同时保存到本地数据库
-        await MainActor.run {
-            let _ = databaseManager?.createUser(
-                id: createdUser.id,
-                email: createdUser.email,
-                name: createdUser.name,
-                phoneNumber: createdUser.phoneNumber,
-                isGuest: createdUser.isGuest,
-                profileSetupCompleted: createdUser.profileSetupCompleted
-            )
+        do {
+            print("🔍 [createUser] 开始插入用户到 Supabase")
+            print("📊 [createUser] 用户信息:")
+            print("   - ID: \(user.id)")
+            print("   - Email: \(user.email)")
+            print("   - Name: \(user.name)")
+            print("   - isGuest: \(user.isGuest)")
+            print("   - profileSetupCompleted: \(user.profileSetupCompleted)")
+            print("   - isPro: \(user.isPro)")
+            print("   - likesRemaining: \(user.likesRemaining)")
+            
+            let response = try await client
+                .from(SupabaseTable.users.rawValue)
+                .insert(user)
+                .select()
+                .single()
+                .execute()
+            
+            print("✅ [createUser] Supabase 插入成功")
+            print("📊 [createUser] HTTP 状态码: \(response.response.statusCode)")
+            
+            let data = response.data
+            print("📦 [createUser] 响应数据大小: \(data.count) bytes")
+            
+            // 打印响应内容（用于调试）
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("📄 [createUser] 响应内容: \(responseString.prefix(500))")
+            }
+            
+            let createdUser = try JSONDecoder().decode(SupabaseUser.self, from: data)
+            print("✅ [createUser] JSON 解码成功: \(createdUser.name)")
+            
+            // 同时保存到本地数据库
+            await MainActor.run {
+                let _ = databaseManager?.createUser(
+                    id: createdUser.id,
+                    email: createdUser.email,
+                    name: createdUser.name,
+                    phoneNumber: createdUser.phoneNumber,
+                    isGuest: createdUser.isGuest,
+                    profileSetupCompleted: createdUser.profileSetupCompleted
+                )
+            }
+            
+            print("✅ [createUser] 用户创建完成: \(createdUser.name)")
+            return createdUser
+            
+        } catch {
+            print("❌ [createUser] 插入用户失败:")
+            print("   - 错误类型: \(type(of: error))")
+            print("   - 错误信息: \(error.localizedDescription)")
+            
+            // 尝试解析详细错误信息
+            if let nsError = error as NSError? {
+                print("   - NSError 代码: \(nsError.code)")
+                print("   - NSError 域: \(nsError.domain)")
+                print("   - NSError 用户信息: \(nsError.userInfo)")
+            }
+            
+            // 如果是网络错误
+            if let urlError = error as? URLError {
+                print("   - URLError 代码: \(urlError.code.rawValue)")
+                print("   - URLError 描述: \(urlError.localizedDescription)")
+            }
+            
+            // 尝试解析 Supabase 错误响应
+            let errorDescription = error.localizedDescription
+            let lowercased = errorDescription.lowercased()
+            if lowercased.contains("duplicate") || lowercased.contains("already exists") {
+                print("⚠️ [createUser] 检测到重复键错误")
+            } else if lowercased.contains("null") || lowercased.contains("not null") {
+                print("⚠️ [createUser] 检测到 NULL 约束违反")
+            } else if lowercased.contains("permission") || lowercased.contains("policy") {
+                print("⚠️ [createUser] 检测到权限/策略错误")
+            } else if lowercased.contains("column") && lowercased.contains("does not exist") {
+                print("⚠️ [createUser] 检测到列不存在错误")
+            }
+            
+            throw error
         }
-        
-        return createdUser
     }
     
     /// 更新用户资料设置完成状态
@@ -5076,12 +5133,6 @@ extension SupabaseService {
         print("✅ [Pro] 用户 \(userId) 已升级为 Pro")
     }
     
-    /// Grant free Pro trial to new user (1 week)
-    func grantFreeProTrial(userId: String) async throws {
-        print("🎁 [Pro] 给新用户 \(userId) 赠送一周免费 Pro")
-        let oneWeekInSeconds: TimeInterval = 7 * 24 * 60 * 60
-        try await upgradeUserToPro(userId: userId, durationSeconds: oneWeekInSeconds)
-    }
     
     private func normalizedProDateCandidates(from value: String) -> [String] {
         var candidates: Set<String> = []
@@ -5754,6 +5805,52 @@ extension SupabaseService {
     }
     
     // MARK: - Credibility System
+    
+    /// 确保用户有信誉评分记录（如果没有则创建默认记录）
+    func ensureCredibilityScoreExists(userId: String) async throws {
+        print("🔍 [Credibility] 检查用户是否有信誉评分记录: \(userId)")
+        
+        // 首先查询是否已存在
+        do {
+            let response = try await client
+                .from("credibility_scores")
+                .select("user_id")
+                .eq("user_id", value: userId.lowercased())
+                .execute()
+            
+            let data = response.data
+            if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+               !jsonArray.isEmpty {
+                print("✅ [Credibility] 用户已有信誉评分记录")
+                return
+            }
+        } catch {
+            print("⚠️ [Credibility] 查询信誉评分时出错，尝试创建: \(error.localizedDescription)")
+        }
+        
+        // 如果不存在，创建默认记录
+        print("🔄 [Credibility] 为用户创建默认信誉评分记录")
+        
+        struct CredibilityScoreInsert: Encodable {
+            let user_id: String
+        }
+        
+        let insert = CredibilityScoreInsert(user_id: userId.lowercased())
+        
+        do {
+            try await client
+                .from("credibility_scores")
+                .insert(insert)
+                .execute()
+            
+            print("✅ [Credibility] 成功创建默认信誉评分记录")
+        } catch {
+            // 如果插入失败（例如表不存在或权限问题），记录日志但不抛出错误
+            // 这样不会影响注册流程
+            print("⚠️ [Credibility] 创建信誉评分记录失败，但不影响注册: \(error.localizedDescription)")
+            print("💡 [Credibility] 提示: 可能需要执行 create_credibility_system_tables.sql 创建表")
+        }
+    }
     
     /// 获取用户信誉评分
     func getCredibilityScore(userId: String) async throws -> CredibilityScore? {

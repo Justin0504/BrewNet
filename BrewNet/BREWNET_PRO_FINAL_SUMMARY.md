@@ -39,7 +39,6 @@
 
 1. **SupabaseService Pro Methods**
    - `upgradeUserToPro()` - Handles subscription purchase, adds duration to existing Pro
-   - `grantFreeProTrial()` - Gives 1 week free Pro to new users
    - `checkAndUpdateProExpiration()` - Auto-expires Pro when time is up
    - `decrementUserLikes()` - Manages like counting with 24h reset
    - `getUserLikesRemaining()` - Gets current like count
@@ -48,7 +47,7 @@
 
 2. **AuthManager Updates**
    - Updated `AppUser` model with Pro fields
-   - Modified `supabaseRegister()` to grant free 1-week Pro trial to new users
+   - New users start with default status: `is_pro = false`, `likes_remaining = 6`
    - Added `refreshUser()` method to reload user data after subscription
    - Updated `updateProfileSetupCompleted()` to preserve Pro fields
 
@@ -315,11 +314,9 @@ WHERE id = 'USER_ID';
 
 2. **1.5x Recommendation Boost**: Balanced boost that's noticeable but not overwhelming. Can be adjusted based on analytics.
 
-3. **Likes: 10 per 24h for Free Users**: Reasonable limit that encourages upgrades without being too restrictive.
+3. **Likes: 6 per 24h for Free Users**: Reasonable limit that encourages upgrades without being too restrictive.
 
-4. **Free 1-Week Trial**: Helps users experience Pro benefits, increasing conversion rate.
-
-5. **No Actual Payment Integration**: Simulated for demo purposes. Ready for Stripe/Apple Pay integration when needed.
+4. **No Actual Payment Integration**: Simulated for demo purposes. Ready for Stripe/Apple Pay integration when needed.
 
 6. **Batch Pro Status Fetching**: For efficiency, Pro status is fetched in batches rather than individual queries.
 
