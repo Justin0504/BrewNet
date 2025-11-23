@@ -80,6 +80,8 @@ struct ConnectionRequestsView: View {
                     .environmentObject(authManager)
                     .environmentObject(databaseManager)
                     .environmentObject(supabaseService)
+                    .presentationBackground(BrewTheme.background) // 🎯 设置 sheet 背景，避免白屏
+                    .presentationCornerRadius(20) // 圆角优化
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("TemporaryMessagesRead"))) { notification in
@@ -1875,7 +1877,7 @@ struct TemporaryChatDetailView: View {
     @FocusState private var isTextFieldFocused: Bool
     @State private var messages: [TemporaryMessage] = [] // 🆕 将在 init 中初始化为 request.temporaryMessages
     @State private var isLoadingMessages: Bool // 🆕 加载状态（在 init 中设置）
-    @State private var isInitialLoading = true // 🆕 首次加载状态（总是先显示 Loading）
+    @State private var isInitialLoading: Bool // 🎯 在 init 中根据缓存情况设置
     private let hasCachedMessages: Bool // 🆕 记录是否有缓存数据
     
     private var themeBrown: Color { BrewTheme.primaryBrown }
@@ -1887,11 +1889,6 @@ struct TemporaryChatDetailView: View {
         self.request = request
         self.onDismiss = onDismiss
         
-        print("🚀 [TemporaryChatDetail-INIT] 开始初始化")
-        print("   - request.id: \(request.id)")
-        print("   - request.requesterName: \(request.requesterProfile.name)")
-        print("   - request.temporaryMessages.count: \(request.temporaryMessages.count)")
-        
         // 立即使用 request 中已有的消息（来自缓存）
         var sortedMessages = request.temporaryMessages.sorted(by: { $0.timestamp < $1.timestamp })
         if sortedMessages.count > 10 {
@@ -1902,101 +1899,35 @@ struct TemporaryChatDetailView: View {
         // 记录是否有缓存数据
         hasCachedMessages = !sortedMessages.isEmpty
         
-        // 🔑 关键：如果没有缓存，初始就设置为 loading 状态
+        // 🎯 关键优化：如果有缓存，初始就不显示 loading（避免白屏）
         let shouldShowLoading = sortedMessages.isEmpty
         _isLoadingMessages = State(initialValue: shouldShowLoading)
+        _isInitialLoading = State(initialValue: shouldShowLoading) // 有缓存就不显示初始 loading
         
-        print("   - sortedMessages.count: \(sortedMessages.count)")
-        print("   - hasCachedMessages: \(hasCachedMessages)")
-        print("   - isLoadingMessages (initial): \(shouldShowLoading)")
-        
-        if !sortedMessages.isEmpty {
-            print("✅ [TemporaryChatDetail-INIT] 使用缓存的 \(sortedMessages.count) 条消息立即显示")
-            for (index, msg) in sortedMessages.enumerated() {
-                print("   [\(index)] \(msg.content.prefix(30))...")
-            }
+        // 简化 log：只在无缓存时打印
+        if sortedMessages.isEmpty {
+            print("⚠️ [TemporaryChatDetail] 无缓存，显示 loading...")
         } else {
-            print("⚠️ [TemporaryChatDetail-INIT] 无缓存消息，初始化为 Loading 状态")
+            print("⚡️ [TemporaryChatDetail] 有 \(sortedMessages.count) 条缓存，跳过 loading 直接显示")
         }
     }
     
     var body: some View {
-        let _ = print("🎨 [TemporaryChatDetail-BODY] Rendering, isInitialLoading: \(isInitialLoading), isLoadingMessages: \(isLoadingMessages), messages.count: \(messages.count)")
-        
-        return NavigationStack {
-            ZStack {
-                BrewTheme.background
-                    .ignoresSafeArea()
-                
-                VStack(spacing: 0) {
-                    // Messages List
-                    if isInitialLoading || (isLoadingMessages && messages.isEmpty) {
-                        // 🆕 显示加载状态（首次加载或无缓存时）
-                        let _ = print("⏳ [TemporaryChatDetail-BODY] 显示 Loading UI (isInitialLoading: \(isInitialLoading))")
-                        
-                        ZStack {
-                            // 背景
-                            Color.white
-                            
-                            VStack(spacing: 24) {
-                                Spacer()
-                                
-                                // 加载动画 - 更大更明显
-                                ProgressView()
-                                    .scaleEffect(2.5)
-                                    .progressViewStyle(CircularProgressViewStyle(tint: themeBrown))
-                                    .padding(.bottom, 8)
-                                
-                                // 加载文字
-                                VStack(spacing: 10) {
-                                    Text("Loading conversation...")
-                                        .font(.system(size: 18, weight: .semibold))
-                                        .foregroundColor(themeBrown)
-                                    
-                                    Text("Please wait a moment")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.gray.opacity(0.8))
-                                }
-                                
-                                Spacer()
-                            }
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .transition(.opacity)
-                    } else {
-                        let _ = print("📝 [TemporaryChatDetail-BODY] 显示消息列表 (messages.count: \(messages.count))")
-                        ScrollViewReader { proxy in
-                            ScrollView {
-                                LazyVStack(spacing: 12) {
-                                    ForEach(messages) { message in
-                                        TemporaryMessageBubbleView(message: message, isFromUser: message.senderId == authManager.currentUser?.id)
-                                            .id(message.id)
-                                    }
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 16)
-                            }
-                            .onAppear {
-                                if let lastMessage = messages.last {
-                                    withAnimation {
-                                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                                    }
-                                }
-                            }
-                            .onChange(of: messages.count) { _ in
-                                if let lastMessage = messages.last {
-                                    withAnimation {
-                                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Input Area
-                    messageInputView()
+        NavigationStack {
+            VStack(spacing: 0) {
+                // Messages List
+                if isInitialLoading || (isLoadingMessages && messages.isEmpty) {
+                    // 显示加载状态
+                    loadingView
+                } else {
+                    // 显示消息列表
+                    messagesListView
                 }
+                
+                // Input Area
+                messageInputView()
             }
+            .background(BrewTheme.background.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -2020,59 +1951,39 @@ struct TemporaryChatDetailView: View {
                 }
             }
             .onAppear {
-                print("📱 [TemporaryChatDetail] View appeared, isInitialLoading: \(isInitialLoading), isLoadingMessages: \(isLoadingMessages), hasCachedMessages: \(hasCachedMessages), messages.count: \(messages.count)")
-                
-                // 🆕 延迟关闭初始 Loading（让用户看到过渡效果）
-                // 延长到 0.8秒，确保用户能看到 Loading（避免与 sheet 动画重叠）
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                    isInitialLoading = false
-                    print("✨ [TemporaryChatDetail] 初始 Loading 已关闭（0.8秒后）")
-                }
-                
                 if hasCachedMessages {
-                    // 🆕 如果已经有缓存消息
-                    print("✅ [TemporaryChatDetail] 已有 \(messages.count) 条缓存消息，显示 Loading 0.8秒后显示")
-                    
-                    // 延迟标记已读（等待 Loading 关闭）
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    // ✅ 有缓存：延迟一点标记已读
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         markAllMessagesAsRead()
                     }
                     
-                    // 在后台刷新最新消息（不阻塞 UI）
+                    // 后台刷新最新消息（不影响 UI）
                     Task {
                         await refreshMessages()
-                        // 刷新后再次标记已读（确保新消息也被标记）
+                        // 刷新后标记已读
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             markAllMessagesAsRead()
                         }
                     }
                 } else {
-                    // 🆕 如果没有缓存消息，持续显示 Loading 直到加载完成
-                    print("⚠️ [TemporaryChatDetail] 无缓存，持续显示 Loading 直到加载完成...")
-                    
-                    // 立即开始加载（使用优化后的查询）
+                    // ⏳ 无缓存：加载数据
                     Task {
-                        print("🔄 [TemporaryChatDetail] 开始加载消息（优化后的查询）...")
                         let startTime = Date()
-                        
                         await refreshMessages()
-                        
                         let duration = Date().timeIntervalSince(startTime)
-                        print("✅ [TemporaryChatDetail] 消息加载完成，耗时: \(String(format: "%.2f", duration))秒")
+                        print("✅ [TemporaryChatDetail] 加载完成，耗时: \(String(format: "%.2f", duration))秒")
                         
-                        // 确保至少显示 0.5秒的 Loading（避免闪烁）
-                        let minLoadingTime = 0.5
-                        if duration < minLoadingTime {
-                            try? await Task.sleep(nanoseconds: UInt64((minLoadingTime - duration) * 1_000_000_000))
+                        // 确保至少显示 0.3秒 loading（避免闪烁）
+                        if duration < 0.3 {
+                            try? await Task.sleep(nanoseconds: UInt64((0.3 - duration) * 1_000_000_000))
                         }
                         
                         await MainActor.run {
                             isLoadingMessages = false
                             isInitialLoading = false
-                            print("🎉 [TemporaryChatDetail] Loading 状态已关闭，显示消息列表")
                         }
                         
-                        // 加载完成后标记已读
+                        // 标记已读
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             markAllMessagesAsRead()
                         }
@@ -2081,6 +1992,66 @@ struct TemporaryChatDetailView: View {
             }
             .refreshable {
                 await refreshMessages()
+            }
+        }
+    }
+    
+    // MARK: - Loading View
+    @ViewBuilder
+    private var loadingView: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            
+            ProgressView()
+                .scaleEffect(2.5)
+                .progressViewStyle(CircularProgressViewStyle(tint: themeBrown))
+            
+            VStack(spacing: 8) {
+                Text("Loading conversation...")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(themeBrown)
+                
+                Text("Please wait a moment")
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+            }
+            
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(BrewTheme.background) // 🎯 使用主题背景色，减少视觉冲击
+    }
+    
+    // MARK: - Messages List View
+    @ViewBuilder
+    private var messagesListView: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    ForEach(messages) { message in
+                        TemporaryMessageBubbleView(
+                            message: message,
+                            isFromUser: message.senderId == authManager.currentUser?.id
+                        )
+                        .id(message.id)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 16)
+            }
+            .onAppear {
+                if let lastMessage = messages.last {
+                    withAnimation {
+                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                    }
+                }
+            }
+            .onChange(of: messages.count) { _ in
+                if let lastMessage = messages.last {
+                    withAnimation {
+                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                    }
+                }
             }
         }
     }

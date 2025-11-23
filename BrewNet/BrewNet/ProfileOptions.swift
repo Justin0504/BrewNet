@@ -230,6 +230,12 @@ struct ValuesOptions {
 
 // MARK: - Hobbies & Interests Options
 struct HobbiesOptions {
+    // 精简为6个最大众的 hobby
+    static let popularHobbies = [
+        "Reading", "Music", "Sports", "Travel", "Cooking", "Photography"
+    ]
+    
+    // 保留完整列表用于兼容（如果需要）
     static let allHobbies = [
         "Reading", "Writing", "Photography", "Cooking", "Traveling",
         "Hiking", "Running", "Yoga", "Music", "Painting",
