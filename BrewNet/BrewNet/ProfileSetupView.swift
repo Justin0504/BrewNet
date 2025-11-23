@@ -450,17 +450,15 @@ struct ProfileSetupView: View {
                 return "Please select at least one networking intention."
             }
             // Check if at least one intention is selected (primary or additional)
-            let hasIntention = !networkingIntention.additionalIntentions.isEmpty || networkingIntention.selectedIntention != nil
+            // selectedIntention is not optional, so we check if additionalIntentions is not empty
+            // or if selectedSubIntentions is not empty (which indicates an intention was selected)
+            let hasIntention = !networkingIntention.additionalIntentions.isEmpty || !networkingIntention.selectedSubIntentions.isEmpty
             if !hasIntention {
                 return "Please select at least one networking intention."
             }
             return nil
             
-        case 4: // Industry Preferences
-            // Industry preferences are optional, so no validation needed
-            return nil
-            
-        case 5: // Networking Preferences
+        case 4: // Networking Preferences
             guard let networkingPreferences = profileData.networkingPreferences else {
                 return "Please set your networking preferences."
             }
@@ -937,8 +935,51 @@ struct CoreIdentityStep: View {
     @State private var profileImageURL: String? = nil
     @State private var isUploadingImage = false
     
+    // Resume import related state
+    @State private var showDocumentPicker = false
+    @State private var isParsingResume = false
+    @State private var showResumeParseAlert = false
+    @State private var resumeParseMessage = ""
+    
     var body: some View {
         VStack(spacing: 20) {
+            // Import Resume Button
+            VStack(alignment: .leading, spacing: 8) {
+                Button(action: {
+                    showDocumentPicker = true
+                }) {
+                    HStack {
+                        if isParsingResume {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "doc.text.fill")
+                                .font(.system(size: 16))
+                        }
+                        Text(isParsingResume ? "Parsing Resume..." : "Import Resume (PDF/Word)")
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color(red: 0.6, green: 0.4, blue: 0.2),
+                                Color(red: 0.4, green: 0.2, blue: 0.1)
+                            ]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .cornerRadius(12)
+                }
+                .disabled(isParsingResume)
+                
+            }
+            .padding(.bottom, 8)
+            
             // Profile Image Upload
             VStack(spacing: 12) {
                 Text("Profile Picture")
@@ -1300,6 +1341,143 @@ struct CoreIdentityStep: View {
             }
         }
         .onChange(of: personalWebsite) { _ in updateProfileData() }
+        .sheet(isPresented: $showDocumentPicker) {
+            DocumentPickerView(isPresented: $showDocumentPicker) { url in
+                parseResume(from: url)
+            }
+        }
+        .alert("Resume Import", isPresented: $showResumeParseAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(resumeParseMessage)
+        }
+    }
+    
+    // MARK: - Parse Resume
+    private func parseResume(from url: URL) {
+        isParsingResume = true
+        
+        Task {
+            do {
+                let parsedResume = try await ResumeParser.parseResume(from: url)
+                
+                await MainActor.run {
+                    // Fill in basic information (Step 1)
+                    if let parsedName = parsedResume.name, !parsedName.isEmpty {
+                        name = parsedName
+                    }
+                    if let parsedEmail = parsedResume.email, !parsedEmail.isEmpty {
+                        email = parsedEmail
+                    }
+                    if let parsedPhone = parsedResume.phone, !parsedPhone.isEmpty {
+                        phoneNumber = parsedPhone
+                    }
+                    if let parsedLocation = parsedResume.location, !parsedLocation.isEmpty {
+                        location = parsedLocation
+                    }
+                    // Note: We don't auto-fill bio as user should write it themselves
+                    if let parsedWebsite = parsedResume.personalWebsite, !parsedWebsite.isEmpty {
+                        personalWebsite = parsedWebsite
+                    }
+                    
+                    // Update profileData (including LinkedIn and GitHub URL)
+                    if var coreIdentity = profileData.coreIdentity {
+                        let updatedCoreIdentity = CoreIdentity(
+                            name: name.isEmpty ? coreIdentity.name : name,
+                            email: email.isEmpty ? coreIdentity.email : email,
+                            phoneNumber: phoneNumber.isEmpty ? coreIdentity.phoneNumber : phoneNumber,
+                            profileImage: coreIdentity.profileImage,
+                            bio: coreIdentity.bio, // Keep existing bio, don't overwrite
+                            pronouns: coreIdentity.pronouns,
+                            location: location.isEmpty ? coreIdentity.location : location,
+                            personalWebsite: personalWebsite.isEmpty ? coreIdentity.personalWebsite : personalWebsite,
+                            githubUrl: parsedResume.githubUrl ?? coreIdentity.githubUrl,
+                            linkedinUrl: parsedResume.linkedInUrl ?? coreIdentity.linkedinUrl,
+                            timeZone: coreIdentity.timeZone
+                        )
+                        profileData.coreIdentity = updatedCoreIdentity
+                    } else {
+                        // If coreIdentity doesn't exist, create a new one
+                        updateProfileData()
+                    }
+                    
+                    // Fill in professional background information (Step 2)
+                    var existingProfessionalBackground = profileData.professionalBackground
+                    
+                    let updatedProfessionalBackground = ProfessionalBackground(
+                        currentCompany: existingProfessionalBackground?.currentCompany, // Don't auto-fill current company from resume
+                        jobTitle: parsedResume.jobTitle ?? existingProfessionalBackground?.jobTitle,
+                        industry: existingProfessionalBackground?.industry,
+                        experienceLevel: existingProfessionalBackground?.experienceLevel ?? .entry,
+                        education: existingProfessionalBackground?.education,
+                        educations: {
+                            var allEducations = existingProfessionalBackground?.educations ?? []
+                            // Add new educations, avoiding duplicates
+                            for newEdu in parsedResume.educations {
+                                if !allEducations.contains(where: { $0.schoolName == newEdu.schoolName && $0.startYear == newEdu.startYear }) {
+                                    allEducations.append(newEdu)
+                                }
+                            }
+                            return allEducations.isEmpty ? nil : allEducations
+                        }(),
+                        yearsOfExperience: parsedResume.yearsOfExperience ?? existingProfessionalBackground?.yearsOfExperience,
+                        careerStage: existingProfessionalBackground?.careerStage ?? .earlyCareer,
+                        skills: {
+                            var allSkills = existingProfessionalBackground?.skills ?? []
+                            // Add new skills, avoiding duplicates
+                            for newSkill in parsedResume.skills {
+                                if !allSkills.contains(newSkill) {
+                                    allSkills.append(newSkill)
+                                }
+                            }
+                            return allSkills
+                        }(),
+                        certifications: {
+                            var allCerts = existingProfessionalBackground?.certifications ?? []
+                            // Add new certifications, avoiding duplicates
+                            for newCert in parsedResume.certifications {
+                                if !allCerts.contains(newCert) {
+                                    allCerts.append(newCert)
+                                }
+                            }
+                            return allCerts
+                        }(),
+                        languagesSpoken: {
+                            var allLanguages = existingProfessionalBackground?.languagesSpoken ?? []
+                            // Add new languages, avoiding duplicates
+                            for newLang in parsedResume.languages {
+                                if !allLanguages.contains(newLang) {
+                                    allLanguages.append(newLang)
+                                }
+                            }
+                            return allLanguages
+                        }(),
+                        workExperiences: {
+                            var allExperiences = existingProfessionalBackground?.workExperiences ?? []
+                            // Add new work experiences, avoiding duplicates
+                            for newExp in parsedResume.workExperiences {
+                                if !allExperiences.contains(where: { $0.companyName == newExp.companyName && $0.startYear == newExp.startYear }) {
+                                    allExperiences.append(newExp)
+                                }
+                            }
+                            return allExperiences
+                        }()
+                    )
+                    profileData.professionalBackground = updatedProfessionalBackground
+                    
+                    // Show success message
+                    resumeParseMessage = "Resume imported successfully! Please review and confirm the information is correct."
+                    showResumeParseAlert = true
+                    isParsingResume = false
+                }
+            } catch {
+                await MainActor.run {
+                    resumeParseMessage = "Failed to parse resume: \(error.localizedDescription)"
+                    showResumeParseAlert = true
+                    isParsingResume = false
+                }
+            }
+        }
     }
     
     private func useCurrentLocation() {
@@ -2217,7 +2395,6 @@ struct TimezonePicker: View {
     
     private var currentDisplayName: String {
         if let tz = TimeZone(identifier: selectedTimezone) {
-            let abbreviation = tz.abbreviation() ?? ""
             let offset = tz.secondsFromGMT()
             let hours = offset / 3600
             let minutes = abs(offset % 3600) / 60
