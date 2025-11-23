@@ -410,7 +410,7 @@ struct ProfileDisplayView: View {
                 MinimalProfileHeaderView(
                     profile: profile,
                     isVerified: resolvedVerifiedStatus ?? false,
-                    showProBadge: authManager.currentUser?.isPro ?? false,
+                    showProBadge: authManager.currentUser?.isProActive ?? false,
                     onEditProfile: onEditProfile,
                     onAvatarTap: {
                         showingProfileCard = true

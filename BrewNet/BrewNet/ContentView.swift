@@ -69,8 +69,30 @@ struct ContentView: View {
         
         Task {
             do {
-                // 检查用户是否有 profile 数据
-                let hasProfile = try await supabaseService.getProfile(userId: user.id) != nil
+            // 1. 检查并更新 Pro 过期状态（应用启动时自动检测）
+            do {
+                let proExpired = try await supabaseService.checkAndUpdateProExpiration(userId: user.id)
+                if proExpired {
+                    print("⚠️ [App启动] 检测到 Pro 已过期，已自动更新为 is_pro=false, likes_remaining=6")
+                    // 刷新用户数据以同步最新状态
+                    await authManager.refreshUser()
+                } else {
+                    print("✅ [App启动] Pro 状态正常或用户非 Pro")
+                }
+            } catch {
+                print("❌ [App启动] Pro 过期检测失败: \(error.localizedDescription)")
+            }
+            
+            // 2. 检查并重置普通用户的点赞次数（如果已过24小时）
+            do {
+                try await supabaseService.checkAndResetUserLikesIfNeeded(userId: user.id)
+                print("✅ [App启动] 点赞次数检查完成")
+            } catch {
+                print("❌ [App启动] 点赞重置检测失败: \(error.localizedDescription)")
+            }
+                
+            // 3. 检查用户是否有 profile 数据
+            let hasProfile = try await supabaseService.getProfile(userId: user.id) != nil
                 
                 print("🔍 Profile 检查结果: hasProfile = \(hasProfile)")
                 
