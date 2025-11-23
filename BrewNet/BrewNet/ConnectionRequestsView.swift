@@ -207,10 +207,16 @@ struct ConnectionRequestsView: View {
                         currentUserId: authManager.currentUser?.id,
                         onTap: {
                             // 点击卡片：如果有临时消息，直接跳转到临时聊天界面
+                            print("👆 [ConnectionRequests] 点击卡片: \(request.requesterProfile.name)")
+                            print("   - request.temporaryMessages.count: \(request.temporaryMessages.count)")
+                            print("   - request.latestTemporaryMessage: \(request.latestTemporaryMessage != nil ? "有" : "无")")
+                            
                             if request.latestTemporaryMessage != nil {
+                                print("   → 打开临时聊天界面")
                                 selectedTemporaryChatRequest = request
                                 showingTemporaryChatDetail = true
                             } else {
+                                print("   → 打开详情页面")
                                 // 否则打开详情页面
                                 selectedRequest = request
                             }
@@ -267,6 +273,9 @@ struct ConnectionRequestsView: View {
                 
                 print("✅ Rejected invitation from \(request.requesterProfile.name)")
                 
+                // 🆕 从缓存中移除该请求
+                LocalCacheManager.shared.invalidateConnectionRequest(userId: currentUser.id, requestId: request.id)
+                
                 await MainActor.run {
                     NotificationCenter.default.post(
                         name: NSNotification.Name("ConnectionRequestRejected"),
@@ -298,6 +307,9 @@ struct ConnectionRequestsView: View {
                 )
                 
                 print("✅ Accepted invitation from \(request.requesterProfile.name)")
+                
+                // 🆕 从缓存中移除该请求
+                LocalCacheManager.shared.invalidateConnectionRequest(userId: currentUser.id, requestId: request.id)
                 
                 // 同时保存到本地数据库
                 await MainActor.run {
@@ -343,6 +355,22 @@ struct ConnectionRequestsView: View {
         }
         
         isLoading = true
+        
+        // 🆕 先尝试从缓存加载
+        if let cachedData = LocalCacheManager.shared.loadConnectionRequestsData(userId: currentUser.id) {
+            print("📦 [ConnectionRequests] 从缓存加载数据")
+            self.requests = cachedData.requests
+            self.isLoading = false
+            updateUnreadTemporaryMessageCount()
+            
+            // 后台刷新缓存
+            Task {
+                await refreshConnectionRequestsInBackground(userId: currentUser.id)
+            }
+            return
+        }
+        
+        // 缓存未命中，从 Supabase 加载
         Task {
             do {
                 // 从 Supabase 获取收到的待处理邀请
@@ -485,6 +513,9 @@ struct ConnectionRequestsView: View {
                     print("✅ Loaded \(sortedRequests.count) connection requests from database (Pro prioritized)")
                 }
                 
+                // 🆕 保存到缓存
+                LocalCacheManager.shared.saveConnectionRequestsData(userId: currentUser.id, requests: sortedRequests)
+                
                 // 更新未读临时消息数
                 await updateUnreadTemporaryMessagesCount()
                 
@@ -495,6 +526,159 @@ struct ConnectionRequestsView: View {
                     self.isLoading = false
                 }
             }
+        }
+    }
+    
+    // MARK: - 后台刷新 Connection Requests（用于缓存后台更新）
+    private func refreshConnectionRequestsInBackground(userId: String) async {
+        print("🔄 [ConnectionRequests] 后台刷新数据中...")
+        do {
+            // 从 Supabase 获取收到的待处理邀请
+            let supabaseInvitations = try await supabaseService.getPendingInvitations(userId: userId)
+            
+            // 获取所有已匹配的用户ID，用于过滤
+            var matchedUserIds: Set<String> = []
+            do {
+                let matches = try await supabaseService.getActiveMatches(userId: userId)
+                for match in matches {
+                    if match.userId == userId {
+                        matchedUserIds.insert(match.matchedUserId)
+                    } else if match.matchedUserId == userId {
+                        matchedUserIds.insert(match.userId)
+                    }
+                }
+            } catch {
+                print("⚠️ Failed to fetch matches for filtering (background): \(error.localizedDescription)")
+            }
+            
+            // 过滤掉已经匹配的邀请
+            let filteredInvitations = supabaseInvitations.filter { invitation in
+                !matchedUserIds.contains(invitation.senderId)
+            }
+            
+            // 转换为 ConnectionRequest 模型
+            var convertedRequests: [ConnectionRequest] = []
+            
+            for invitation in filteredInvitations {
+                // 获取发送者的 profile 信息
+                var requesterProfile = ConnectionRequestProfile(
+                    profilePhoto: nil,
+                    name: "Unknown",
+                    jobTitle: "",
+                    company: "",
+                    location: "",
+                    bio: "",
+                    expertise: [],
+                    backgroundImage: nil
+                )
+                
+                // 从 senderProfile JSONB 中提取信息
+                if let senderProfile = invitation.senderProfile {
+                    requesterProfile = ConnectionRequestProfile(
+                        profilePhoto: senderProfile.profileImage,
+                        name: senderProfile.name,
+                        jobTitle: senderProfile.jobTitle ?? "",
+                        company: senderProfile.company ?? "",
+                        location: senderProfile.location ?? "",
+                        bio: senderProfile.bio ?? "",
+                        expertise: senderProfile.expertise ?? [],
+                        backgroundImage: nil
+                    )
+                } else {
+                    // 如果没有 senderProfile，尝试从 profile 表获取
+                    if let senderProfile = try? await supabaseService.getProfile(userId: invitation.senderId) {
+                        let brewNetProfile = senderProfile.toBrewNetProfile()
+                        requesterProfile = ConnectionRequestProfile(
+                            profilePhoto: brewNetProfile.coreIdentity.profileImage,
+                            name: brewNetProfile.coreIdentity.name,
+                            jobTitle: brewNetProfile.professionalBackground.jobTitle ?? "",
+                            company: brewNetProfile.professionalBackground.currentCompany ?? "",
+                            location: brewNetProfile.coreIdentity.location ?? "",
+                            bio: brewNetProfile.coreIdentity.bio ?? "",
+                            expertise: brewNetProfile.professionalBackground.skills,
+                            backgroundImage: nil
+                        )
+                    }
+                }
+                
+                // 解析创建时间
+                let dateFormatter = ISO8601DateFormatter()
+                let createdAt = dateFormatter.date(from: invitation.createdAt) ?? Date()
+                
+                // 加载该请求的临时消息
+                var temporaryMessages: [TemporaryMessage] = []
+                do {
+                    let messages = try await supabaseService.getTemporaryMessagesFromSender(
+                        receiverId: userId,
+                        senderId: invitation.senderId
+                    )
+                    var tempMessages = messages.map { TemporaryMessage(from: $0) }
+                    
+                    // 限制最多10条消息（保留最新的10条）
+                    if tempMessages.count > 10 {
+                        tempMessages.sort(by: { $0.timestamp < $1.timestamp })
+                        tempMessages = Array(tempMessages.suffix(10))
+                    }
+                    
+                    temporaryMessages = tempMessages
+                } catch {
+                    print("⚠️ [后台刷新] 加载临时消息失败: \(error.localizedDescription)")
+                }
+                
+                var connectionRequest = ConnectionRequest(
+                    id: invitation.id,
+                    requesterId: invitation.senderId,
+                    requesterName: requesterProfile.name,
+                    requesterProfile: requesterProfile,
+                    reasonForInterest: invitation.reasonForInterest,
+                    createdAt: createdAt,
+                    isFeatured: false
+                )
+                connectionRequest.temporaryMessages = temporaryMessages
+                
+                convertedRequests.append(connectionRequest)
+            }
+            
+            // 加载 Pro 状态并对结果排序
+            let requesterIds = convertedRequests.map { $0.requesterId }
+            let sortedRequests: [ConnectionRequest]
+            do {
+                let proUserIds = try await supabaseService.getProUserIds(from: requesterIds)
+                let requestsWithProFlag = convertedRequests.map { request -> ConnectionRequest in
+                    var updatedRequest = request
+                    updatedRequest.isRequesterPro = proUserIds.contains(request.requesterId)
+                    return updatedRequest
+                }
+                
+                sortedRequests = requestsWithProFlag.sorted { lhs, rhs in
+                    if lhs.isRequesterPro != rhs.isRequesterPro {
+                        return lhs.isRequesterPro && !rhs.isRequesterPro
+                    }
+                    return lhs.createdAt > rhs.createdAt
+                }
+            } catch {
+                print("⚠️ Failed to load Pro status for requests (background): \(error.localizedDescription)")
+                sortedRequests = convertedRequests.sorted(by: { $0.createdAt > $1.createdAt })
+            }
+            
+            // 保存到缓存
+            LocalCacheManager.shared.saveConnectionRequestsData(userId: userId, requests: sortedRequests)
+            
+            // 如果数据有变化，更新 UI
+            await MainActor.run {
+                if self.requests.count != sortedRequests.count {
+                    self.requests = sortedRequests
+                    print("🔄 [ConnectionRequests] 后台刷新完成，数据已更新")
+                } else {
+                    print("🔄 [ConnectionRequests] 后台刷新完成，数据无变化")
+                }
+            }
+            
+            // 更新未读临时消息数
+            await updateUnreadTemporaryMessagesCount()
+            
+        } catch {
+            print("❌ [ConnectionRequests] 后台刷新失败: \(error.localizedDescription)")
         }
     }
     
@@ -550,6 +734,18 @@ struct ConnectionRequestsView: View {
                 totalUnreadTemporaryMessagesCount = requests.reduce(0) { $0 + $1.unreadTemporaryMessageCount(currentUserId: currentUser.id) }
             }
         }
+    }
+    
+    // MARK: - Update Unread Count (同步版本，用于缓存加载后)
+    private func updateUnreadTemporaryMessageCount() {
+        guard let currentUser = authManager.currentUser else {
+            totalUnreadTemporaryMessagesCount = 0
+            return
+        }
+        
+        // 从 requests 中计算未读消息数
+        totalUnreadTemporaryMessagesCount = requests.reduce(0) { $0 + $1.unreadTemporaryMessageCount(currentUserId: currentUser.id) }
+        print("📊 [临时消息] 从缓存计算未读消息数: \(totalUnreadTemporaryMessagesCount)")
     }
 }
 
@@ -1633,42 +1829,121 @@ struct TemporaryChatDetailView: View {
     
     @State private var messageText = ""
     @FocusState private var isTextFieldFocused: Bool
-    @State private var messages: [TemporaryMessage] = []
+    @State private var messages: [TemporaryMessage] = [] // 🆕 将在 init 中初始化为 request.temporaryMessages
+    @State private var isLoadingMessages: Bool // 🆕 加载状态（在 init 中设置）
+    @State private var isInitialLoading = true // 🆕 首次加载状态（总是先显示 Loading）
+    private let hasCachedMessages: Bool // 🆕 记录是否有缓存数据
     
     private var themeBrown: Color { BrewTheme.primaryBrown }
     private var themeBrownLight: Color { BrewTheme.secondaryBrown }
     private let maxMessageLength = 200
     
+    // 🆕 添加初始化方法，立即使用缓存的消息
+    init(request: ConnectionRequest, onDismiss: @escaping () -> Void) {
+        self.request = request
+        self.onDismiss = onDismiss
+        
+        print("🚀 [TemporaryChatDetail-INIT] 开始初始化")
+        print("   - request.id: \(request.id)")
+        print("   - request.requesterName: \(request.requesterProfile.name)")
+        print("   - request.temporaryMessages.count: \(request.temporaryMessages.count)")
+        
+        // 立即使用 request 中已有的消息（来自缓存）
+        var sortedMessages = request.temporaryMessages.sorted(by: { $0.timestamp < $1.timestamp })
+        if sortedMessages.count > 10 {
+            sortedMessages = Array(sortedMessages.suffix(10))
+        }
+        _messages = State(initialValue: sortedMessages)
+        
+        // 记录是否有缓存数据
+        hasCachedMessages = !sortedMessages.isEmpty
+        
+        // 🔑 关键：如果没有缓存，初始就设置为 loading 状态
+        let shouldShowLoading = sortedMessages.isEmpty
+        _isLoadingMessages = State(initialValue: shouldShowLoading)
+        
+        print("   - sortedMessages.count: \(sortedMessages.count)")
+        print("   - hasCachedMessages: \(hasCachedMessages)")
+        print("   - isLoadingMessages (initial): \(shouldShowLoading)")
+        
+        if !sortedMessages.isEmpty {
+            print("✅ [TemporaryChatDetail-INIT] 使用缓存的 \(sortedMessages.count) 条消息立即显示")
+            for (index, msg) in sortedMessages.enumerated() {
+                print("   [\(index)] \(msg.content.prefix(30))...")
+            }
+        } else {
+            print("⚠️ [TemporaryChatDetail-INIT] 无缓存消息，初始化为 Loading 状态")
+        }
+    }
+    
     var body: some View {
-        NavigationStack {
+        let _ = print("🎨 [TemporaryChatDetail-BODY] Rendering, isInitialLoading: \(isInitialLoading), isLoadingMessages: \(isLoadingMessages), messages.count: \(messages.count)")
+        
+        return NavigationStack {
             ZStack {
                 BrewTheme.background
                     .ignoresSafeArea()
                 
                 VStack(spacing: 0) {
                     // Messages List
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            LazyVStack(spacing: 12) {
-                                ForEach(messages) { message in
-                                    TemporaryMessageBubbleView(message: message, isFromUser: message.senderId == authManager.currentUser?.id)
-                                        .id(message.id)
+                    if isInitialLoading || (isLoadingMessages && messages.isEmpty) {
+                        // 🆕 显示加载状态（首次加载或无缓存时）
+                        let _ = print("⏳ [TemporaryChatDetail-BODY] 显示 Loading UI (isInitialLoading: \(isInitialLoading))")
+                        
+                        ZStack {
+                            // 背景
+                            Color.white
+                            
+                            VStack(spacing: 24) {
+                                Spacer()
+                                
+                                // 加载动画 - 更大更明显
+                                ProgressView()
+                                    .scaleEffect(2.5)
+                                    .progressViewStyle(CircularProgressViewStyle(tint: themeBrown))
+                                    .padding(.bottom, 8)
+                                
+                                // 加载文字
+                                VStack(spacing: 10) {
+                                    Text("Loading conversation...")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundColor(themeBrown)
+                                    
+                                    Text("Please wait a moment")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.gray.opacity(0.8))
+                                }
+                                
+                                Spacer()
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .transition(.opacity)
+                    } else {
+                        let _ = print("📝 [TemporaryChatDetail-BODY] 显示消息列表 (messages.count: \(messages.count))")
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                LazyVStack(spacing: 12) {
+                                    ForEach(messages) { message in
+                                        TemporaryMessageBubbleView(message: message, isFromUser: message.senderId == authManager.currentUser?.id)
+                                            .id(message.id)
+                                    }
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 16)
+                            }
+                            .onAppear {
+                                if let lastMessage = messages.last {
+                                    withAnimation {
+                                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                    }
                                 }
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 16)
-                        }
-                        .onAppear {
-                            if let lastMessage = messages.last {
-                                withAnimation {
-                                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                                }
-                            }
-                        }
-                        .onChange(of: messages.count) { _ in
-                            if let lastMessage = messages.last {
-                                withAnimation {
-                                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                            .onChange(of: messages.count) { _ in
+                                if let lastMessage = messages.last {
+                                    withAnimation {
+                                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                    }
                                 }
                             }
                         }
@@ -1701,10 +1976,63 @@ struct TemporaryChatDetailView: View {
                 }
             }
             .onAppear {
-                loadMessages()
-                // 延迟一点标记已读，确保消息已加载
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    markAllMessagesAsRead()
+                print("📱 [TemporaryChatDetail] View appeared, isInitialLoading: \(isInitialLoading), isLoadingMessages: \(isLoadingMessages), hasCachedMessages: \(hasCachedMessages), messages.count: \(messages.count)")
+                
+                // 🆕 延迟关闭初始 Loading（让用户看到过渡效果）
+                // 延长到 0.8秒，确保用户能看到 Loading（避免与 sheet 动画重叠）
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    isInitialLoading = false
+                    print("✨ [TemporaryChatDetail] 初始 Loading 已关闭（0.8秒后）")
+                }
+                
+                if hasCachedMessages {
+                    // 🆕 如果已经有缓存消息
+                    print("✅ [TemporaryChatDetail] 已有 \(messages.count) 条缓存消息，显示 Loading 0.8秒后显示")
+                    
+                    // 延迟标记已读（等待 Loading 关闭）
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        markAllMessagesAsRead()
+                    }
+                    
+                    // 在后台刷新最新消息（不阻塞 UI）
+                    Task {
+                        await refreshMessages()
+                        // 刷新后再次标记已读（确保新消息也被标记）
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            markAllMessagesAsRead()
+                        }
+                    }
+                } else {
+                    // 🆕 如果没有缓存消息，持续显示 Loading 直到加载完成
+                    print("⚠️ [TemporaryChatDetail] 无缓存，持续显示 Loading 直到加载完成...")
+                    
+                    // 立即开始加载（使用优化后的查询）
+                    Task {
+                        print("🔄 [TemporaryChatDetail] 开始加载消息（优化后的查询）...")
+                        let startTime = Date()
+                        
+                        await refreshMessages()
+                        
+                        let duration = Date().timeIntervalSince(startTime)
+                        print("✅ [TemporaryChatDetail] 消息加载完成，耗时: \(String(format: "%.2f", duration))秒")
+                        
+                        // 确保至少显示 0.5秒的 Loading（避免闪烁）
+                        let minLoadingTime = 0.5
+                        if duration < minLoadingTime {
+                            try? await Task.sleep(nanoseconds: UInt64((minLoadingTime - duration) * 1_000_000_000))
+                        }
+                        
+                        await MainActor.run {
+                            isLoadingMessages = false
+                            isInitialLoading = false
+                            print("🎉 [TemporaryChatDetail] Loading 状态已关闭，显示消息列表")
+                        }
+                        
+                        // 加载完成后标记已读
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            markAllMessagesAsRead()
+                        }
+                    }
                 }
             }
             .refreshable {
@@ -1784,16 +2112,11 @@ struct TemporaryChatDetailView: View {
         }
     }
     
-    // MARK: - Load Messages
-    private func loadMessages() {
-        Task {
-            await refreshMessages()
-        }
-    }
-    
-    // MARK: - Refresh Messages
+    // MARK: - Refresh Messages（优化版：后台刷新）
     private func refreshMessages() async {
         guard let currentUser = authManager.currentUser else { return }
+        
+        print("🔄 [TemporaryChatDetail] 刷新消息中...")
         
         do {
             // 重新从数据库加载最新的临时消息
@@ -1813,22 +2136,32 @@ struct TemporaryChatDetailView: View {
                     print("⚠️ [临时聊天] 消息数量超过10条，已保留最新的10条")
                 }
                 
-                messages = sortedMessages
-                print("✅ Refreshed \(messages.count) messages in chat detail")
+                // 🆕 总是更新消息（初次加载时需要显示，后续只在变化时更新）
+                if messages.isEmpty {
+                    // 初次加载，直接设置
+                    messages = sortedMessages
+                    print("✅ [TemporaryChatDetail] 初次加载 \(sortedMessages.count) 条消息")
+                } else if messages.count != sortedMessages.count || 
+                          messages.map(\.id) != sortedMessages.map(\.id) {
+                    // 后续更新，只在变化时更新
+                    let oldCount = messages.count
+                    messages = sortedMessages
+                    print("✅ [TemporaryChatDetail] 消息已更新: \(oldCount) -> \(sortedMessages.count) 条")
+                } else {
+                    print("ℹ️ [TemporaryChatDetail] 消息无变化，跳过更新")
+                }
             }
         } catch {
-            print("⚠️ Failed to refresh messages: \(error.localizedDescription)")
-            // 如果刷新失败，使用原来的消息列表
+            print("❌ [TemporaryChatDetail] 刷新失败: \(error.localizedDescription)")
             await MainActor.run {
-                var sortedMessages = request.temporaryMessages.sorted(by: { $0.timestamp < $1.timestamp })
-                // 即使使用原有消息，也限制为10条
-                if sortedMessages.count > 10 {
-                    sortedMessages = Array(sortedMessages.suffix(10))
+                // 如果是初次加载且失败，显示错误提示
+                if messages.isEmpty {
+                    print("❌ [TemporaryChatDetail] 初次加载失败，无法显示消息")
                 }
-                messages = sortedMessages
             }
         }
     }
+    
     
     // MARK: - Mark All Messages As Read
     private func markAllMessagesAsRead() {

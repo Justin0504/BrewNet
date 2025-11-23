@@ -440,11 +440,104 @@ class LocalCacheManager {
         return decoded
     }
     
+    // MARK: - Connection Requests Cache (含 Temporary Chat)
+    func saveConnectionRequestsData(userId: String, requests: [ConnectionRequest]) {
+        let key = "connection_requests_cache_\(userId)"
+        let cacheData = ConnectionRequestsCacheData(requests: requests, timestamp: Date())
+        if let encoded = try? JSONEncoder().encode(cacheData) {
+            userDefaults.set(encoded, forKey: key)
+            print("💾 [Cache] 已保存 Connection Requests 数据到本地缓存（包含 \(requests.count) 个请求）")
+            
+            // 统计临时消息数量
+            let totalMessages = requests.reduce(0) { $0 + $1.temporaryMessages.count }
+            if totalMessages > 0 {
+                print("   📩 包含 \(totalMessages) 条临时消息")
+            }
+        }
+    }
+    
+    func loadConnectionRequestsData(userId: String) -> ConnectionRequestsCacheData? {
+        let key = "connection_requests_cache_\(userId)"
+        guard let data = userDefaults.data(forKey: key),
+              let decoded = try? JSONDecoder().decode(ConnectionRequestsCacheData.self, from: data) else {
+            return nil
+        }
+        
+        // 检查缓存是否过期（5分钟，因为临时消息更新频繁）
+        if let timestamp = decoded.timestamp {
+            let timeSinceCache = Date().timeIntervalSince(timestamp)
+            if timeSinceCache > 300 { // 5分钟
+                print("⏰ [Cache] Connection Requests 缓存已过期 (\(Int(timeSinceCache)) 秒前)")
+                return nil
+            }
+            print("📦 [Cache] 从本地缓存加载 Connection Requests 数据（\(decoded.requests.count) 个请求，\(Int(timeSinceCache)) 秒前）")
+            
+            // 统计临时消息数量
+            let totalMessages = decoded.requests.reduce(0) { $0 + $1.temporaryMessages.count }
+            if totalMessages > 0 {
+                print("   📩 包含 \(totalMessages) 条临时消息")
+            }
+        }
+        
+        return decoded
+    }
+    
+    // 快速更新单个请求的临时消息（不重新加载整个列表）
+    func updateConnectionRequestMessages(userId: String, requestId: String, messages: [TemporaryMessage]) {
+        let key = "connection_requests_cache_\(userId)"
+        guard let data = userDefaults.data(forKey: key),
+              var decoded = try? JSONDecoder().decode(ConnectionRequestsCacheData.self, from: data) else {
+            return
+        }
+        
+        // 找到对应的请求并更新消息
+        if let index = decoded.requests.firstIndex(where: { $0.id == requestId }) {
+            var updatedRequest = decoded.requests[index]
+            updatedRequest.temporaryMessages = messages
+            decoded.requests[index] = updatedRequest
+            
+            // 保存更新后的缓存，保持原时间戳（因为只是部分更新）
+            let updatedData = ConnectionRequestsCacheData(
+                requests: decoded.requests,
+                timestamp: decoded.timestamp
+            )
+            
+            if let encoded = try? JSONEncoder().encode(updatedData) {
+                userDefaults.set(encoded, forKey: key)
+                print("💾 [Cache] 已快速更新请求 \(requestId) 的临时消息: \(messages.count) 条")
+            }
+        }
+    }
+    
+    // 清除单个连接请求的缓存（当接受/拒绝请求时使用）
+    func invalidateConnectionRequest(userId: String, requestId: String) {
+        let key = "connection_requests_cache_\(userId)"
+        guard let data = userDefaults.data(forKey: key),
+              var decoded = try? JSONDecoder().decode(ConnectionRequestsCacheData.self, from: data) else {
+            return
+        }
+        
+        // 移除对应的请求
+        decoded.requests.removeAll { $0.id == requestId }
+        
+        // 保存更新后的缓存
+        let updatedData = ConnectionRequestsCacheData(
+            requests: decoded.requests,
+            timestamp: Date() // 使用新的时间戳
+        )
+        
+        if let encoded = try? JSONEncoder().encode(updatedData) {
+            userDefaults.set(encoded, forKey: key)
+            print("🗑️ [Cache] 已从缓存中移除请求: \(requestId)")
+        }
+    }
+    
     // MARK: - Clear Cache
     func clearCache(userId: String) {
         userDefaults.removeObject(forKey: "credit_cache_\(userId)")
         userDefaults.removeObject(forKey: "redeem_cache_\(userId)")
         userDefaults.removeObject(forKey: "chats_cache_\(userId)")
+        userDefaults.removeObject(forKey: "connection_requests_cache_\(userId)")
         print("🗑️ [Cache] 已清除用户缓存")
     }
 }
@@ -452,6 +545,12 @@ class LocalCacheManager {
 // MARK: - Chats Cache Data Model
 struct ChatsCacheData: Codable {
     let schedules: [CoffeeChatSchedule]
+    let timestamp: Date?
+}
+
+// MARK: - Connection Requests Cache Data Model
+struct ConnectionRequestsCacheData: Codable {
+    var requests: [ConnectionRequest]
     let timestamp: Date?
 }
 
