@@ -154,12 +154,13 @@ class RecommendationService: ObservableObject {
         let profilesDict = try await supabaseService.getProfilesBatch(userIds: topKUserIds)
         print("✅ Fetched \(profilesDict.count) profiles from database (requested: \(topKUserIds.count))")
         
-        // 9. 构建结果，保持推荐分数顺序
+        // 9. 构建结果，保持推荐分数顺序，过滤掉已删除的用户
         var results: [(userId: String, score: Double, profile: BrewNetProfile)] = []
         var missingProfiles: [String] = []
         var decodingErrors: [String] = []
         
         for item in topK {
+            // 只处理成功获取到 profile 的用户（已删除的用户会被过滤掉）
             if let supabaseProfile = profilesDict[item.userId] {
                 do {
                     let brewNetProfile = supabaseProfile.toBrewNetProfile()
@@ -187,18 +188,45 @@ class RecommendationService: ObservableObject {
                     missingProfiles.append(item.userId)
                 }
             } else {
-                print("⚠️ Profile not found for recommended user: \(item.userId)")
+                // 用户已被删除或 profile 不存在，跳过该用户
+                print("⚠️ Profile not found for recommended user: \(item.userId) (user may have been deleted)")
                 missingProfiles.append(item.userId)
             }
         }
         
+        // 如果有些用户被过滤掉了，记录日志
         if !missingProfiles.isEmpty {
-            print("⚠️ \(missingProfiles.count) profiles not found: \(missingProfiles.prefix(5).joined(separator: ", "))")
+            print("⚠️ \(missingProfiles.count) profiles not found (filtered out): \(missingProfiles.prefix(5).joined(separator: ", "))")
+            print("   These users may have been deleted from the database")
         }
         
         if !decodingErrors.isEmpty {
             print("⚠️ \(decodingErrors.count) profiles failed to decode: \(decodingErrors.prefix(5).joined(separator: ", "))")
             print("   These profiles may have incomplete or corrupted data in the database")
+        }
+        
+        // 如果过滤后结果不足，尝试从剩余的候选用户中补充
+        if results.count < limit && results.count < topK.count {
+            let remainingCandidates = scoredCandidates.filter { candidate in
+                !topKUserIds.contains(candidate.userId) && profilesDict[candidate.userId] != nil
+            }
+            
+            let additionalNeeded = min(limit - results.count, remainingCandidates.count)
+            if additionalNeeded > 0 {
+                print("📊 Supplementing results: adding \(additionalNeeded) more candidates to replace deleted users")
+                let additionalCandidates = Array(remainingCandidates.prefix(additionalNeeded))
+                
+                for candidate in additionalCandidates {
+                    if let supabaseProfile = profilesDict[candidate.userId] {
+                        do {
+                            let brewNetProfile = supabaseProfile.toBrewNetProfile()
+                            results.append((candidate.userId, candidate.score, brewNetProfile))
+                        } catch {
+                            print("⚠️ Failed to convert additional profile for user \(candidate.userId): \(error.localizedDescription)")
+                        }
+                    }
+                }
+            }
         }
         
         // 9.5. 应用距离过滤（如果设置了 maxDistance）

@@ -312,13 +312,23 @@ class FieldAwareScoring {
             // 将 token 转换为小写以确保不区分大小写的匹配
             let lowercasedToken = token.lowercased()
             
+            // 获取同义词组 key
+            let synonymGroup = getSynonymGroupKey(for: token)
+            
+            // 如果该同义词组已经匹配过，跳过（避免重复计分）
+            if matchedSynonymGroups.contains(synonymGroup) {
+                continue
+            }
+            
             // 在不同区域搜索，应用不同权重
             if zonedText.zoneA.contains(lowercasedToken) {
                 score += FieldZone.zoneA.weight
                 matchDetails.append((token, .zoneA))
+                matchedSynonymGroups.insert(synonymGroup)  // ⭐ 标记该同义词组已计分
             } else if zonedText.zoneB.contains(lowercasedToken) {
                 score += FieldZone.zoneB.weight
                 matchDetails.append((token, .zoneB))
+                matchedSynonymGroups.insert(synonymGroup)  // ⭐ 标记该同义词组已计分
             } else if zonedText.zoneC.contains(lowercasedToken) {
                 score += FieldZone.zoneC.weight
                 matchDetails.append((token, .zoneC))

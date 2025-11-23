@@ -210,9 +210,23 @@ struct BrewNetMatchesView: View {
             if let userId = authManager.currentUser?.id {
                 SubscriptionPaymentView(currentUserId: userId) {
                     Task {
+                        // 刷新用户信息
                         await authManager.refreshUser()
+                        // 清除 Pro 状态缓存，强制重新检查
+                        await MainActor.run {
+                            currentUserIsPro = nil
+                        }
+                        // 重新加载 Pro 状态
+                        preloadCurrentUserProStatus()
                     }
                 }
+            }
+        }
+        .onChange(of: authManager.currentUser?.isProActive) { isPro in
+            // 当用户的 Pro 状态变化时，更新缓存
+            if let isPro = isPro {
+                currentUserIsPro = isPro
+                print("✅ [临时聊天] Pro 状态已更新: \(isPro ? "Pro用户" : "普通用户")")
             }
         }
         .alert("No Connects Left", isPresented: $showInviteLimitAlert) {

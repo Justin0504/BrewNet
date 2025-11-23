@@ -372,17 +372,28 @@ struct ExploreMainView: View {
                 )
                 print("  ⏱️  Recall: \(Date().timeIntervalSince(step1) * 1000)ms")
                 
-                // 3. V2.0 升级的排序逻辑
+                // 3. 先验证推荐的用户是否仍然存在（过滤已删除的用户）
+                let step1_5 = Date()
+                let validRecommendations = await validateRecommendations(recommendations)
+                print("  ⏱️  Validation: \(Date().timeIntervalSince(step1_5) * 1000)ms (filtered \(recommendations.count - validRecommendations.count) deleted users)")
+                
+                // 4. V2.0 升级的排序逻辑（只对有效的推荐进行排序）
                 let step2 = Date()
                 let ranked = rankRecommendationsV2(
-                    recommendations, 
+                    validRecommendations, 
                     parsedQuery: parsedQuery,
                     currentUserProfile: currentUserProfile
                 )
                 print("  ⏱️  Ranking: \(Date().timeIntervalSince(step2) * 1000)ms")
                 
                 let topProfiles = Array(ranked.prefix(5))
-                let topIds = topProfiles.map { $0.userId }
+                
+                // 最终验证：确保所有 Top 5 用户仍然存在（双重检查）
+                let step2_5 = Date()
+                let finalValidProfiles = await validateProfilesExist(topProfiles)
+                print("  ⏱️  Final Validation: \(Date().timeIntervalSince(step2_5) * 1000)ms (filtered \(topProfiles.count - finalValidProfiles.count) deleted users)")
+                
+                let topIds = finalValidProfiles.map { $0.userId }
                 
                 var fetchedProIds = Set<String>()
                 var fetchedVerifiedIds = Set<String>()
@@ -400,10 +411,10 @@ struct ExploreMainView: View {
                 }
                 
                 print("  ⏱️  Total time: \(Date().timeIntervalSince(searchStart) * 1000)ms")
-                print("  ✅ Top 5 selected from \(recommendations.count) candidates\n")
+                print("  ✅ Top \(finalValidProfiles.count) selected from \(recommendations.count) candidates (after filtering deleted users)\n")
                 
                 await MainActor.run {
-                    self.recommendedProfiles = topProfiles
+                    self.recommendedProfiles = finalValidProfiles
                     // 触发结果动画
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         withAnimation {
@@ -424,6 +435,52 @@ struct ExploreMainView: View {
                 }
             }
         }
+    }
+    
+    // MARK: - Validation
+    
+    /// 验证推荐用户是否仍然存在（过滤已删除的用户）
+    private func validateRecommendations(
+        _ recommendations: [(userId: String, score: Double, profile: BrewNetProfile)]
+    ) async -> [(userId: String, score: Double, profile: BrewNetProfile)] {
+        var validRecommendations: [(userId: String, score: Double, profile: BrewNetProfile)] = []
+        
+        // 批量验证用户是否存在
+        let userIds = recommendations.map { $0.userId }
+        let profilesDict = try? await supabaseService.getProfilesBatch(userIds: userIds)
+        
+        for item in recommendations {
+            // 只保留仍然存在的用户
+            if profilesDict?[item.userId] != nil {
+                validRecommendations.append(item)
+            } else {
+                print("⚠️ [验证] 用户 \(item.userId) (\(item.profile.coreIdentity.name)) 已被删除，已过滤")
+            }
+        }
+        
+        return validRecommendations
+    }
+    
+    /// 最终验证：确保所有 profile 仍然存在（双重检查）
+    private func validateProfilesExist(
+        _ profiles: [BrewNetProfile]
+    ) async -> [BrewNetProfile] {
+        var validProfiles: [BrewNetProfile] = []
+        
+        // 批量验证用户是否存在
+        let userIds = profiles.map { $0.userId }
+        let profilesDict = try? await supabaseService.getProfilesBatch(userIds: userIds)
+        
+        for profile in profiles {
+            // 只保留仍然存在的用户
+            if profilesDict?[profile.userId] != nil {
+                validProfiles.append(profile)
+            } else {
+                print("⚠️ [最终验证] 用户 \(profile.userId) (\(profile.coreIdentity.name)) 已被删除，已从结果中移除")
+            }
+        }
+        
+        return validProfiles
     }
     
     // MARK: - Ranking Logic V2.0
