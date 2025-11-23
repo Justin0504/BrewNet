@@ -193,18 +193,6 @@ struct LoginView: View {
                                     .foregroundColor(.gray)
                                     .multilineTextAlignment(.center)
                                     .padding(.horizontal, 20)
-                                
-                                // 调试按钮：清除所有数据
-                                Button("Clear All Data (Debug)") {
-                                    print("🧹 Clear data button clicked")
-                                    authManager.forceLogout()
-                                }
-                                .font(.caption)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(Color.red.opacity(0.1))
-                                .foregroundColor(.red)
-                                .cornerRadius(8)
                             }
                         }
                         .padding(.horizontal, 32)
