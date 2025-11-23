@@ -2868,41 +2868,72 @@ class SupabaseService: ObservableObject {
     /// 临时消息是指：1. message_type 为 "temporary"，或 2. 在两个用户之间还没有匹配记录时的消息
     /// 参数说明：userId1 和 userId2 是任意顺序的两个用户ID，方法会查询这两个用户之间的所有临时消息
     func getTemporaryMessagesFromSender(receiverId: String, senderId: String) async throws -> [SupabaseMessage] {
-        // 使用更通用的参数名，因为这是双向查询
         let userId1 = receiverId
         let userId2 = senderId
-        print("🔍 [临时消息-优化] 开始快速查询: userId1=\(userId1), userId2=\(userId2)")
+        print("🚀 [临时消息-极速] 开始并行查询: userId1=\(userId1), userId2=\(userId2)")
         
-        // 🆕 优化：使用简化的查询，只查询 message_type = 'temporary' 的消息
-        // 这样不需要检查匹配状态，大大提升速度
-        let response = try await client
+        // 🎯 关键优化：使用两个简单的 eq 查询代替复杂的 or 查询
+        // 这样和左上角按钮的逻辑一样，速度会快很多！
+        
+        let startTime = Date()
+        
+        // 第一个查询：发送给我的消息（userId2 -> userId1）
+        async let receivedTask = client
             .from(SupabaseTable.messages.rawValue)
             .select()
+            .eq("receiver_id", value: userId1)
+            .eq("sender_id", value: userId2)
             .eq("message_type", value: "temporary")
-            .or("and(sender_id.eq.\(userId1),receiver_id.eq.\(userId2)),and(sender_id.eq.\(userId2),receiver_id.eq.\(userId1))")
             .order("timestamp", ascending: true)
             .execute()
         
-        let data = response.data
+        // 第二个查询：我发送的消息（userId1 -> userId2）
+        async let sentTask = client
+            .from(SupabaseTable.messages.rawValue)
+            .select()
+            .eq("receiver_id", value: userId2)
+            .eq("sender_id", value: userId1)
+            .eq("message_type", value: "temporary")
+            .order("timestamp", ascending: true)
+            .execute()
         
-        // 🆕 简化解析：只解析 message_type = 'temporary' 的消息
-        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-            print("❌ [临时消息-优化] 解析响应失败")
+        // 并行等待两个查询完成
+        let (receivedResponse, sentResponse) = try await (receivedTask, sentTask)
+        
+        let elapsed = Date().timeIntervalSince(startTime)
+        print("⚡️ [临时消息-极速] 并行查询完成，耗时: \(String(format: "%.2f", elapsed * 1000))ms")
+        
+        // 解析两个响应
+        guard let receivedArray = try? JSONSerialization.jsonObject(with: receivedResponse.data) as? [[String: Any]],
+              let sentArray = try? JSONSerialization.jsonObject(with: sentResponse.data) as? [[String: Any]] else {
+            print("❌ [临时消息-极速] 解析响应失败")
             throw ProfileError.fetchFailed("Failed to parse temporary messages response")
         }
         
-        print("✅ [临时消息-优化] 查询到 \(jsonArray.count) 条临时消息（已优化）")
+        print("📊 [临时消息-极速] 收到 \(receivedArray.count) 条，发送 \(sentArray.count) 条")
         
-        var messages: [SupabaseMessage] = []
-        for json in jsonArray {
+        // 合并两个数组
+        var allMessages: [SupabaseMessage] = []
+        
+        for json in receivedArray {
             if let messageData = try? JSONSerialization.data(withJSONObject: json),
                let message = try? JSONDecoder().decode(SupabaseMessage.self, from: messageData) {
-                messages.append(message)
+                allMessages.append(message)
             }
         }
         
-        print("✅ [临时消息-优化] 返回 \(messages.count) 条临时消息（耗时更短）")
-        return messages
+        for json in sentArray {
+            if let messageData = try? JSONSerialization.data(withJSONObject: json),
+               let message = try? JSONDecoder().decode(SupabaseMessage.self, from: messageData) {
+                allMessages.append(message)
+            }
+        }
+        
+        // 按时间排序
+        allMessages.sort(by: { $0.timestamp < $1.timestamp })
+        
+        print("✅ [临时消息-极速] 返回 \(allMessages.count) 条消息（总耗时: \(String(format: "%.2f", elapsed * 1000))ms）")
+        return allMessages
     }
     
     /// 获取我发送的所有临时消息
