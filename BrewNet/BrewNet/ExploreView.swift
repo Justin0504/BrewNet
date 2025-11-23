@@ -28,9 +28,21 @@ struct ExploreMainView: View {
     @State private var showHeaderAnimation = false
     @State private var showResults = false
     @State private var currentUserIsPro: Bool? = nil  // ⭐ 缓存当前用户的 Pro 状态
+    @State private var loadingMessageIndex = 0  // ⭐ 加载消息索引
+    @State private var loadingProgress: Double = 0.0  // ⭐ 加载进度
+    @State private var loadingTimer: Timer? = nil  // ⭐ 加载动画定时器
     
     private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
     private var backgroundColor: Color { Color(red: 0.98, green: 0.97, blue: 0.95) }
+    
+    // ⭐ 动态加载消息
+    private let loadingMessages = [
+        "Scanning BrewNet profiles...",
+        "Analyzing skills and experience...",
+        "Matching your requirements...",
+        "Finding perfect connections...",
+        "Almost there..."
+    ]
     
     var body: some View {
         NavigationStack {
@@ -137,18 +149,59 @@ struct ExploreMainView: View {
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
-                Image(systemName: "sparkle.magnifyingglass")
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundColor(themeColor)
-                    .modifier(PulseAnimationModifier())
+                ZStack {
+                    // 背景光效
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                gradient: Gradient(colors: [
+                                    themeColor.opacity(0.2),
+                                    themeColor.opacity(0.0)
+                                ]),
+                                center: .center,
+                                startRadius: 0,
+                                endRadius: 30
+                            )
+                        )
+                        .frame(width: 50, height: 50)
+                        .blur(radius: 8)
+                        .opacity(showHeaderAnimation ? 1 : 0)
+                    
+                    Image(systemName: "sparkle.magnifyingglass")
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundStyle(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    themeColor,
+                                    themeColor.opacity(0.7),
+                                    themeColor
+                                ]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .modifier(PulseAnimationModifier())
+                }
                 
                 Text("Talent Scout")
                     .font(.system(size: 32, weight: .bold))
-                    .foregroundColor(themeColor)
+                    .foregroundStyle(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                themeColor,
+                                Color(red: 0.5, green: 0.3, blue: 0.15),
+                                themeColor
+                            ]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .shadow(color: themeColor.opacity(0.2), radius: 2, x: 0, y: 1)
             }
         }
         .opacity(showHeaderAnimation ? 1 : 0)
         .scaleEffect(showHeaderAnimation ? 1 : 0.8)
+        .offset(y: showHeaderAnimation ? 0 : -10)
         .animation(.spring(response: 0.6, dampingFraction: 0.8), value: showHeaderAnimation)
         .onAppear {
             withAnimation {
@@ -168,14 +221,42 @@ struct ExploreMainView: View {
     
     private var inputSection: some View {
         ZStack(alignment: .topLeading) {
+            // 渐变背景 + 玻璃态效果
             RoundedRectangle(cornerRadius: 20)
-                .fill(Color.white)
+                .fill(
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            Color.white,
+                            Color.white.opacity(0.95)
+                        ]),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
                 .overlay(
                     RoundedRectangle(cornerRadius: 20)
-                        .stroke(textEditorFocused ? themeColor.opacity(0.7) : Color.gray.opacity(0.2), lineWidth: textEditorFocused ? 2 : 1.5)
+                        .stroke(
+                            LinearGradient(
+                                gradient: Gradient(colors: textEditorFocused ? [
+                                    themeColor.opacity(0.8),
+                                    themeColor.opacity(0.5)
+                                ] : [
+                                    Color.gray.opacity(0.2),
+                                    Color.gray.opacity(0.1)
+                                ]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: textEditorFocused ? 2.5 : 1.5
+                        )
                 )
-                .shadow(color: textEditorFocused ? themeColor.opacity(0.2) : Color.black.opacity(0.05), radius: textEditorFocused ? 12 : 8, x: 0, y: 4)
-                .scaleEffect(textEditorFocused ? 1.01 : 1.0)
+                .shadow(
+                    color: textEditorFocused ? themeColor.opacity(0.25) : Color.black.opacity(0.05),
+                    radius: textEditorFocused ? 16 : 8,
+                    x: 0,
+                    y: textEditorFocused ? 6 : 4
+                )
+                .scaleEffect(textEditorFocused ? 1.02 : 1.0)
             
             TextEditor(text: $descriptionText)
                 .focused($textEditorFocused)
@@ -194,6 +275,21 @@ struct ExploreMainView: View {
                     .padding(.vertical, 16)
                     .allowsHitTesting(false)
             }
+            
+            // 字符计数（可选，显示在右下角）
+            if !descriptionText.isEmpty {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Text("\(descriptionText.count)")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(descriptionText.count > 500 ? .orange : .gray.opacity(0.6))
+                            .padding(.trailing, 16)
+                            .padding(.bottom, 12)
+                    }
+                }
+            }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: textEditorFocused)
         .opacity(showHeaderAnimation ? 1 : 0)
@@ -208,37 +304,87 @@ struct ExploreMainView: View {
             impactFeedback.impactOccurred()
             runTalentScoutSearch()
         }) {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 if isLoading {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        .scaleEffect(0.8)
+                    // 自定义加载动画：旋转的放大镜 + 粒子效果
+                    ZStack {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(0.9)
+                        
+                        // 旋转的放大镜图标
+                        Image(systemName: "sparkle.magnifyingglass")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.9))
+                            .rotationEffect(.degrees(isLoading ? 360 : 0))
+                            .animation(.linear(duration: 2).repeatForever(autoreverses: false), value: isLoading)
+                    }
                 } else {
                     Image(systemName: "sparkle.magnifyingglass")
+                        .font(.system(size: 18, weight: .semibold))
                         .modifier(PulseAnimationModifier())
                 }
                 Text(isLoading ? "Scouting..." : "Start Scouting")
-                    .fontWeight(.bold)
+                    .font(.system(size: 17, weight: .bold))
             }
             .frame(maxWidth: .infinity)
-            .padding()
+            .padding(.vertical, 16)
             .foregroundColor(.white)
             .background(
                 Group {
                     if isLoading {
+                        // 加载时的渐变（更丰富的颜色）
                         LinearGradient(
-                            gradient: Gradient(colors: [themeColor, themeColor.opacity(0.8)]),
+                            gradient: Gradient(colors: [
+                                themeColor,
+                                themeColor.opacity(0.85),
+                                themeColor.opacity(0.75)
+                            ]),
                             startPoint: .leading,
                             endPoint: .trailing
                         )
                     } else {
-                        isSearchDisabled ? Color.gray : themeColor
+                        // 正常状态的丰富渐变
+                        isSearchDisabled ? 
+                        LinearGradient(
+                            gradient: Gradient(colors: [Color.gray, Color.gray.opacity(0.8)]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ) :
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                themeColor,
+                                Color(red: 0.5, green: 0.3, blue: 0.15),
+                                themeColor.opacity(0.9)
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     }
                 }
             )
-            .cornerRadius(16)
-            .shadow(color: isSearchDisabled ? Color.clear : themeColor.opacity(0.3), radius: isLoading ? 8 : 4, x: 0, y: 4)
-            .scaleEffect(isLoading ? 0.98 : 1.0)
+            .cornerRadius(18)
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.white.opacity(0.3),
+                                Color.white.opacity(0.1)
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(
+                color: isSearchDisabled ? Color.clear : themeColor.opacity(isLoading ? 0.4 : 0.35),
+                radius: isLoading ? 12 : 8,
+                x: 0,
+                y: isLoading ? 6 : 4
+            )
+            .scaleEffect(isLoading ? 0.97 : 1.0)
         }
         .disabled(isSearchDisabled)
         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isLoading)
@@ -250,16 +396,70 @@ struct ExploreMainView: View {
     private var statusSection: some View {
         Group {
             if isLoading {
-                HStack(spacing: 12) {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: themeColor))
-                        .scaleEffect(1.1)
-                    Text("Scanning BrewNet profiles for the best matches...")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(.gray)
+                VStack(spacing: 16) {
+                    // 骨架屏预览（显示3个骨架卡片）
+                    VStack(spacing: 12) {
+                        ForEach(0..<3, id: \.self) { index in
+                            LoadingSkeletonCard(delay: Double(index) * 0.1)
+                        }
+                    }
+                    .padding(.top, 8)
+                    
+                    // 加载状态指示器
+                    VStack(spacing: 12) {
+                        // 进度条
+                        GeometryReader { geometry in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color.gray.opacity(0.2))
+                                    .frame(height: 6)
+                                
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [themeColor, themeColor.opacity(0.7)]),
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: geometry.size.width * loadingProgress, height: 6)
+                                    .animation(.easeInOut(duration: 0.3), value: loadingProgress)
+                            }
+                        }
+                        .frame(height: 6)
+                        .padding(.horizontal, 20)
+                        
+                        // 动态加载消息
+                        HStack(spacing: 12) {
+                            // 旋转的放大镜图标
+                            ZStack {
+                                Circle()
+                                    .stroke(themeColor.opacity(0.2), lineWidth: 3)
+                                    .frame(width: 24, height: 24)
+                                
+                                Image(systemName: "sparkle.magnifyingglass")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(themeColor)
+                                    .rotationEffect(.degrees(loadingProgress * 360))
+                                    .animation(.linear(duration: 2).repeatForever(autoreverses: false), value: loadingProgress)
+                            }
+                            
+                            Text(loadingMessages[loadingMessageIndex])
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(.gray)
+                                .id(loadingMessageIndex)  // 用于动画
+                        }
+                        .padding(.top, 4)
+                    }
                 }
                 .padding(.top, 8)
                 .transition(.opacity.combined(with: .move(edge: .top)))
+                .onAppear {
+                    startLoadingAnimation()
+                }
+                .onDisappear {
+                    stopLoadingAnimation()
+                }
             } else if let errorMessage = errorMessage {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -293,14 +493,51 @@ struct ExploreMainView: View {
         VStack(alignment: .leading, spacing: 16) {
             if !recommendedProfiles.isEmpty {
                 HStack(spacing: 8) {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 16))
-                        .foregroundColor(themeColor)
-                        .modifier(PulseAnimationModifier())
+                    ZStack {
+                        // 星星背景光效
+                        Circle()
+                            .fill(
+                                RadialGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(red: 1.0, green: 0.84, blue: 0.0).opacity(0.3),
+                                        Color.clear
+                                    ]),
+                                    center: .center,
+                                    startRadius: 0,
+                                    endRadius: 15
+                                )
+                            )
+                            .frame(width: 30, height: 30)
+                            .blur(radius: 4)
+                        
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(red: 1.0, green: 0.84, blue: 0.0),
+                                        Color(red: 1.0, green: 0.75, blue: 0.0)
+                                    ]),
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .modifier(PulseAnimationModifier())
+                    }
                     
                     Text("Top 5 matches")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(themeColor)
+                        .foregroundStyle(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    themeColor,
+                                    Color(red: 0.5, green: 0.3, blue: 0.15)
+                                ]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .shadow(color: themeColor.opacity(0.1), radius: 1, x: 0, y: 1)
                 }
                 .opacity(showResults ? 1 : 0)
                 .offset(x: showResults ? 0 : -20)
@@ -313,16 +550,49 @@ struct ExploreMainView: View {
                         rank: entry.offset + 1,
                         isEngaged: engagedProfileIds.contains(profile.userId),
                         onTap: {
+                            // 添加触觉反馈
+                            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                            impactFeedback.impactOccurred()
                             selectedProfile = profile
                         }
                     )
                     .opacity(showResults ? 1 : 0)
-                    .offset(y: showResults ? 0 : 30)
-                    .scaleEffect(showResults ? 1 : 0.9)
+                    .offset(
+                        x: showResults ? 0 : -20,
+                        y: showResults ? 0 : 30
+                    )
+                    .scaleEffect(showResults ? 1 : 0.85)
+                    .rotationEffect(.degrees(showResults ? 0 : -5))
                     .animation(
-                        .spring(response: 0.6, dampingFraction: 0.75)
-                        .delay(Double(entry.offset) * 0.1 + 0.2),
+                        .spring(response: 0.7, dampingFraction: 0.75)
+                        .delay(Double(entry.offset) * 0.08 + 0.15),
                         value: showResults
+                    )
+                    // ⭐ 添加光效动画（Top 3）
+                    .overlay(
+                        Group {
+                            if entry.offset < 3 && showResults {
+                                RoundedRectangle(cornerRadius: 20)
+                                    .stroke(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                rankBorderColorForIndex(entry.offset + 1).opacity(0.6),
+                                                rankBorderColorForIndex(entry.offset + 1).opacity(0.0)
+                                            ]),
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        ),
+                                        lineWidth: 2
+                                    )
+                                    .opacity(showResults ? 1 : 0)
+                                    .animation(
+                                        .easeInOut(duration: 2.0)
+                                        .repeatForever(autoreverses: true)
+                                        .delay(Double(entry.offset) * 0.3),
+                                        value: showResults
+                                    )
+                            }
+                        }
                     )
                 }
             }
@@ -336,6 +606,16 @@ struct ExploreMainView: View {
             } else {
                 showResults = false
             }
+        }
+    }
+    
+    // ⭐ 辅助函数：根据排名索引获取边框颜色
+    private func rankBorderColorForIndex(_ rank: Int) -> Color {
+        switch rank {
+        case 1: return Color(red: 1.0, green: 0.84, blue: 0.0)  // 金色
+        case 2: return Color(red: 0.75, green: 0.75, blue: 0.75)  // 银色
+        case 3: return Color(red: 0.8, green: 0.5, blue: 0.2)  // 铜色
+        default: return themeColor
         }
     }
     
@@ -357,10 +637,12 @@ struct ExploreMainView: View {
             return
         }
         
-        isLoading = true
+                isLoading = true
         errorMessage = nil
         hasSearched = true
         textEditorFocused = false
+        loadingProgress = 0.0
+        loadingMessageIndex = 0
         
         Task {
             let searchStart = Date()
@@ -377,12 +659,20 @@ struct ExploreMainView: View {
                 
                 // ===== V2.0: NLP 增强 =====
                 // 1. 解析查询
+                await MainActor.run {
+                    loadingProgress = 0.2
+                    loadingMessageIndex = 1
+                }
                 let parsedQuery = queryParser.parse(trimmed)
                 print("\n📊 Query Analysis:")
                 print("  - Difficulty: \(parsedQuery.difficulty)")
                 print("  - Summary: \(parsedQuery.summary)")
                 
                 // 2. 获取推荐候选池（扩大到100人）
+                await MainActor.run {
+                    loadingProgress = 0.4
+                    loadingMessageIndex = 2
+                }
                 let step1 = Date()
                 let recommendations = try await recommendationService.getRecommendations(
                     for: currentUser.id,
@@ -392,11 +682,19 @@ struct ExploreMainView: View {
                 print("  ⏱️  Recall: \(Date().timeIntervalSince(step1) * 1000)ms")
                 
                 // 3. 先验证推荐的用户是否仍然存在（过滤已删除的用户）
+                await MainActor.run {
+                    loadingProgress = 0.6
+                    loadingMessageIndex = 3
+                }
                 let step1_5 = Date()
                 let validRecommendations = await validateRecommendations(recommendations)
                 print("  ⏱️  Validation: \(Date().timeIntervalSince(step1_5) * 1000)ms (filtered \(recommendations.count - validRecommendations.count) deleted users)")
                 
                 // 4. V2.0 升级的排序逻辑（只对有效的推荐进行排序）
+                await MainActor.run {
+                    loadingProgress = 0.8
+                    loadingMessageIndex = 4
+                }
                 let step2 = Date()
                 let ranked = rankRecommendationsV2(
                     validRecommendations, 
@@ -404,6 +702,14 @@ struct ExploreMainView: View {
                     currentUserProfile: currentUserProfile
                 )
                 print("  ⏱️  Ranking: \(Date().timeIntervalSince(step2) * 1000)ms")
+                
+                await MainActor.run {
+                    loadingProgress = 1.0
+                }
+                
+                await MainActor.run {
+                    loadingProgress = 1.0
+                }
                 
                 let topProfiles = Array(ranked.prefix(5))
                 
@@ -982,6 +1288,52 @@ struct ExploreMainView: View {
         }
     }
     
+    // MARK: - 加载动画管理
+    
+    /// 开始加载动画
+    private func startLoadingAnimation() {
+        // 重置状态
+        loadingProgress = 0.0
+        loadingMessageIndex = 0
+        
+        // 进度条动画（模拟进度）
+        loadingTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
+            if self.isLoading {
+                Task { @MainActor in
+                    withAnimation(.easeInOut(duration: 0.1)) {
+                        // 渐进式增加进度（但不超过当前实际进度）
+                        if self.loadingProgress < 0.95 {
+                            self.loadingProgress += 0.02
+                        }
+                    }
+                }
+            } else {
+                timer.invalidate()
+            }
+        }
+        
+        // 动态加载消息轮播
+        Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { timer in
+            if self.isLoading {
+                Task { @MainActor in
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        self.loadingMessageIndex = (self.loadingMessageIndex + 1) % self.loadingMessages.count
+                    }
+                }
+            } else {
+                timer.invalidate()
+            }
+        }
+    }
+    
+    /// 停止加载动画
+    private func stopLoadingAnimation() {
+        loadingTimer?.invalidate()
+        loadingTimer = nil
+        loadingProgress = 0.0
+        loadingMessageIndex = 0
+    }
+    
     private func handleCoffeeChatConnect(profile: BrewNetProfile) async {
         guard let currentUser = authManager.currentUser else { return }
         do {
@@ -1031,26 +1383,78 @@ struct TalentScoutResultCard: View {
     
     private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
     
+    @State private var isPressed = false
+    @State private var isHovered = false
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
+                // ⭐ 重新设计的排名徽章
                 HStack(spacing: 6) {
-                    Text("#\(rank)")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(themeColor)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(themeColor.opacity(0.1))
-                        .cornerRadius(12)
+                    ZStack {
+                        // 渐变背景
+                        RoundedRectangle(cornerRadius: rank <= 3 ? 14 : 12)
+                            .fill(rankBadgeGradient)
+                            .frame(width: rank <= 3 ? 50 : 45, height: rank <= 3 ? 28 : 26)
+                            .shadow(
+                                color: rank <= 3 ? Color.black.opacity(0.2) : Color.clear,
+                                radius: rank <= 3 ? 4 : 0,
+                                x: 0,
+                                y: rank <= 3 ? 2 : 0
+                            )
+                        
+                        HStack(spacing: 4) {
+                            if rank <= 3 {
+                                Image(systemName: rankIcon)
+                                    .font(.system(size: rank == 1 ? 14 : 12, weight: .bold))
+                                    .foregroundColor(.white)
+                            }
+                            Text("#\(rank)")
+                                .font(.system(size: rank <= 3 ? 16 : 14, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                    }
                     
                     if isEngaged {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(Color.green)
-                            .font(.system(size: 18, weight: .bold))
+                            .font(.system(size: 20, weight: .bold))
+                            .shadow(color: Color.green.opacity(0.3), radius: 4, x: 0, y: 2)
+                            .scaleEffect(isHovered ? 1.1 : 1.0)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isHovered)
                     }
                 }
                 
                 Spacer()
+                
+                // ⭐ 匹配度指示器（模拟，实际应从评分计算）
+                HStack(spacing: 4) {
+                    ForEach(0..<5, id: \.self) { index in
+                        Image(systemName: index < matchScoreStars ? "star.fill" : "star")
+                            .font(.system(size: 10))
+                            .foregroundColor(index < matchScoreStars ? Color(red: 1.0, green: 0.84, blue: 0.0) : Color.gray.opacity(0.3))
+                            .scaleEffect(isHovered && index < matchScoreStars ? 1.2 : 1.0)
+                            .animation(
+                                .spring(response: 0.3, dampingFraction: 0.6)
+                                .delay(Double(index) * 0.05),
+                                value: isHovered
+                            )
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            Color.white.opacity(0.9),
+                            Color.white.opacity(0.7)
+                        ]),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .cornerRadius(8)
+                .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
                 
                 Text(profile.professionalBackground.experienceLevel.displayName)
                     .font(.system(size: 13, weight: .semibold))
@@ -1064,22 +1468,43 @@ struct TalentScoutResultCard: View {
                     Text(profile.coreIdentity.name)
                         .font(.system(size: 20, weight: .bold))
                         .foregroundColor(.black)
+                        .shadow(color: Color.black.opacity(0.05), radius: 1, x: 0, y: 1)
                     
                     Text(primaryHeadline)
                         .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(themeColor)
+                        .foregroundStyle(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    themeColor,
+                                    themeColor.opacity(0.8)
+                                ]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
                         .lineLimit(2)
                     
                     if let location = profile.coreIdentity.location, !location.isEmpty {
                         HStack(spacing: 6) {
                             Image(systemName: "mappin.circle.fill")
                                 .font(.system(size: 13))
-                                .foregroundColor(.gray)
+                                .foregroundStyle(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [
+                                            Color.red.opacity(0.7),
+                                            Color.orange.opacity(0.6)
+                                        ]),
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
                             Text(location)
                                 .font(.system(size: 13))
                                 .foregroundColor(.gray)
                                 .lineLimit(1)
                         }
+                        .opacity(isHovered ? 1.0 : 0.9)
+                        .animation(.easeInOut(duration: 0.2), value: isHovered)
                     }
                     
                     if let bio = profile.coreIdentity.bio, !bio.isEmpty {
@@ -1092,27 +1517,237 @@ struct TalentScoutResultCard: View {
             }
             
             if !skillsPreview.isEmpty {
-                HStack {
-                    ForEach(skillsPreview, id: \.self) { skill in
+                HStack(spacing: 8) {
+                    ForEach(Array(skillsPreview.enumerated()), id: \.element) { index, skill in
                         Text(skill)
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(themeColor)
                             .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(themeColor.opacity(0.08))
+                            .padding(.vertical, 5)
+                            .background(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        themeColor.opacity(isHovered ? 0.18 : 0.12),
+                                        themeColor.opacity(isHovered ? 0.14 : 0.08)
+                                    ]),
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
                             .cornerRadius(10)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                themeColor.opacity(isHovered ? 0.3 : 0.2),
+                                                themeColor.opacity(isHovered ? 0.25 : 0.15)
+                                            ]),
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        ),
+                                        lineWidth: isHovered ? 0.8 : 0.5
+                                    )
+                            )
+                            .scaleEffect(isHovered ? 1.05 : 1.0)
+                            .animation(
+                                .spring(response: 0.3, dampingFraction: 0.7)
+                                .delay(Double(index) * 0.05),
+                                value: isHovered
+                            )
                     }
                 }
                 .padding(.top, 4)
             }
         }
-        .padding(18)
-        .background(Color.white)
+        .padding(20)
+        .background(
+            // ⭐ 渐变背景 + 左侧彩色边框 + 光效
+            ZStack(alignment: .leading) {
+                // 主背景渐变（悬停时更亮）
+                LinearGradient(
+                    gradient: Gradient(colors: isHovered ? [
+                        Color.white,
+                        Color(red: 0.995, green: 0.99, blue: 0.98)
+                    ] : [
+                        Color.white,
+                        Color(red: 0.99, green: 0.98, blue: 0.97)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                
+                // 左侧彩色边框条（根据排名变色，悬停时更亮）
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                rankBorderColor,
+                                rankBorderColor.opacity(isHovered ? 0.9 : 0.7)
+                            ]),
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: isHovered ? 5 : 4)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
+                
+                // 光效（悬停时显示）
+                if isHovered && rank <= 3 {
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(
+                            RadialGradient(
+                                gradient: Gradient(colors: [
+                                    rankBorderColor.opacity(0.1),
+                                    Color.clear
+                                ]),
+                                center: .topLeading,
+                                startRadius: 0,
+                                endRadius: 150
+                            )
+                        )
+                }
+            }
+        )
         .cornerRadius(20)
-        .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 6)
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(
+                    LinearGradient(
+                        gradient: Gradient(colors: isHovered ? [
+                            Color.white.opacity(0.9),
+                            rankBorderColor.opacity(0.2),
+                            Color.gray.opacity(0.1)
+                        ] : [
+                            Color.white.opacity(0.8),
+                            Color.gray.opacity(0.1)
+                        ]),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: isHovered ? 1.5 : 1
+                )
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
+        )
+        .shadow(
+            color: rank <= 3 ? 
+                (isHovered ? Color.black.opacity(0.15) : Color.black.opacity(0.12)) :
+                (isHovered ? Color.black.opacity(0.1) : Color.black.opacity(0.08)),
+            radius: rank <= 3 ? (isHovered ? 16 : 12) : (isHovered ? 14 : 10),
+            x: 0,
+            y: rank <= 3 ? (isHovered ? 10 : 8) : (isHovered ? 8 : 6)
+        )
+        .scaleEffect(isPressed ? 0.97 : (isHovered ? 1.02 : 1.0))
+        .offset(y: isPressed ? 2 : 0)
+        .rotationEffect(.degrees(isHovered ? 0.5 : 0))
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
+        .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isPressed)
+        // ⭐ 限制点击区域：使用 contentShape 精确控制点击范围，只响应卡片内容区域的点击
         .contentShape(RoundedRectangle(cornerRadius: 20))
         .onTapGesture {
+            // 触觉反馈
+            let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+            impactFeedback.impactOccurred()
             onTap?()
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 5)  // ⭐ 设置最小距离，允许滚动
+                .onChanged { value in
+                    // 只有在很小的移动范围内才认为是按压
+                    if abs(value.translation.width) < 5 && abs(value.translation.height) < 5 {
+                        withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
+                            isPressed = true
+                            isHovered = true
+                        }
+                    } else {
+                        // 如果移动距离较大，取消按压状态，允许滚动
+                        withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
+                            isPressed = false
+                            isHovered = false
+                        }
+                    }
+                }
+                .onEnded { value in
+                    withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
+                        isPressed = false
+                        isHovered = false
+                    }
+                    // 如果移动距离很小，认为是点击
+                    if abs(value.translation.width) < 5 && abs(value.translation.height) < 5 {
+                        let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+                        impactFeedback.impactOccurred()
+                        onTap?()
+                    }
+                }
+        )
+    }
+    
+    // ⭐ 排名徽章颜色（Top 3 特殊设计）
+    private var rankBadgeGradient: LinearGradient {
+        switch rank {
+        case 1:
+            return LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(red: 1.0, green: 0.84, blue: 0.0),  // 金色
+                    Color(red: 1.0, green: 0.75, blue: 0.0)
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        case 2:
+            return LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(red: 0.75, green: 0.75, blue: 0.75),  // 银色
+                    Color(red: 0.6, green: 0.6, blue: 0.6)
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        case 3:
+            return LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(red: 0.8, green: 0.5, blue: 0.2),  // 铜色
+                    Color(red: 0.7, green: 0.4, blue: 0.15)
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        default:
+            return LinearGradient(
+                gradient: Gradient(colors: [themeColor, themeColor.opacity(0.8)]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+    }
+    
+    // ⭐ 排名图标
+    private var rankIcon: String {
+        switch rank {
+        case 1: return "crown.fill"
+        case 2: return "medal.fill"
+        case 3: return "rosette"
+        default: return "star.fill"
+        }
+    }
+    
+    // ⭐ 匹配度星级（模拟，实际应从评分计算）
+    private var matchScoreStars: Int {
+        // 根据排名计算匹配度（Top 1 = 5星，Top 2-3 = 4星，其他 = 3星）
+        switch rank {
+        case 1: return 5
+        case 2, 3: return 4
+        default: return 3
+        }
+    }
+    
+    // ⭐ 排名边框颜色
+    private var rankBorderColor: Color {
+        switch rank {
+        case 1: return Color(red: 1.0, green: 0.84, blue: 0.0)  // 金色
+        case 2: return Color(red: 0.75, green: 0.75, blue: 0.75)  // 银色
+        case 3: return Color(red: 0.8, green: 0.5, blue: 0.2)  // 铜色
+        default: return themeColor
         }
     }
     
@@ -1174,6 +1809,87 @@ struct TalentScoutResultCard: View {
     
     private var skillsPreview: [String] {
         Array(profile.professionalBackground.skills.prefix(3))
+    }
+}
+
+// MARK: - Loading Skeleton Card
+struct LoadingSkeletonCard: View {
+    let delay: Double
+    @State private var isAnimating = false
+    
+    private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                // 排名徽章骨架
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(width: 45, height: 26)
+                
+                Spacer()
+                
+                // 匹配度骨架
+                HStack(spacing: 4) {
+                    ForEach(0..<5, id: \.self) { _ in
+                        Circle()
+                            .fill(Color.gray.opacity(0.2))
+                            .frame(width: 10, height: 10)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(8)
+            }
+            
+            HStack(alignment: .top, spacing: 16) {
+                // 头像骨架
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(width: 64, height: 64)
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    // 姓名骨架
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(width: 120, height: 20)
+                    
+                    // 职位骨架
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.gray.opacity(0.15))
+                        .frame(width: 180, height: 16)
+                    
+                    // 位置骨架
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.gray.opacity(0.15))
+                        .frame(width: 100, height: 14)
+                }
+            }
+            
+            // 技能标签骨架
+            HStack(spacing: 8) {
+                ForEach(0..<3, id: \.self) { _ in
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.gray.opacity(0.15))
+                        .frame(width: 60, height: 24)
+                }
+            }
+        }
+        .padding(20)
+        .background(Color.white)
+        .cornerRadius(20)
+        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+        .opacity(isAnimating ? 0.6 : 1.0)
+        .onAppear {
+            withAnimation(
+                .easeInOut(duration: 1.2)
+                .repeatForever(autoreverses: true)
+                .delay(delay)
+            ) {
+                isAnimating = true
+            }
+        }
     }
 }
 
