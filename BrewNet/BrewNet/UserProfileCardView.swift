@@ -747,9 +747,9 @@ struct ProfileCardContentView: View {
         
         private func formatDate(year: Int, month: Int?) -> String {
             if let month = month {
-                return "\(YearOptions.shortMonthName(for: month)) \(year)"
+                return "\(YearOptions.shortMonthName(for: month)) \(String(year))"
             }
-            return "\(year)"
+            return String(year)
         }
         
         private var durationText: String {

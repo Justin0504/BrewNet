@@ -458,12 +458,22 @@ struct ProfileSetupView: View {
             }
             return nil
             
-        case 4: // Networking Preferences
-            guard let networkingPreferences = profileData.networkingPreferences else {
+        case 4: // Industry Preferences
+            // Step 4 is for Industry Preferences, which is stored in networkingIntention.industryPreferences
+            guard let networkingIntention = profileData.networkingIntention else {
                 return "Please set your networking preferences."
             }
-            // Check if available timeslot is set
-            // This might not be required, but we can add validation if needed
+            guard let industryPreferences = networkingIntention.industryPreferences else {
+                return "Please set your networking preferences."
+            }
+            // Check if at least one industry preference is selected
+            if industryPreferences.selections.isEmpty {
+                return "Please select at least one industry preference."
+            }
+            // Check if selection count exceeds maximum (6)
+            if industryPreferences.selections.count > 6 {
+                return "You can select a maximum of 6 industry preferences. Please remove some selections."
+            }
             return nil
             
         case 6: // Personality & Social
@@ -1288,6 +1298,7 @@ struct CoreIdentityStep: View {
         .onChange(of: selectedPhotoItem) { newItem in
             Task {
                 if let data = try? await newItem?.loadTransferable(type: Data.self) {
+                    // First, set the image data for immediate display
                     await MainActor.run {
                         profileImageData = data
                     }
@@ -1308,19 +1319,32 @@ struct CoreIdentityStep: View {
                                 fileExtension: fileExtension
                             )
                             
+                            // Add cache busting parameter to ensure fresh image load
+                            let urlWithCacheBuster = "\(publicURL)?t=\(Date().timeIntervalSince1970)"
+                            
                             await MainActor.run {
-                                profileImageURL = publicURL
+                                // Set the new URL with cache buster
+                                profileImageURL = urlWithCacheBuster
+                                // Clear the local image data after successful upload
+                                // This forces the UI to use the URL, ensuring consistency
+                                profileImageData = nil
                                 isUploadingImage = false
                                 updateProfileData()
-                                print("✅ Profile image uploaded successfully: \(publicURL)")
+                                print("✅ Profile image uploaded successfully: \(urlWithCacheBuster)")
                             }
                         } catch {
                             await MainActor.run {
                                 isUploadingImage = false
                                 print("❌ Failed to upload profile image: \(error.localizedDescription)")
-                                // Continue anyway, image data is still in profileImageData
+                                // Keep image data on error so user can see their selection
+                                // Don't set URL on failure
                                 updateProfileData()
                             }
+                        }
+                    } else {
+                        // No user ID, just keep the local data
+                        await MainActor.run {
+                            print("⚠️ No user ID available for upload")
                         }
                     }
                 }
@@ -1570,8 +1594,9 @@ struct CoreIdentityStep: View {
             fullPhoneNumber = "\(selectedCountryCode.code)\(phoneNumber)"
         }
         
-        // Use existing URL if we have new image data, otherwise keep the URL
-        let imageURL = profileImageData != nil ? profileImageURL : profileImageURL
+        // Use profileImageURL if available, it contains the uploaded URL
+        // profileImageURL is set after successful upload or loaded from existing profile
+        let imageURL = profileImageURL
         
         let coreIdentity = CoreIdentity(
             name: name,
@@ -4511,9 +4536,9 @@ struct EducationCard: View {
     
     private func formatDate(year: Int, month: Int?) -> String {
         if let month = month {
-            return "\(YearOptions.shortMonthName(for: month)) \(year)"
+            return "\(YearOptions.shortMonthName(for: month)) \(String(year))"
         }
-        return "\(year)"
+        return String(year)
     }
     
     var body: some View {
@@ -4564,9 +4589,9 @@ struct WorkExperienceCard: View {
     
     private func formatDate(year: Int, month: Int?) -> String {
         if let month = month {
-            return "\(YearOptions.shortMonthName(for: month)) \(year)"
+            return "\(YearOptions.shortMonthName(for: month)) \(String(year))"
         }
-        return "\(year)"
+        return String(year)
     }
     
     private var isValidWorkExperience: Bool {
@@ -4778,7 +4803,7 @@ struct AddWorkExperienceView: View {
                                 .foregroundColor(.gray)
                             Picker("Start Year", selection: $startYear) {
                                 ForEach(YearOptions.workExperienceYears, id: \.self) { year in
-                                    Text("\(year)").tag(year)
+                                    Text(verbatim: String(year)).tag(year)
                                 }
                             }
                             .pickerStyle(MenuPickerStyle())
@@ -4855,7 +4880,7 @@ struct AddWorkExperienceView: View {
                                     set: { endYear = $0 }
                                 )) {
                                     ForEach(YearOptions.workExperienceYears, id: \.self) { year in
-                                        Text("\(year)").tag(year)
+                                        Text(verbatim: String(year)).tag(year)
                                     }
                                 }
                                 .pickerStyle(MenuPickerStyle())
@@ -5024,7 +5049,7 @@ struct AddEducationView: View {
                                 .foregroundColor(.gray)
                             Picker("Start Year", selection: $startYear) {
                                 ForEach(YearOptions.years, id: \.self) { year in
-                                    Text("\(year)").tag(year)
+                                    Text(verbatim: String(year)).tag(year)
                                 }
                             }
                             .pickerStyle(MenuPickerStyle())
@@ -5101,7 +5126,7 @@ struct AddEducationView: View {
                                     set: { endYear = $0 }
                                 )) {
                                     ForEach(YearOptions.years, id: \.self) { year in
-                                        Text("\(year)").tag(year)
+                                        Text(verbatim: String(year)).tag(year)
                                     }
                                 }
                                 .pickerStyle(MenuPickerStyle())

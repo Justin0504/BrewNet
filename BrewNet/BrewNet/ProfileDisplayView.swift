@@ -209,6 +209,7 @@ struct MinimalProfileHeaderView: View {
 
         if let userId = authManager.currentUser?.id {
             do {
+                print("📤 [ProfileDisplay] Uploading profile image...")
                 let fileExtension = detectImageFormat(from: data) ?? "jpg"
 
                 let publicURL = try await supabaseService.uploadProfileImage(
@@ -217,11 +218,15 @@ struct MinimalProfileHeaderView: View {
                     fileExtension: fileExtension
                 )
 
+                // Add cache busting parameter to ensure fresh image load
+                let urlWithCacheBuster = "\(publicURL)?t=\(Date().timeIntervalSince1970)"
+                print("✅ [ProfileDisplay] Profile image uploaded with cache buster: \(urlWithCacheBuster)")
+
                 let updatedCoreIdentity = CoreIdentity(
                     name: profile.coreIdentity.name,
                     email: profile.coreIdentity.email,
                     phoneNumber: profile.coreIdentity.phoneNumber,
-                    profileImage: publicURL,
+                    profileImage: urlWithCacheBuster,
                     bio: profile.coreIdentity.bio,
                     pronouns: profile.coreIdentity.pronouns,
                     location: profile.coreIdentity.location,

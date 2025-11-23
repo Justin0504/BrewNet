@@ -20,7 +20,6 @@
 
 ### 4. SupabaseService Methods
 - ✅ `upgradeUserToPro()` - Handles subscription purchase
-- ✅ `grantFreeProTrial()` - Gives 1 week free Pro to new users
 - ✅ `checkAndUpdateProExpiration()` - Checks if Pro expired
 - ✅ `decrementUserLikes()` - Handles like counting for non-Pro users
 - ✅ `getUserLikesRemaining()` - Gets remaining likes

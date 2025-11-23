@@ -649,52 +649,103 @@ class AuthManager: ObservableObject {
             
             // 尝试保存到 Supabase
             do {
-                if let createdUser = try await supabaseService?.createUser(user: supabaseUser) {
-                    print("✅ 用户数据已保存到 Supabase")
-                    
-                    // Grant free 1-week Pro trial to new user
-                    do {
-                        try await supabaseService?.grantFreeProTrial(userId: user.id.uuidString)
-                        print("🎁 新用户已获得 1 周免费 Pro 试用")
-                    } catch {
-                        print("⚠️ 赠送 Pro 试用失败，但继续注册流程: \(error.localizedDescription)")
-                        // Don't fail registration if Pro grant fails
-                    }
-                    
-                    let appUser = createdUser.toAppUser()
-                    
-                    await MainActor.run {
-                        saveUser(appUser)
-                    }
-                    
-                    return .success(appUser)
-                } else {
-                    // supabaseService 为 nil
-                    print("⚠️ Supabase 服务不可用")
+                // 检查 supabaseService 是否可用
+                guard let service = supabaseService else {
+                    print("❌ [注册] Supabase 服务不可用 (supabaseService 为 nil)")
                     return .failure(.unknownError)
                 }
+                
+                print("✅ [注册] Supabase 服务可用，开始创建用户记录")
+                
+                let createdUser = try await service.createUser(user: supabaseUser)
+                print("✅ [注册] 用户数据已保存到 Supabase: \(createdUser.name)")
+                
+                // 确保用户有信誉评分记录
+                do {
+                    try await service.ensureCredibilityScoreExists(userId: user.id.uuidString)
+                    print("✅ [注册] 用户信誉评分记录已创建")
+                } catch {
+                    print("⚠️ [注册] 创建信誉评分失败，但不影响注册流程: \(error.localizedDescription)")
+                    // 不抛出错误，不影响注册流程
+                }
+                
+                let appUser = createdUser.toAppUser()
+                
+                await MainActor.run {
+                    saveUser(appUser)
+                }
+                
+                print("✅ [注册] 注册流程完成: \(appUser.name)")
+                return .success(appUser)
+                
             } catch {
                 // Supabase 数据库操作失败
-                print("⚠️ Supabase 数据保存失败: \(error.localizedDescription)")
-                throw error
+                print("❌ [注册] Supabase 数据保存失败:")
+                print("   - 错误类型: \(type(of: error))")
+                print("   - 错误信息: \(error.localizedDescription)")
+                
+                // 提供更具体的错误信息
+                let errorMessage = error.localizedDescription.lowercased()
+                if errorMessage.contains("duplicate") || errorMessage.contains("already exists") {
+                    print("⚠️ [注册] 检测到重复键错误，返回 emailAlreadyExists")
+                    return .failure(.emailAlreadyExists)
+                } else {
+                    print("⚠️ [注册] 返回 unknownError")
+                    throw error
+                }
             }
             
         } catch {
-            print("❌ Supabase 注册失败:")
-            print("🔍 错误类型: \(type(of: error))")
-            print("📝 错误信息: \(error.localizedDescription)")
+            print("❌ [注册] Supabase 注册失败:")
+            print("   - 错误类型: \(type(of: error))")
+            print("   - 错误信息: \(error.localizedDescription)")
+            
+            // 打印详细错误信息
+            if let nsError = error as NSError? {
+                print("   - NSError 代码: \(nsError.code)")
+                print("   - NSError 域: \(nsError.domain)")
+                print("   - NSError 用户信息: \(nsError.userInfo)")
+                
+                // 尝试从 userInfo 中获取更详细的错误信息
+                if let underlyingError = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+                    print("   - 底层错误代码: \(underlyingError.code)")
+                    print("   - 底层错误域: \(underlyingError.domain)")
+                    print("   - 底层错误信息: \(underlyingError.localizedDescription)")
+                }
+            }
             
             // 根据错误类型返回更具体的错误信息
-            if error.localizedDescription.contains("already registered") ||
-               error.localizedDescription.contains("already exists") ||
-               error.localizedDescription.contains("duplicate key") {
+            let errorMessage = error.localizedDescription.lowercased()
+            
+            // 特殊处理 "Database error saving new user" 错误
+            if errorMessage.contains("database error saving new user") {
+                print("⚠️ [注册] 检测到数据库保存错误")
+                print("💡 [注册] 可能的原因:")
+                print("   1. Supabase 数据库触发器或函数失败")
+                print("   2. RLS (Row Level Security) 策略阻止操作")
+                print("   3. users 表结构不匹配或缺少必需字段")
+                print("   4. 数据库连接问题")
+                print("💡 [注册] 建议检查:")
+                print("   - Supabase Dashboard → Database → Triggers")
+                print("   - Supabase Dashboard → Authentication → Policies")
+                print("   - Supabase Dashboard → Table Editor → users 表结构")
+                return .failure(.unknownError)
+            } else if errorMessage.contains("already registered") ||
+               errorMessage.contains("already exists") ||
+               errorMessage.contains("duplicate key") {
+                print("⚠️ [注册] 检测到重复注册错误")
                 return .failure(.emailAlreadyExists)
-            } else if error.localizedDescription.contains("password") {
+            } else if errorMessage.contains("password") {
+                print("⚠️ [注册] 检测到密码错误")
                 return .failure(.invalidCredentials)
+            } else if errorMessage.contains("email") && errorMessage.contains("invalid") {
+                print("⚠️ [注册] 检测到邮箱格式错误")
+                return .failure(.invalidEmail)
             } else if let httpError = error as? URLError {
-                print("🌐 网络错误代码: \(httpError.code.rawValue)")
+                print("🌐 [注册] 网络错误代码: \(httpError.code.rawValue)")
                 return .failure(.networkError)
             } else {
+                print("⚠️ [注册] 未知错误，返回 unknownError")
                 return .failure(.unknownError)
             }
         }

@@ -18,20 +18,35 @@ struct IndustryEditView: View {
     @Binding var industrySelections: [IndustryEditSelection]
     
     @State private var expandedCategories: Set<String> = []
+    @State private var showLimitAlert = false
     
     private let themeBrown = Color(red: 0.4, green: 0.2, blue: 0.1)
     private let lightBrown = Color(red: 0.6, green: 0.4, blue: 0.2)
     private let lightBackground = Color(red: 0.98, green: 0.97, blue: 0.95)
+    private let maxSelections = 6
     
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
+                // Selection Counter
+                HStack {
+                    Text("Selected: \(industrySelections.count)/\(maxSelections)")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(industrySelections.count >= maxSelections ? Color.orange : themeBrown)
+                    
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                
                 // Industry Categories
                 VStack(spacing: 16) {
                     ForEach(IndustryData.categories, id: \.id) { category in
                         IndustryCategoryCard(
                             category: category,
                             industrySelections: $industrySelections,
+                            maxSelections: maxSelections,
+                            showLimitAlert: $showLimitAlert,
                             isExpanded: Binding(
                                 get: { expandedCategories.contains(category.id) },
                                 set: { isExpanded in
@@ -49,6 +64,11 @@ struct IndustryEditView: View {
             }
         }
         .background(lightBackground)
+        .alert("Selection Limit Reached", isPresented: $showLimitAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("You can select a maximum of \(maxSelections) industry preferences. Please remove a selection before adding another.")
+        }
         .onChange(of: industrySelections) { newSelections in
             print("🔄 [IndustryEditView] industrySelections changed, refreshing view. Count: \(newSelections.count)")
             
@@ -79,6 +99,8 @@ struct IndustryEditView: View {
 struct IndustryCategoryCard: View {
     let category: IndustryCategory
     @Binding var industrySelections: [IndustryEditSelection]
+    let maxSelections: Int
+    @Binding var showLimitAlert: Bool
     @Binding var isExpanded: Bool
     
     private let themeBrown = Color(red: 0.4, green: 0.2, blue: 0.1)
@@ -121,7 +143,9 @@ struct IndustryCategoryCard: View {
                             IndustrySubcategoryRow(
                                 categoryName: category.name,
                                 subcategoryName: subcategory,
-                                industrySelections: $industrySelections
+                                industrySelections: $industrySelections,
+                                maxSelections: maxSelections,
+                                showLimitAlert: $showLimitAlert
                             )
                         }
                     }
@@ -164,12 +188,18 @@ struct IndustrySubcategoryRow: View {
     let categoryName: String
     let subcategoryName: String
     @Binding var industrySelections: [IndustryEditSelection]
+    let maxSelections: Int
+    @Binding var showLimitAlert: Bool
     
     private let themeBrown = Color(red: 0.4, green: 0.2, blue: 0.1)
     private let lightBrown = Color(red: 0.6, green: 0.4, blue: 0.2)
     
     private var isSelected: Bool {
         industrySelections.contains { $0.categoryName == categoryName && $0.subcategoryName == subcategoryName }
+    }
+    
+    private var canSelect: Bool {
+        isSelected || industrySelections.count < maxSelections
     }
     
     var body: some View {
@@ -181,6 +211,11 @@ struct IndustrySubcategoryRow: View {
                         industrySelections.remove(at: index)
                     }
                 } else {
+                    // Check if we've reached the limit
+                    if industrySelections.count >= maxSelections {
+                        showLimitAlert = true
+                        return
+                    }
                     // Add selection
                     let newSelection = IndustryEditSelection(
                         categoryName: categoryName,
@@ -205,10 +240,12 @@ struct IndustrySubcategoryRow: View {
             }
             .padding(.vertical, 12)
             .padding(.horizontal, 16)
-            .background(isSelected ? lightBrown : Color.gray.opacity(0.05))
+            .background(isSelected ? lightBrown : (canSelect ? Color.gray.opacity(0.05) : Color.gray.opacity(0.02)))
             .cornerRadius(10)
+            .opacity(canSelect ? 1.0 : 0.5)
         }
         .buttonStyle(PlainButtonStyle())
+        .disabled(!canSelect && !isSelected)
     }
 }
 

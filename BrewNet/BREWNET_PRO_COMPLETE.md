@@ -25,7 +25,6 @@
 
 #### 4. SupabaseService 方法 ✅
 - `upgradeUserToPro()` - 处理订阅购买
-- `grantFreeProTrial()` - 新用户1周免费 Pro
 - `checkAndUpdateProExpiration()` - 自动过期检查
 - `decrementUserLikes()` - Likes 计数管理
 - `getUserLikesRemaining()` - 获取剩余 likes
@@ -71,7 +70,7 @@
 - 实现在 MatchFilterView
 
 #### 7. 注册流程 ✅
-- 所有新用户自动获得1周免费 Pro
+- 新用户默认状态：`is_pro = false`, `likes_remaining = 6`
 - 实现在 `AuthManager.supabaseRegister()`
 
 #### 8. Profile Tab 增强 ✅
@@ -297,10 +296,10 @@ BrewNet/RecommendationService.swift
 - 第 130-132 行: 1.5x 提升逻辑
 ```
 
-### 新用户免费试用
+### 新用户默认状态
 ```
 BrewNet/AuthManager.swift
-- 第 517-524 行: 赠送免费 Pro 试用
+- 新用户注册后：is_pro = false, likes_remaining = 6
 ```
 
 ## 🎓 学到的经验
