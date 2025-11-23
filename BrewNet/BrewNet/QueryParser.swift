@@ -486,6 +486,12 @@ class QueryParser {
             }
             if schoolDictionary.contains(token) {
                 entities.schools.append(token)
+            } else {
+                // ⭐ 检查是否是学校缩写（如 "umich" → "university of michigan"）
+                if let expandedSchool = expandSchoolAbbreviation(token) {
+                    entities.schools.append(expandedSchool)
+                    print("  🎓 School abbreviation expanded: '\(token)' → '\(expandedSchool)'")
+                }
             }
             if skillDictionary.contains(token) {
                 entities.skills.append(token)
@@ -582,6 +588,62 @@ class QueryParser {
         }
         
         return matrix[s1Array.count][s2Array.count]
+    }
+    
+    /// 扩展学校缩写（如 "umich" → "university of michigan"）
+    private func expandSchoolAbbreviation(_ abbreviation: String) -> String? {
+        let abbr = abbreviation.lowercased()
+        
+        // 学校缩写映射表
+        let abbreviationMap: [String: String] = [
+            "umich": "university of michigan",
+            "mit": "massachusetts institute of technology",
+            "uc berkeley": "university of california berkeley",
+            "berkeley": "university of california berkeley",
+            "ucla": "university of california los angeles",
+            "uva": "university of virginia",
+            "unc": "university of north carolina",
+            "ut austin": "university of texas",
+            "ucsd": "university of california san diego",
+            "uw": "university of washington",
+            "upenn": "university of pennsylvania",
+            "penn": "university of pennsylvania",
+            "pku": "peking university",
+            "sjtu": "shanghai jiao tong university",
+            "zju": "zhejiang university",
+            "ustc": "university of science and technology of china",
+            "nju": "nanjing university"
+        ]
+        
+        // 直接匹配
+        if let expanded = abbreviationMap[abbr] {
+            return expanded
+        }
+        
+        // 模糊匹配：检查缩写是否包含在学校名中（如 "mich" 匹配 "michigan"）
+        for (key, value) in abbreviationMap {
+            if abbr.contains(key) || key.contains(abbr) {
+                // 进一步检查相似度
+                let similarity = self.similarity(abbr, key)
+                if similarity > 0.7 {
+                    return value
+                }
+            }
+        }
+        
+        // 检查是否与学校字典中的任何条目匹配（模糊匹配）
+        for school in schoolDictionary {
+            let schoolLower = school.lowercased()
+            // 如果缩写包含在学校名中，或学校名包含缩写
+            if schoolLower.contains(abbr) || abbr.contains(schoolLower) {
+                let similarity = self.similarity(abbr, schoolLower)
+                if similarity > 0.75 {
+                    return school
+                }
+            }
+        }
+        
+        return nil
     }
     
     private func printEntities(_ entities: QueryEntities) {
