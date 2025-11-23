@@ -341,12 +341,6 @@ class FieldAwareScoring {
             
             let lowercasedToken = token.lowercased()
             
-            // 获取同义词组 key（用于去重）
-            let synonymGroupKey = getSynonymGroupKey(for: lowercasedToken)
-            
-            // 检查该同义词组是否已经计分过（避免重复计分）
-            if matchedSynonymGroups.contains(synonymGroupKey) {
-                continue  // 跳过已计分的同义词组
             // 跳过停用词
             if stopWords.contains(lowercasedToken) {
                 continue
@@ -363,10 +357,10 @@ class FieldAwareScoring {
             }
             
             // 获取同义词组 key
-            let synonymGroup = getSynonymGroupKey(for: token)
+            let synonymGroupKey = getSynonymGroupKey(for: token)
             
             // 如果该同义词组已经匹配过，跳过（避免重复计分）
-            if matchedSynonymGroups.contains(synonymGroup) {
+            if matchedSynonymGroups.contains(synonymGroupKey) {
                 continue
             }
             
@@ -379,11 +373,6 @@ class FieldAwareScoring {
                 score += FieldZone.zoneB.weight
                 matchDetails.append((token, .zoneB))
                 matchedSynonymGroups.insert(synonymGroupKey)  // ⭐ 标记该同义词组已计分
-                matchedSynonymGroups.insert(synonymGroup)  // ⭐ 标记该同义词组已计分
-            } else if zonedText.zoneB.contains(lowercasedToken) {
-                score += FieldZone.zoneB.weight
-                matchDetails.append((token, .zoneB))
-                matchedSynonymGroups.insert(synonymGroup)  // ⭐ 标记该同义词组已计分
             } else if zonedText.zoneC.contains(lowercasedToken) {
                 score += FieldZone.zoneC.weight
                 matchDetails.append((token, .zoneC))
