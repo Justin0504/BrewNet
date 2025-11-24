@@ -228,6 +228,16 @@ struct ValuesOptions {
     ]
 }
 
+// MARK: - Skills Options
+struct SkillsOptions {
+    // 10个大众技能选项
+    static let popularSkills = [
+        "Python", "JavaScript", "Project Management", "Data Analysis",
+        "Communication", "Leadership", "Marketing", "SQL",
+        "Problem Solving", "Team Collaboration"
+    ]
+}
+
 // MARK: - Hobbies & Interests Options
 struct HobbiesOptions {
     // 精简为6个最大众的 hobby
