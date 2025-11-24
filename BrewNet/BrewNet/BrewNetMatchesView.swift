@@ -99,7 +99,7 @@ struct BrewNetMatchesView: View {
                 // Cards Stack（确保 profiles 不为空且当前索引有效）
                 else if !profiles.isEmpty && currentIndex < profiles.count {
                     ZStack {
-                        // Next card (background) - 平滑过渡
+                        // Next card (background) - 平滑过渡，添加跟随效果
                         if currentIndex + 1 < profiles.count {
                             UserProfileCardView(
                                 profile: profiles[currentIndex + 1],
@@ -112,12 +112,13 @@ struct BrewNetMatchesView: View {
                                 showsOuterFrame: false,
                                 cardWidth: screenWidth - 4
                             )
-                            .scaleEffect(isTransitioning ? 1.0 : 0.95)
-                            .offset(y: isTransitioning ? 0 : 10)
+                            .scaleEffect(isTransitioning ? 1.0 : (0.95 + min(abs(dragOffset.width) / (screenWidth * 2), 0.05)))
+                            .offset(y: isTransitioning ? 0 : (10 - min(abs(dragOffset.width) / 20, 5)))
                             .offset(x: nextProfileOffset)
-                            .opacity(isTransitioning ? 1.0 : 0.8)
+                            .opacity(isTransitioning ? 1.0 : (0.8 + min(abs(dragOffset.width) / (screenWidth * 2), 0.2)))
                             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isTransitioning)
                             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: nextProfileOffset)
+                            .animation(.easeOut(duration: 0.1), value: dragOffset.width)
                         }
                         
                         // Current card (foreground)
@@ -641,12 +642,16 @@ struct BrewNetMatchesView: View {
     }
 
     private func swipeLeft() {
-        withAnimation(.spring()) {
-            dragOffset = CGSize(width: -screenWidth, height: 0)
-            rotationAngle = -15
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            dragOffset = CGSize(width: -screenWidth * 1.5, height: 0)
+            rotationAngle = -20
         }
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        // 触觉反馈
+        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+        impactFeedback.impactOccurred()
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
             passProfile()
         }
     }
@@ -731,7 +736,7 @@ struct BrewNetMatchesView: View {
                 await MainActor.run {
                     print("⚠️ No likes remaining, showing alert")
                     showInviteLimitAlert = true
-                    withAnimation(.spring()) {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                         dragOffset = .zero
                         rotationAngle = 0
                     }
@@ -741,13 +746,16 @@ struct BrewNetMatchesView: View {
 
             if triggeredByButton {
                 await MainActor.run {
-                    withAnimation(.spring()) {
-                        dragOffset = CGSize(width: screenWidth, height: 0)
-                        rotationAngle = 15
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        dragOffset = CGSize(width: screenWidth * 1.5, height: 0)
+                        rotationAngle = 20
                     }
+                    // 触觉反馈
+                    let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                    impactFeedback.impactOccurred()
                 }
                 // Allow animation to complete
-                try? await Task.sleep(nanoseconds: 200_000_000)
+                try? await Task.sleep(nanoseconds: 250_000_000)
             }
 
             await MainActor.run {

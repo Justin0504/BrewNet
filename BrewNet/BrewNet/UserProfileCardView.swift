@@ -1044,6 +1044,7 @@ struct UserProfileCardView: View {
     @State private var currentUserLocation: String?
     @State private var selectedWorkExperience: WorkExperience?
     @State private var credibilityScore: CredibilityScore?  // 🆕 信誉评分
+    @State private var isDraggingHorizontally = false  // 跟踪是否正在进行水平拖拽
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -1115,56 +1116,110 @@ struct UserProfileCardView: View {
             .id("scroll-\(profile.id)")
             .frame(width: cardWidth, height: screenHeight * 0.82)
             .clipShape(RoundedRectangle(cornerRadius: 28))
-            
-            if abs(dragOffset.width) > 50 {
-                VStack {
-                    if dragOffset.width > 0 {
-                        SwipeIndicatorView(text: "LIKE", color: .green, systemImage: "heart.fill")
-                            .rotationEffect(.degrees(-15))
-                    } else {
-                        SwipeIndicatorView(text: "PASS", color: .red, systemImage: "xmark")
-                            .rotationEffect(.degrees(15))
-                    }
-                }
-                .offset(x: dragOffset.width > 0 ? 24 : -24, y: 40)
-            }
+            .scrollDisabled(isDraggingHorizontally)  // 水平拖拽时禁用 ScrollView 滚动
         }
         .offset(dragOffset)
         .rotationEffect(.degrees(rotationAngle))
+        .scaleEffect(calculateScale())
         .onAppear {
             // 🆕 加载用户信誉评分
             loadCredibilityScore()
         }
-        .gesture(
-            DragGesture()
+        .highPriorityGesture(
+            // 使用高优先级手势，确保水平拖拽优先于 ScrollView
+            DragGesture(minimumDistance: 0)
                 .onChanged { value in
-                    dragOffset = value.translation
-                    rotationAngle = Double(value.translation.width / 20)
+                    // 判断拖拽方向：如果主要是水平拖拽，则处理卡片移动
+                    let horizontalDistance = abs(value.translation.width)
+                    let verticalDistance = abs(value.translation.height)
+                    
+                    // 如果水平距离大于垂直距离，或者是水平拖拽，则处理卡片移动
+                    // 降低阈值，让水平拖拽更容易触发
+                    if horizontalDistance > verticalDistance * 0.8 || horizontalDistance > 5 {
+                        // 标记为水平拖拽，禁用 ScrollView
+                        if !isDraggingHorizontally {
+                            isDraggingHorizontally = true
+                        }
+                        
+                        // 实时更新拖拽位置，无延迟，紧贴手指
+                        // 对垂直方向添加阻尼，使其更自然
+                        let horizontalTranslation = value.translation.width
+                        let verticalTranslation = value.translation.height * 0.3  // 垂直方向阻尼
+                        
+                        // 添加弹性效果：当拖拽超过阈值时，增加阻力感
+                        let elasticThreshold: CGFloat = screenWidth * 0.3
+                        let elasticFactor: CGFloat = 0.7  // 弹性系数
+                        let finalHorizontal: CGFloat
+                        
+                        if abs(horizontalTranslation) > elasticThreshold {
+                            // 超过阈值，添加弹性阻力
+                            let excess = abs(horizontalTranslation) - elasticThreshold
+                            let elasticResistance = excess * (1 - elasticFactor)
+                            finalHorizontal = horizontalTranslation > 0 ? 
+                                (elasticThreshold + elasticResistance) : 
+                                -(elasticThreshold + elasticResistance)
+                        } else {
+                            finalHorizontal = horizontalTranslation
+                        }
+                        
+                        // 直接更新，不使用动画，确保实时跟随
+                        dragOffset = CGSize(width: finalHorizontal, height: verticalTranslation)
+                        
+                        // 优化旋转计算：基于拖拽距离，添加阻尼效果
+                        // 使用更平滑的曲线函数，让旋转更自然
+                        let dragDistance = finalHorizontal
+                        let maxRotation: Double = 15.0
+                        // 使用平滑的曲线函数（ease-out）
+                        let normalizedDistance = abs(dragDistance) / (screenWidth * 0.5)
+                        let easedFactor = 1 - pow(1 - min(normalizedDistance, 1.0), 3)  // 三次方缓动
+                        rotationAngle = max(-maxRotation, min(maxRotation, easedFactor * maxRotation * (dragDistance > 0 ? 1 : -1)))
+                    } else if verticalDistance > horizontalDistance * 1.2 {
+                        // 主要是垂直拖拽，允许 ScrollView 滚动
+                        isDraggingHorizontally = false
+                    }
                 }
                 .onEnded { value in
-                    let threshold: CGFloat = 100
+                    let threshold: CGFloat = screenWidth * 0.25  // 25% 屏幕宽度作为阈值
+                    // 计算速度：使用预测位置和当前位置的差值
+                    let velocity = value.predictedEndTranslation.width - value.translation.width
+                    // 速度阈值：每秒 300 点（更敏感）
+                    let velocityThreshold: CGFloat = 300
+                    let hasSignificantVelocity = abs(velocity) > velocityThreshold
                     
-                    if value.translation.width > threshold {
-                        // Swipe right (Like)
-                        withAnimation(.spring()) {
-                            dragOffset = CGSize(width: screenWidth, height: value.translation.height)
-                            rotationAngle = 15
+                    // 判断是否应该滑动：距离超过阈值 或 速度足够快
+                    let shouldSwipeRight = value.translation.width > threshold || (hasSignificantVelocity && velocity > 0)
+                    let shouldSwipeLeft = value.translation.width < -threshold || (hasSignificantVelocity && velocity < 0)
+                    
+                    if shouldSwipeRight {
+                        // Swipe right (Like) - 使用流畅的弹性动画
+                        let finalX = screenWidth * 1.5
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75, blendDuration: 0.1)) {
+                            dragOffset = CGSize(width: finalX, height: value.translation.height * 0.3)
+                            rotationAngle = 20
                         }
+                        // 触觉反馈
+                        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                        impactFeedback.impactOccurred()
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             onSwipe(.right)
                         }
-                    } else if value.translation.width < -threshold {
-                        // Swipe left (Pass)
-                        withAnimation(.spring()) {
-                            dragOffset = CGSize(width: -screenWidth, height: value.translation.height)
-                            rotationAngle = -15
+                    } else if shouldSwipeLeft {
+                        // Swipe left (Pass) - 使用流畅的弹性动画
+                        let finalX = -screenWidth * 1.5
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75, blendDuration: 0.1)) {
+                            dragOffset = CGSize(width: finalX, height: value.translation.height * 0.3)
+                            rotationAngle = -20
                         }
+                        // 触觉反馈
+                        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                        impactFeedback.impactOccurred()
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             onSwipe(.left)
                         }
                     } else {
-                        // Return to center
-                        withAnimation(.spring()) {
+                        // Return to center - 使用弹性回弹动画，更有拖拽感
+                        isDraggingHorizontally = false
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.7, blendDuration: 0.1)) {
                             dragOffset = .zero
                             rotationAngle = 0
                         }
@@ -1207,6 +1262,25 @@ struct UserProfileCardView: View {
             // 🆕 当用户登录时，重新加载评分
             print("🔄 [UserProfileCard] 用户登录，重新加载评分...")
             loadCredibilityScore()
+        }
+    }
+    
+    // MARK: - Calculate Scale Effect
+    private func calculateScale() -> CGFloat {
+        // 根据拖拽距离计算缩放：拖拽时稍微缩小，增加层次感
+        // 使用平滑的曲线，让缩放更自然
+        let dragDistance = abs(dragOffset.width)
+        let maxScale: CGFloat = 0.96  // 稍微调整，让缩放更明显
+        let scaleThreshold: CGFloat = screenWidth * 0.4  // 缩放阈值
+        
+        if dragDistance < scaleThreshold {
+            // 在阈值内，平滑缩放
+            let normalizedDistance = dragDistance / scaleThreshold
+            let easedFactor = 1 - pow(1 - normalizedDistance, 2)  // 二次方缓动
+            return 1.0 - (easedFactor * (1.0 - maxScale))
+        } else {
+            // 超过阈值，保持最小缩放
+            return maxScale
         }
     }
     
