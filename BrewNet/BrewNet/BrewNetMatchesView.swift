@@ -229,6 +229,16 @@ struct BrewNetMatchesView: View {
                 print("✅ [临时聊天] Pro 状态已更新: \(isPro ? "Pro用户" : "普通用户")")
             }
         }
+        .onChange(of: currentIndex) { _ in
+            // 当索引改变时，预加载下一个卡片的头像
+            preloadProfileImages()
+        }
+        .onChange(of: profiles.count) { _ in
+            // 当 profiles 加载完成时，预加载头像
+            if !profiles.isEmpty {
+                preloadProfileImages()
+            }
+        }
         .alert("No Connects Left", isPresented: $showInviteLimitAlert) {
             Button("Subscribe to Pro") {
                 showInviteLimitAlert = false
@@ -249,6 +259,9 @@ struct BrewNetMatchesView: View {
             
             // 先尝试从持久化缓存加载（包括索引）
             loadCachedProfilesFromStorage()
+            
+            // 预加载当前和下一个卡片的头像
+            preloadProfileImages()
             
             // 如果有缓存数据且来自推荐系统，且距离上次加载不到5分钟
             if !cachedProfiles.isEmpty && isCacheFromRecommendation, let lastLoad = lastLoadTime, Date().timeIntervalSince(lastLoad) < 300 {
@@ -1643,6 +1656,30 @@ struct BrewNetMatchesView: View {
                     isLoadingMore = false
                 }
             }
+        }
+    }
+    
+    // MARK: - Preload Profile Images
+    private func preloadProfileImages() {
+        guard !profiles.isEmpty else { return }
+        
+        var imageUrls: [String] = []
+        
+        // 预加载当前卡片和接下来2个卡片的头像
+        let startIndex = currentIndex
+        let endIndex = min(currentIndex + 3, profiles.count)
+        
+        for i in startIndex..<endIndex {
+            if let imageUrl = profiles[i].coreIdentity.profileImage,
+               !imageUrl.isEmpty,
+               imageUrl.hasPrefix("http") {
+                imageUrls.append(imageUrl)
+            }
+        }
+        
+        // 批量预加载
+        if !imageUrls.isEmpty {
+            ImageCacheManager.shared.preloadImages(from: imageUrls)
         }
     }
     

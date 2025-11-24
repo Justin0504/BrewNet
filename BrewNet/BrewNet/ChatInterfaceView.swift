@@ -5377,9 +5377,9 @@ struct AvatarView: View {
         self.size = size
         _currentAvatarString = State(initialValue: avatarString)
         
-        // 在初始化时立即尝试从缓存加载（同步）
+        // 在初始化时立即尝试从缓存加载（同步，仅检查内存缓存）
         if avatarString.hasPrefix("http://") || avatarString.hasPrefix("https://"),
-           let cached = ImageCacheManager.shared.loadImage(from: avatarString) {
+           let cached = ImageCacheManager.shared.getCachedImage(from: avatarString) {
             // 注意：这里不能直接设置 @State，需要在 body 中处理
             // 但我们可以通过 _cachedImage 来设置初始值
             _cachedImage = State(initialValue: cached)
@@ -5444,8 +5444,8 @@ struct AvatarView: View {
             return
         }
         
-        // 先尝试从缓存加载（同步，立即返回）
-        if let cached = ImageCacheManager.shared.loadImage(from: avatarString) {
+        // 先尝试从缓存加载（同步，仅检查内存缓存）
+        if let cached = ImageCacheManager.shared.getCachedImage(from: avatarString) {
             self.cachedImage = cached
             self.currentAvatarString = avatarString
             return

@@ -42,3 +42,4 @@ AND column_name = 'tokens';
 -- UPDATE users SET tokens = 10 WHERE tokens = 0;
 
 
+

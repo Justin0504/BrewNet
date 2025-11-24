@@ -656,17 +656,19 @@ struct ProfileCardContentView: View {
     private var profileImageView: some View {
         ZStack {
             if let imageUrl = profile.coreIdentity.profileImage,
+               !imageUrl.isEmpty,
+               imageUrl.hasPrefix("http"),
                let url = URL(string: imageUrl) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    case .failure, .empty:
+                CachedAsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    ZStack {
                         placeholderImageView
-                    @unknown default:
-                        placeholderImageView
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(0.8)
                     }
                 }
             } else {
@@ -1488,17 +1490,18 @@ struct UserProfileCardView: View {
     private var profileImageView: some View {
         ZStack {
             if let imageUrl = profile.coreIdentity.profileImage, !imageUrl.isEmpty,
+               imageUrl.hasPrefix("http"),
                let url = URL(string: imageUrl) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    case .failure(_), .empty:
+                CachedAsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    ZStack {
                         placeholderImageView
-                    @unknown default:
-                        placeholderImageView
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(0.8)
                     }
                 }
             } else {
@@ -2319,17 +2322,18 @@ struct LegacyPublicProfileCardView: View {
     private var profileImageView: some View {
         ZStack {
             if let imageUrl = profile.coreIdentity.profileImage, !imageUrl.isEmpty,
+               imageUrl.hasPrefix("http"),
                let url = URL(string: imageUrl) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    case .failure(_), .empty:
+                CachedAsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    ZStack {
                         placeholderImageView
-                    @unknown default:
-                        placeholderImageView
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(0.8)
                     }
                 }
             } else {
