@@ -180,6 +180,15 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         self.url = url
         self.content = content
         self.placeholder = placeholder
+        
+        // 立即检查缓存，避免闪烁
+        if let url = url {
+            let urlString = url.absoluteString
+            if let cachedImage = ImageCacheManager.shared.getCachedImage(from: urlString) {
+                _loadedImage = State(initialValue: cachedImage)
+                _isLoading = State(initialValue: false)
+            }
+        }
     }
     
     var body: some View {
@@ -206,6 +215,11 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         }
         
         let urlString = url.absoluteString
+        
+        // 如果已经有缓存图片，不再加载
+        if loadedImage != nil {
+            return
+        }
         
         if let cachedImage = await ImageCacheManager.shared.loadImage(from: urlString) {
             await MainActor.run {

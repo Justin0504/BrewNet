@@ -208,9 +208,9 @@ struct ChatInterfaceView: View {
                 // 重新加载匹配列表
                 await loadChatSessionsFromDatabase()
                 
-                // 如果有 matchedUserId，自动打开与该用户的聊天
+                // 支持两种键名：userId（从 View Match 发送）和 matchedUserId（从其他地方发送）
                 if let userInfo = notification.userInfo,
-                   let matchedUserId = userInfo["matchedUserId"] as? String {
+                   let matchedUserId = (userInfo["matchedUserId"] as? String) ?? (userInfo["userId"] as? String) {
                     
                     // 等待数据加载完成后再选择会话
                     await MainActor.run {

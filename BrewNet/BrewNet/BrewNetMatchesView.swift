@@ -364,7 +364,15 @@ struct BrewNetMatchesView: View {
                 showingMatchAlert = false
             }
             Button("View Match") {
-                // Navigate to match details
+                // 导航到聊天页面并选中匹配的用户
+                if let profile = matchedProfile {
+                    // 发送通知，包含匹配的用户ID，并切换到聊天 tab
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("NavigateToChat"),
+                        object: nil,
+                        userInfo: ["userId": profile.userId]
+                    )
+                }
                 showingMatchAlert = false
             }
         } message: {
@@ -906,6 +914,22 @@ struct BrewNetMatchesView: View {
     }
     
     private func moveToNextProfile() {
+        // 在切换前，确保下一个卡片的头像已经预加载完成
+        let nextIndex = currentIndex + 1
+        if nextIndex < profiles.count {
+            if let imageUrl = profiles[nextIndex].coreIdentity.profileImage,
+               !imageUrl.isEmpty,
+               imageUrl.hasPrefix("http") {
+                // 如果缓存中没有，立即开始预加载
+                if ImageCacheManager.shared.getCachedImage(from: imageUrl) == nil {
+                    Task {
+                        // 等待预加载完成（最多等待0.2秒）
+                        _ = await ImageCacheManager.shared.loadImage(from: imageUrl)
+                    }
+                }
+            }
+        }
+        
         // 开始平滑过渡
         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
             isTransitioning = true
@@ -922,6 +946,9 @@ struct BrewNetMatchesView: View {
             
             // 每次移动到下一个时保存索引
             saveCurrentIndex()
+            
+            // 预加载下一个卡片的头像（为下次切换做准备）
+            preloadProfileImages()
             
             // 如果已经到达最后一个，检查是否需要加载更多
             if currentIndex >= profiles.count {
@@ -1665,9 +1692,9 @@ struct BrewNetMatchesView: View {
         
         var imageUrls: [String] = []
         
-        // 预加载当前卡片和接下来2个卡片的头像
+        // 预加载当前卡片和接下来3个卡片的头像（增加预加载数量）
         let startIndex = currentIndex
-        let endIndex = min(currentIndex + 3, profiles.count)
+        let endIndex = min(currentIndex + 4, profiles.count)
         
         for i in startIndex..<endIndex {
             if let imageUrl = profiles[i].coreIdentity.profileImage,
