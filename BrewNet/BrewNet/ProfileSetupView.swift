@@ -294,6 +294,7 @@ struct ProfileSetupView: View {
                                         }
                                         .padding(.horizontal, 32)
                                         .padding(.top, 32)
+                                        .padding(.bottom, 24)
                                         .background(
                                             GeometryReader { contentGeometry in
                                                 Color.clear
@@ -347,7 +348,7 @@ struct ProfileSetupView: View {
                             
                             // Navigation buttons
                             navigationButtonsView
-                            .padding(.bottom, 50)
+                            .padding(.bottom, 10)
                         }
                         
                         // 加载覆盖层 - 当保存 profile 时显示
@@ -1872,45 +1873,63 @@ struct ProfessionalBackgroundStep: View {
             }
             
             // Skills
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text("Skills *")
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                 
-                HStack {
-                    TextField("Add a skill", text: $newSkill)
+                // Add custom skill input
+                HStack(spacing: 12) {
+                    TextField("Add custom skill", text: $newSkill)
                         .textFieldStyle(CustomTextFieldStyle())
+                        .autocorrectionDisabled()
                     
-                    Button("Add") {
-                        if !newSkill.isEmpty && !skills.contains(newSkill) {
-                            skills.append(newSkill)
+                    Button(action: {
+                        let trimmedSkill = newSkill.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmedSkill.isEmpty && !skills.contains(trimmedSkill) {
+                            skills.append(trimmedSkill)
                             newSkill = ""
                         }
+                    }) {
+                        Text("Add")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color(red: 0.6, green: 0.4, blue: 0.2))
+                            .cornerRadius(8)
                     }
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .disabled(newSkill.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .opacity(newSkill.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.5 : 1.0)
                 }
                 
+                // Selected skills
                 if !skills.isEmpty {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
-                        ForEach(skills, id: \.self) { skill in
-                            HStack {
-                                Text(skill)
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.white)
-                                
-                                Button(action: {
-                                    skills.removeAll { $0 == skill }
-                                }) {
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 12))
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Selected:")
+                            .font(.system(size: 13))
+                            .foregroundColor(.gray)
+                        
+                        FlowLayout(spacing: 8) {
+                            ForEach(skills, id: \.self) { skill in
+                                HStack(spacing: 6) {
+                                    Text(skill)
+                                        .font(.system(size: 14))
                                         .foregroundColor(.white)
+                                    
+                                    Button(action: {
+                                        skills.removeAll { $0 == skill }
+                                    }) {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundColor(.white)
+                                    }
                                 }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(Color(red: 0.6, green: 0.4, blue: 0.2))
+                                .cornerRadius(16)
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color(red: 0.6, green: 0.4, blue: 0.2))
-                            .cornerRadius(16)
                         }
                     }
                 }
@@ -4804,7 +4823,7 @@ struct AddWorkExperienceView: View {
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                     
-                    HStack(spacing: 12) {
+                    HStack(spacing: 8) {
                         // Start Year
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Year")
@@ -4812,15 +4831,16 @@ struct AddWorkExperienceView: View {
                                 .foregroundColor(.gray)
                             Picker("Start Year", selection: $startYear) {
                                 ForEach(YearOptions.workExperienceYears, id: \.self) { year in
-                                    Text(verbatim: String(year)).tag(year)
+                                    Text(verbatim: String(year))
+                                        .tag(year)
                                 }
                             }
                             .pickerStyle(MenuPickerStyle())
-                            .fixedSize(horizontal: true, vertical: false) // 🎯 强制单行显示
-                            .frame(minWidth: 80, maxWidth: .infinity, minHeight: 44)
+                            .font(.system(size: 14))
+                            .frame(maxWidth: .infinity)
                             .lineLimit(1)
-                            .layoutPriority(1)
-                            .padding(.horizontal, 12)
+                            .minimumScaleFactor(0.5)
+                            .padding(.horizontal, 8)
                             .padding(.vertical, 10)
                             .background(Color.gray.opacity(0.1))
                             .cornerRadius(8)
@@ -4835,17 +4855,19 @@ struct AddWorkExperienceView: View {
                                 get: { startMonth ?? YearOptions.currentMonth },
                                 set: { startMonth = $0 }
                             )) {
-                                Text("Not specified").tag(Int?.none)
+                                Text("Not specified")
+                                    .tag(Int?.none)
                                 ForEach(YearOptions.months, id: \.self) { month in
-                                    Text(YearOptions.shortMonthName(for: month)).tag(Int?.some(month))
+                                    Text(YearOptions.shortMonthName(for: month))
+                                        .tag(Int?.some(month))
                                 }
                             }
                             .pickerStyle(MenuPickerStyle())
-                            .fixedSize(horizontal: true, vertical: false) // 🎯 强制单行显示
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .font(.system(size: 14))
+                            .frame(maxWidth: .infinity)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                            .padding(.horizontal, 12)
+                            .minimumScaleFactor(0.5)
+                            .padding(.horizontal, 8)
                             .padding(.vertical, 10)
                             .background(Color.gray.opacity(0.1))
                             .cornerRadius(8)
@@ -4880,7 +4902,7 @@ struct AddWorkExperienceView: View {
                     }
                     
                     if !isPresent {
-                        HStack(spacing: 12) {
+                        HStack(spacing: 8) {
                             // End Year
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Year")
@@ -4891,15 +4913,16 @@ struct AddWorkExperienceView: View {
                                     set: { endYear = $0 }
                                 )) {
                                     ForEach(YearOptions.workExperienceYears, id: \.self) { year in
-                                        Text(verbatim: String(year)).tag(year)
+                                        Text(verbatim: String(year))
+                                            .tag(year)
                                     }
                                 }
                                 .pickerStyle(MenuPickerStyle())
-                                .fixedSize(horizontal: true, vertical: false) // 🎯 强制单行显示
-                                .frame(minWidth: 80, maxWidth: .infinity, minHeight: 44)
+                                .font(.system(size: 14))
+                                .frame(maxWidth: .infinity)
                                 .lineLimit(1)
-                                .layoutPriority(1)
-                                .padding(.horizontal, 12)
+                                .minimumScaleFactor(0.5)
+                                .padding(.horizontal, 8)
                                 .padding(.vertical, 10)
                                 .background(Color.gray.opacity(0.1))
                                 .cornerRadius(8)
@@ -4920,11 +4943,11 @@ struct AddWorkExperienceView: View {
                                     }
                                 }
                                 .pickerStyle(MenuPickerStyle())
-                                .fixedSize(horizontal: true, vertical: false) // 🎯 强制单行显示
-                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .font(.system(size: 14))
+                                .frame(maxWidth: .infinity)
                                 .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                                .padding(.horizontal, 12)
+                                .minimumScaleFactor(0.5)
+                                .padding(.horizontal, 8)
                                 .padding(.vertical, 10)
                                 .background(Color.gray.opacity(0.1))
                                 .cornerRadius(8)
@@ -4943,7 +4966,8 @@ struct AddWorkExperienceView: View {
                         .padding(.horizontal)
                 }
             }
-            .padding()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
             .navigationTitle("Add Work Experience")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -5054,7 +5078,7 @@ struct AddEducationView: View {
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                     
-                    HStack(spacing: 12) {
+                    HStack(spacing: 8) {
                         // Start Year
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Year")
@@ -5062,15 +5086,16 @@ struct AddEducationView: View {
                                 .foregroundColor(.gray)
                             Picker("Start Year", selection: $startYear) {
                                 ForEach(YearOptions.years, id: \.self) { year in
-                                    Text(verbatim: String(year)).tag(year)
+                                    Text(verbatim: String(year))
+                                        .tag(year)
                                 }
                             }
                             .pickerStyle(MenuPickerStyle())
-                            .fixedSize(horizontal: true, vertical: false) // 🎯 强制单行显示
-                            .frame(minWidth: 80, maxWidth: .infinity, minHeight: 44)
+                            .font(.system(size: 14))
+                            .frame(maxWidth: .infinity)
                             .lineLimit(1)
-                            .layoutPriority(1)
-                            .padding(.horizontal, 12)
+                            .minimumScaleFactor(0.5)
+                            .padding(.horizontal, 8)
                             .padding(.vertical, 10)
                             .background(Color.gray.opacity(0.1))
                             .cornerRadius(8)
@@ -5085,17 +5110,19 @@ struct AddEducationView: View {
                                 get: { startMonth ?? YearOptions.currentMonth },
                                 set: { startMonth = $0 }
                             )) {
-                                Text("Not specified").tag(Int?.none)
+                                Text("Not specified")
+                                    .tag(Int?.none)
                                 ForEach(YearOptions.months, id: \.self) { month in
-                                    Text(YearOptions.shortMonthName(for: month)).tag(Int?.some(month))
+                                    Text(YearOptions.shortMonthName(for: month))
+                                        .tag(Int?.some(month))
                                 }
                             }
                             .pickerStyle(MenuPickerStyle())
-                            .fixedSize(horizontal: true, vertical: false) // 🎯 强制单行显示
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .font(.system(size: 14))
+                            .frame(maxWidth: .infinity)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                            .padding(.horizontal, 12)
+                            .minimumScaleFactor(0.5)
+                            .padding(.horizontal, 8)
                             .padding(.vertical, 10)
                             .background(Color.gray.opacity(0.1))
                             .cornerRadius(8)
@@ -5130,7 +5157,7 @@ struct AddEducationView: View {
                     }
                     
                     if !isPresent {
-                        HStack(spacing: 12) {
+                        HStack(spacing: 8) {
                             // End Year
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Year")
@@ -5141,15 +5168,16 @@ struct AddEducationView: View {
                                     set: { endYear = $0 }
                                 )) {
                                     ForEach(YearOptions.years, id: \.self) { year in
-                                        Text(verbatim: String(year)).tag(year)
+                                        Text(verbatim: String(year))
+                                            .tag(year)
                                     }
                                 }
                                 .pickerStyle(MenuPickerStyle())
-                                .fixedSize(horizontal: true, vertical: false) // 🎯 强制单行显示
-                                .frame(minWidth: 80, maxWidth: .infinity, minHeight: 44)
+                                .font(.system(size: 14))
+                                .frame(maxWidth: .infinity)
                                 .lineLimit(1)
-                                .layoutPriority(1)
-                                .padding(.horizontal, 12)
+                                .minimumScaleFactor(0.5)
+                                .padding(.horizontal, 8)
                                 .padding(.vertical, 10)
                                 .background(Color.gray.opacity(0.1))
                                 .cornerRadius(8)
@@ -5170,11 +5198,11 @@ struct AddEducationView: View {
                                     }
                                 }
                                 .pickerStyle(MenuPickerStyle())
-                                .fixedSize(horizontal: true, vertical: false) // 🎯 强制单行显示
-                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .font(.system(size: 14))
+                                .frame(maxWidth: .infinity)
                                 .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                                .padding(.horizontal, 12)
+                                .minimumScaleFactor(0.5)
+                                .padding(.horizontal, 8)
                                 .padding(.vertical, 10)
                                 .background(Color.gray.opacity(0.1))
                                 .cornerRadius(8)
@@ -5222,7 +5250,8 @@ struct AddEducationView: View {
                         .padding(.horizontal)
                 }
             }
-            .padding()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
             .navigationTitle("Add Education")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
