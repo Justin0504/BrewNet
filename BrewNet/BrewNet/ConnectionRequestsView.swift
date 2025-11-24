@@ -16,6 +16,8 @@ struct ConnectionRequestsView: View {
     @State private var showingTemporaryChatDetail = false
     @State private var selectedTemporaryChatRequest: ConnectionRequest?
     @State private var totalUnreadTemporaryMessagesCount: Int = 0
+    @StateObject private var onboardingManager = OnboardingManager.shared
+    @State private var showRequestsTip = false // 显示临时聊天提示
     
     private var themeBrown: Color { BrewTheme.primaryBrown }
     private var themeBrownLight: Color { BrewTheme.secondaryBrown }
@@ -30,6 +32,12 @@ struct ConnectionRequestsView: View {
                 VStack(spacing: 0) {
                     // Top Bar
                     topBarView()
+                    
+                    // Contextual Tip - Temporary chat hint
+                    if showRequestsTip {
+                        ContextualTip.requestsTemporaryChatTip(isVisible: $showRequestsTip)
+                            .padding(.top, 8)
+                    }
                     
                     // Main Content
                     if isLoading {
@@ -117,6 +125,14 @@ struct ConnectionRequestsView: View {
                 .environmentObject(supabaseService)
             }
             .onAppear {
+                // 显示新用户引导提示
+                if !onboardingManager.hasSeenRequestsTip && !requests.isEmpty {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        showRequestsTip = true
+                        onboardingManager.markRequestsTipAsSeen()
+                    }
+                }
+                
                 loadConnectionRequests()
                 loadSentInvitations()
                 Task {

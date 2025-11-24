@@ -43,6 +43,8 @@ struct BrewNetMatchesView: View {
     @State private var isTransitioning = false // 标记是否正在过渡
     @State private var nextProfileOffset: CGFloat = 0 // 下一个 profile 的偏移量
     @State private var currentUserIsPro: Bool? = nil // 缓存当前用户的 Pro 状态
+    @StateObject private var onboardingManager = OnboardingManager.shared
+    @State private var showSwipeTip = false // 显示滑动提示
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -55,6 +57,12 @@ struct BrewNetMatchesView: View {
                 .ignoresSafeArea()
             
             VStack(spacing: 0) {
+                // Contextual Tip - Swipe hint
+                if showSwipeTip {
+                    ContextualTip.matchesSwipeTip(isVisible: $showSwipeTip)
+                        .padding(.top, 50)
+                }
+                
                 // Header Buttons - 放在卡片上方
                 HStack {
                     // 左上角按钮 - Match Filter
@@ -252,6 +260,14 @@ struct BrewNetMatchesView: View {
             Text("You've used all 10 connects for today. Upgrade to BrewNet Pro for unlimited connections and more exclusive features.")
         }
         .onAppear {
+            // 显示新用户引导提示
+            if !onboardingManager.hasSeenMatchesSwipeTip {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    showSwipeTip = true
+                    onboardingManager.markMatchesSwipeTipAsSeen()
+                }
+            }
+            
             // 预加载当前用户的 Pro 状态，优化临时聊天打开速度
             preloadCurrentUserProStatus()
             
