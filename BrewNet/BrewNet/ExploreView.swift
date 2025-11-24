@@ -1642,43 +1642,58 @@ struct TalentScoutResultCard: View {
         .rotationEffect(.degrees(isHovered ? 0.5 : 0))
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
         .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isPressed)
-        // ⭐ 限制点击区域：使用 contentShape 精确控制点击范围，只响应卡片内容区域的点击
-        .contentShape(RoundedRectangle(cornerRadius: 20))
-        .onTapGesture {
-            // 触觉反馈
-            let impactFeedback = UIImpactFeedbackGenerator(style: .light)
-            impactFeedback.impactOccurred()
-            onTap?()
-        }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 5)  // ⭐ 设置最小距离，允许滚动
-                .onChanged { value in
-                    // 只有在很小的移动范围内才认为是按压
-                    if abs(value.translation.width) < 5 && abs(value.translation.height) < 5 {
-                        withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
-                            isPressed = true
-                            isHovered = true
+        // ⭐ 限制点击区域：只响应左侧 85% 的区域，右侧 15% 用于滑动
+        .allowsHitTesting(false)  // 先禁用整个卡片的点击
+        .overlay(
+            GeometryReader { geometry in
+                // 左侧可点击区域（85% 宽度）
+                HStack(spacing: 0) {
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(Color.clear)
+                        .frame(width: geometry.size.width * 0.85)
+                        .contentShape(RoundedRectangle(cornerRadius: 20))
+                        .onTapGesture {
+                            // 触觉反馈
+                            let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+                            impactFeedback.impactOccurred()
+                            onTap?()
                         }
-                    } else {
-                        // 如果移动距离较大，取消按压状态，允许滚动
-                        withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
-                            isPressed = false
-                            isHovered = false
-                        }
-                    }
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 5)  // ⭐ 设置最小距离，允许滚动
+                                .onChanged { value in
+                                    // 只有在很小的移动范围内才认为是按压
+                                    if abs(value.translation.width) < 5 && abs(value.translation.height) < 5 {
+                                        withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
+                                            isPressed = true
+                                            isHovered = true
+                                        }
+                                    } else {
+                                        // 如果移动距离较大，取消按压状态，允许滚动
+                                        withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
+                                            isPressed = false
+                                            isHovered = false
+                                        }
+                                    }
+                                }
+                                .onEnded { value in
+                                    withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
+                                        isPressed = false
+                                        isHovered = false
+                                    }
+                                    // 如果移动距离很小，认为是点击
+                                    if abs(value.translation.width) < 5 && abs(value.translation.height) < 5 {
+                                        let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+                                        impactFeedback.impactOccurred()
+                                        onTap?()
+                                    }
+                                }
+                        )
+                    
+                    // 右侧空白区域（15% 宽度），不响应点击，用于滑动
+                    Spacer()
                 }
-                .onEnded { value in
-                    withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
-                        isPressed = false
-                        isHovered = false
-                    }
-                    // 如果移动距离很小，认为是点击
-                    if abs(value.translation.width) < 5 && abs(value.translation.height) < 5 {
-                        let impactFeedback = UIImpactFeedbackGenerator(style: .light)
-                        impactFeedback.impactOccurred()
-                        onTap?()
-                    }
-                }
+            }
+            .allowsHitTesting(true)
         )
     }
     
