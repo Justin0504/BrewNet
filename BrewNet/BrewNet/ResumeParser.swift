@@ -924,7 +924,22 @@ class ResumeParser {
                     }
                     
                     // If we have enough info, create WorkExperience
+                    // Skip entries that contain "Project" keyword (case-insensitive)
                     if let company = currentCompany, let start = startYear, company.count > 2 {
+                        let companyLower = company.lowercased()
+                        let positionLower = (currentPosition ?? "").lowercased()
+                        
+                        // Skip if company name or position contains "project"
+                        if companyLower.contains("project") || positionLower.contains("project") {
+                            // Reset for next entry
+                            currentCompany = nil
+                            currentPosition = nil
+                            startYear = nil
+                            endYear = nil
+                            isCurrent = false
+                            continue
+                        }
+                        
                         let experience = WorkExperience(
                             companyName: company,
                             startYear: start,

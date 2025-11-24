@@ -1430,7 +1430,7 @@ struct CoreIdentityStep: View {
                     
                     let updatedProfessionalBackground = ProfessionalBackground(
                         currentCompany: existingProfessionalBackground?.currentCompany, // Don't auto-fill current company from resume
-                        jobTitle: parsedResume.jobTitle ?? existingProfessionalBackground?.jobTitle,
+                        jobTitle: existingProfessionalBackground?.jobTitle, // Don't auto-fill job title from resume
                         industry: existingProfessionalBackground?.industry,
                         experienceLevel: existingProfessionalBackground?.experienceLevel ?? .entry,
                         education: existingProfessionalBackground?.education,
@@ -1444,7 +1444,7 @@ struct CoreIdentityStep: View {
                             }
                             return allEducations.isEmpty ? nil : allEducations
                         }(),
-                        yearsOfExperience: parsedResume.yearsOfExperience ?? existingProfessionalBackground?.yearsOfExperience,
+                        yearsOfExperience: existingProfessionalBackground?.yearsOfExperience, // Don't auto-fill years of experience from resume
                         careerStage: existingProfessionalBackground?.careerStage ?? .earlyCareer,
                         skills: {
                             var allSkills = existingProfessionalBackground?.skills ?? []
