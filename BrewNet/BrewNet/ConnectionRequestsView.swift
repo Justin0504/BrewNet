@@ -125,15 +125,23 @@ struct ConnectionRequestsView: View {
             }
             .onChange(of: onboardingManager.hasSeenRequestsTip) { hasSeenTip in
                 // 监听状态变化，当重置引导时自动显示提示
-                if !hasSeenTip && !requests.isEmpty {
+                if !hasSeenTip {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        showRequestsTip = true
+                    }
+                }
+            }
+            .onChange(of: isLoading) { loading in
+                // 当数据加载完成后，检查是否需要显示提示
+                if !loading && !onboardingManager.hasSeenRequestsTip && !showRequestsTip {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         showRequestsTip = true
                     }
                 }
             }
             .onAppear {
-                // 显示新用户引导提示
-                if !onboardingManager.hasSeenRequestsTip && !requests.isEmpty {
+                // 显示新用户引导提示（不依赖 requests 数据，因为动画演示不需要实际数据）
+                if !onboardingManager.hasSeenRequestsTip && !showRequestsTip {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         showRequestsTip = true
                     }
