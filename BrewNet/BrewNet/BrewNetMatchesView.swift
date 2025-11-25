@@ -42,6 +42,8 @@ struct BrewNetMatchesView: View {
     @State private var isProcessingLike = false
     @State private var isTransitioning = false // 标记是否正在过渡
     @State private var nextProfileOffset: CGFloat = 0 // 下一个 profile 的偏移量
+    @State private var showAddMessagePrompt = false // 显示添加消息提示弹窗
+    @State private var profilePendingInvitation: BrewNetProfile? = nil // 待发送邀请的profile
     @State private var currentUserIsPro: Bool? = nil // 缓存当前用户的 Pro 状态
     @StateObject private var onboardingManager = OnboardingManager.shared
     @State private var showSwipeTip = false // 显示滑动提示
@@ -227,6 +229,48 @@ struct BrewNetMatchesView: View {
                         }
                         // 重新加载 Pro 状态
                         preloadCurrentUserProStatus()
+                        
+                        // 如果购买前有待发送邀请的 profile，购买后自动打开临时聊天界面
+                        await MainActor.run {
+                            if let pendingProfile = profilePendingInvitation,
+                               let userId = authManager.currentUser?.id {
+                                // 等待 Pro 状态更新后再打开
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                    // 再次检查 Pro 状态
+                                    Task {
+                                        guard let currentUser = authManager.currentUser else {
+                                            print("❌ [购买后] 无法获取当前用户")
+                                            return
+                                        }
+                                        
+                                        if currentUser.isProActive {
+                                            // 确认是 Pro 用户后，打开临时聊天界面
+                                            await MainActor.run {
+                                                selectedProfileForChat = pendingProfile
+                                                showingTemporaryChat = true
+                                                currentUserIsPro = true
+                                                print("✅ [购买后] 自动打开临时聊天界面")
+                                            }
+                                        } else {
+                                            // 如果还不是 Pro，再次检查
+                                            do {
+                                                let canChat = try await supabaseService.canSendTemporaryChat(userId: userId)
+                                                if canChat {
+                                                    await MainActor.run {
+                                                        selectedProfileForChat = pendingProfile
+                                                        showingTemporaryChat = true
+                                                        currentUserIsPro = true
+                                                        print("✅ [购买后] 自动打开临时聊天界面（通过检查）")
+                                                    }
+                                                }
+                                            } catch {
+                                                print("❌ [购买后] 检查 Pro 状态失败: \(error.localizedDescription)")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -236,6 +280,13 @@ struct BrewNetMatchesView: View {
             if let isPro = isPro {
                 currentUserIsPro = isPro
                 print("✅ [临时聊天] Pro 状态已更新: \(isPro ? "Pro用户" : "普通用户")")
+                
+                // 如果刚变成 Pro 用户，且有待发送邀请的 profile，自动打开临时聊天界面
+                if isPro, let pendingProfile = profilePendingInvitation {
+                    selectedProfileForChat = pendingProfile
+                    showingTemporaryChat = true
+                    print("✅ [Pro状态更新] 自动打开临时聊天界面")
+                }
             }
         }
         .onChange(of: currentIndex) { _ in
@@ -258,6 +309,11 @@ struct BrewNetMatchesView: View {
             }
         } message: {
             Text("You've used all 6 connects for today. Upgrade to BrewNet Pro for unlimited connections and more exclusive features.")
+        }
+        .overlay {
+            if showAddMessagePrompt {
+                addMessagePromptView
+            }
         }
         .onAppear {
             // 显示新用户引导提示
@@ -576,6 +632,48 @@ struct BrewNetMatchesView: View {
         }
     }
     
+    // MARK: - Check Pro Status and Open Chat (for Add Message button)
+    private func checkProStatusAndOpenChat(profile: BrewNetProfile) {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        selectedProfileForChat = profile
+        
+        // 如果已经缓存了 Pro 状态，直接决定
+        if let isPro = currentUserIsPro {
+            if isPro {
+                showingTemporaryChat = true
+            } else {
+                showSubscriptionPayment = true
+            }
+            return
+        }
+        
+        // 检查 Pro 状态
+        Task {
+            do {
+                let canChat = try await supabaseService.canSendTemporaryChat(userId: currentUser.id)
+                await MainActor.run {
+                    // 缓存 Pro 状态
+                    currentUserIsPro = canChat
+                    
+                    if canChat {
+                        // Pro 用户，打开临时聊天界面
+                        showingTemporaryChat = true
+                    } else {
+                        // 普通用户，显示订阅窗口
+                        showSubscriptionPayment = true
+                    }
+                }
+            } catch {
+                print("❌ Failed to check Pro status: \(error.localizedDescription)")
+                // 如果检查失败，显示订阅窗口（更安全的选择）
+                await MainActor.run {
+                    showSubscriptionPayment = true
+                }
+            }
+        }
+    }
+    
     private func handleTemporaryChatSend(message: String, profile: BrewNetProfile) {
         guard let currentUser = authManager.currentUser else {
             print("❌ No current user found")
@@ -760,6 +858,24 @@ struct BrewNetMatchesView: View {
                 return
             }
 
+            // Check if this is the first like today - show prompt only on first like
+            let isFirstLike = try await supabaseService.isFirstLikeToday(userId: currentUser.id)
+            if isFirstLike {
+                // Update the first_like_today to current date
+                try await supabaseService.updateFirstLikeToday(userId: currentUser.id)
+                
+                await MainActor.run {
+                    profilePendingInvitation = profile
+                    showAddMessagePrompt = true
+                    // Reset animation
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                        dragOffset = .zero
+                        rotationAngle = 0
+                    }
+                }
+                return // Stop here and wait for user action
+            }
+
             if triggeredByButton {
                 await MainActor.run {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
@@ -930,6 +1046,146 @@ struct BrewNetMatchesView: View {
                     dragOffset = .zero
                     rotationAngle = 0
                 }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    errorMessage = nil
+                }
+            }
+        }
+    }
+    
+    private func sendInvitationWithoutMessage(profile: BrewNetProfile) async {
+        guard let currentUser = authManager.currentUser else {
+            print("❌ No current user found")
+            return
+        }
+        
+        do {
+            await MainActor.run {
+                likedProfiles.append(profile)
+            }
+
+            await recommendationService.recordLike(
+                userId: currentUser.id,
+                targetUserId: profile.userId
+            )
+
+            var senderProfile: InvitationProfile? = nil
+            if let currentUserProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                let brewNetProfile = currentUserProfile.toBrewNetProfile()
+                senderProfile = brewNetProfile.toInvitationProfile()
+            }
+
+            let invitation = try await supabaseService.sendInvitation(
+                senderId: currentUser.id,
+                receiverId: profile.userId,
+                reasonForInterest: nil,
+                senderProfile: senderProfile
+            )
+            print("✅ Invitation sent successfully (without message): \(invitation.id)")
+
+            await MainActor.run {
+                // 开始平滑过渡
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    isTransitioning = true
+                    nextProfileOffset = 0
+                }
+                
+                // 等待过渡动画完成后再更新数据
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    let removedIndex = profiles.firstIndex { $0.userId == profile.userId }
+                    if let index = removedIndex {
+                        profiles.remove(at: index)
+                        if index < currentIndex {
+                            currentIndex -= 1
+                        }
+                    }
+                    
+                    cachedProfiles.removeAll { $0.userId == profile.userId }
+                    proUsers.remove(profile.userId)
+                    verifiedUsers.remove(profile.userId)
+
+                    if !cachedProfiles.isEmpty {
+                        saveCachedProfilesToStorage(isFromRecommendation: isCacheFromRecommendation)
+                    } else {
+                        if let currentUser = authManager.currentUser {
+                            let cacheKey = "matches_cache_\(currentUser.id)"
+                            let timeKey = "matches_cache_time_\(currentUser.id)"
+                            let sourceKey = "matches_cache_source_\(currentUser.id)"
+                            UserDefaults.standard.removeObject(forKey: cacheKey)
+                            UserDefaults.standard.removeObject(forKey: timeKey)
+                            UserDefaults.standard.removeObject(forKey: sourceKey)
+                        }
+                        isCacheFromRecommendation = false
+                    }
+
+                    if currentIndex >= profiles.count && !profiles.isEmpty {
+                        currentIndex = profiles.count - 1
+                    } else if profiles.isEmpty {
+                        currentIndex = 0
+                        if hasMoreProfiles {
+                            loadMoreProfiles()
+                        }
+                    }
+                    
+                    dragOffset = .zero
+                    rotationAngle = 0
+                    isTransitioning = false
+                    nextProfileOffset = 0
+                    
+                    saveCurrentIndex()
+                    profilePendingInvitation = nil
+                }
+            }
+
+            Task {
+                do {
+                    try await supabaseService.clearRecommendationCache(userId: currentUser.id)
+                } catch {
+                    print("⚠️ Failed to clear server-side cache: \(error.localizedDescription)")
+                }
+            }
+
+            let receivedInvitations = try? await supabaseService.getPendingInvitations(userId: currentUser.id)
+            let existingInvitationFromThem = receivedInvitations?.first { $0.senderId == profile.userId }
+
+            if let theirInvitation = existingInvitationFromThem {
+                do {
+                    _ = try await supabaseService.acceptInvitation(
+                        invitationId: theirInvitation.id,
+                        userId: currentUser.id
+                    )
+                    _ = try await supabaseService.acceptInvitation(
+                        invitationId: invitation.id,
+                        userId: currentUser.id
+                    )
+
+                    await recommendationService.recordMatch(
+                        userId: currentUser.id,
+                        targetUserId: profile.userId
+                    )
+
+                    await MainActor.run {
+                        matchedProfile = profile
+                        showingMatchAlert = true
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("UserMatched"),
+                            object: nil,
+                            userInfo: ["profile": profile]
+                        )
+                    }
+                } catch {
+                    print("⚠️ Failed to accept invitations: \(error.localizedDescription)")
+                }
+            }
+
+            Task {
+                await authManager.refreshUser()
+            }
+        } catch {
+            print("❌ Failed to send invitation: \(error.localizedDescription)")
+            await MainActor.run {
+                errorMessage = "Failed to send invitation: \(error.localizedDescription)"
+                profilePendingInvitation = nil
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                     errorMessage = nil
                 }
@@ -2248,6 +2504,83 @@ struct BrewNetMatchesView: View {
         }
         
         return true
+    }
+    
+    // MARK: - Add Message Prompt View
+    private var addMessagePromptView: some View {
+        ZStack {
+            // Background overlay
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    // Dismiss when tapping outside
+                }
+            
+            // Alert dialog
+            VStack(spacing: 20) {
+                // Title
+                Text("Add a message?")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 24)
+                
+                // Message
+                Text("Personalize your request by adding a message. People are more likely to accept requests that include a message.")
+                    .font(.system(size: 15))
+                    .foregroundColor(Color(red: 0.3, green: 0.3, blue: 0.3))
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                
+                // Buttons
+                VStack(spacing: 12) {
+                    // Add a Message button
+                    Button(action: {
+                        showAddMessagePrompt = false
+                        if let profile = profilePendingInvitation {
+                            checkProStatusAndOpenChat(profile: profile)
+                        }
+                    }) {
+                        Text("Add a Message")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .cornerRadius(25)
+                    }
+                    
+                    // Send Anyway button
+                    Button(action: {
+                        showAddMessagePrompt = false
+                        if let profile = profilePendingInvitation {
+                            Task {
+                                await sendInvitationWithoutMessage(profile: profile)
+                            }
+                        }
+                    }) {
+                        Text("Send Anyway")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(Color.white)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 25)
+                                    .stroke(Color(red: 0.4, green: 0.2, blue: 0.1), lineWidth: 1.5)
+                            )
+                            .cornerRadius(25)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
+            }
+            .frame(maxWidth: 340)
+            .background(Color.white)
+            .cornerRadius(20)
+            .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 10)
+        }
     }
 }
 

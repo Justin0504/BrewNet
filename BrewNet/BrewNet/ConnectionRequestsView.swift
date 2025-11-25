@@ -443,8 +443,21 @@ struct ConnectionRequestsView: View {
                         backgroundImage: nil
                     )
                     
-                    // 从 senderProfile JSONB 中提取信息
-                    if let senderProfile = invitation.senderProfile {
+                    // 优先从 profile 表获取最新的信息（包括可修改的名字）
+                    if let senderProfile = try? await supabaseService.getProfile(userId: invitation.senderId) {
+                        let brewNetProfile = senderProfile.toBrewNetProfile()
+                        requesterProfile = ConnectionRequestProfile(
+                            profilePhoto: brewNetProfile.coreIdentity.profileImage,
+                            name: brewNetProfile.coreIdentity.name, // 使用 profile 表中可修改的名字
+                            jobTitle: brewNetProfile.professionalBackground.jobTitle ?? "",
+                            company: brewNetProfile.professionalBackground.currentCompany ?? "",
+                            location: brewNetProfile.coreIdentity.location ?? "",
+                            bio: brewNetProfile.coreIdentity.bio ?? "",
+                            expertise: brewNetProfile.professionalBackground.skills,
+                            backgroundImage: nil
+                        )
+                    } else if let senderProfile = invitation.senderProfile {
+                        // 如果 profile 表获取失败，回退到 senderProfile JSONB
                         requesterProfile = ConnectionRequestProfile(
                             profilePhoto: senderProfile.profileImage,
                             name: senderProfile.name,
@@ -455,21 +468,6 @@ struct ConnectionRequestsView: View {
                             expertise: senderProfile.expertise ?? [],
                             backgroundImage: nil
                         )
-                    } else {
-                        // 如果没有 senderProfile，尝试从 profile 表获取
-                        if let senderProfile = try? await supabaseService.getProfile(userId: invitation.senderId) {
-                            let brewNetProfile = senderProfile.toBrewNetProfile()
-                            requesterProfile = ConnectionRequestProfile(
-                                profilePhoto: brewNetProfile.coreIdentity.profileImage,
-                                name: brewNetProfile.coreIdentity.name,
-                                jobTitle: brewNetProfile.professionalBackground.jobTitle ?? "",
-                                company: brewNetProfile.professionalBackground.currentCompany ?? "",
-                                location: brewNetProfile.coreIdentity.location ?? "",
-                                bio: brewNetProfile.coreIdentity.bio ?? "",
-                                expertise: brewNetProfile.professionalBackground.skills,
-                                backgroundImage: nil
-                            )
-                        }
                     }
                     
                     // 解析创建时间
@@ -601,8 +599,21 @@ struct ConnectionRequestsView: View {
                     backgroundImage: nil
                 )
                 
-                // 从 senderProfile JSONB 中提取信息
-                if let senderProfile = invitation.senderProfile {
+                // 优先从 profile 表获取最新的信息（包括可修改的名字）
+                if let senderProfile = try? await supabaseService.getProfile(userId: invitation.senderId) {
+                    let brewNetProfile = senderProfile.toBrewNetProfile()
+                    requesterProfile = ConnectionRequestProfile(
+                        profilePhoto: brewNetProfile.coreIdentity.profileImage,
+                        name: brewNetProfile.coreIdentity.name, // 使用 profile 表中可修改的名字
+                        jobTitle: brewNetProfile.professionalBackground.jobTitle ?? "",
+                        company: brewNetProfile.professionalBackground.currentCompany ?? "",
+                        location: brewNetProfile.coreIdentity.location ?? "",
+                        bio: brewNetProfile.coreIdentity.bio ?? "",
+                        expertise: brewNetProfile.professionalBackground.skills,
+                        backgroundImage: nil
+                    )
+                } else if let senderProfile = invitation.senderProfile {
+                    // 如果 profile 表获取失败，回退到 senderProfile JSONB
                     requesterProfile = ConnectionRequestProfile(
                         profilePhoto: senderProfile.profileImage,
                         name: senderProfile.name,
@@ -613,21 +624,6 @@ struct ConnectionRequestsView: View {
                         expertise: senderProfile.expertise ?? [],
                         backgroundImage: nil
                     )
-                } else {
-                    // 如果没有 senderProfile，尝试从 profile 表获取
-                    if let senderProfile = try? await supabaseService.getProfile(userId: invitation.senderId) {
-                        let brewNetProfile = senderProfile.toBrewNetProfile()
-                        requesterProfile = ConnectionRequestProfile(
-                            profilePhoto: brewNetProfile.coreIdentity.profileImage,
-                            name: brewNetProfile.coreIdentity.name,
-                            jobTitle: brewNetProfile.professionalBackground.jobTitle ?? "",
-                            company: brewNetProfile.professionalBackground.currentCompany ?? "",
-                            location: brewNetProfile.coreIdentity.location ?? "",
-                            bio: brewNetProfile.coreIdentity.bio ?? "",
-                            expertise: brewNetProfile.professionalBackground.skills,
-                            backgroundImage: nil
-                        )
-                    }
                 }
                 
                 // 解析创建时间

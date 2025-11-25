@@ -1035,6 +1035,32 @@ extension AvailableTimeslot {
         
         return summary
     }
+    
+    /// 格式化时区显示字符串
+    func formattedTimezoneString(profileTimezone: String?) -> String? {
+        guard let profileTimezone = profileTimezone else { return nil }
+        
+        if let tz = TimeZone(identifier: profileTimezone) {
+            let offset = tz.secondsFromGMT()
+            let hours = offset / 3600
+            let minutes = abs(offset % 3600) / 60
+            let sign = hours >= 0 ? "+" : "-"
+            let offsetString = String(format: "%@%02d:%02d", sign, abs(hours), minutes)
+            return "\(profileTimezone.replacingOccurrences(of: "_", with: " ")) (GMT\(offsetString))"
+        }
+        return profileTimezone
+    }
+    
+    /// 格式化摘要，包含时区信息
+    func formattedSummaryWithTimezone(profileTimezone: String?) -> String {
+        let summary = formattedSummary()
+        
+        if let timezoneString = formattedTimezoneString(profileTimezone: profileTimezone) {
+            return "\(summary) • \(timezoneString)"
+        }
+        
+        return summary
+    }
 }
 
 // MARK: - Visibility Check Helper
