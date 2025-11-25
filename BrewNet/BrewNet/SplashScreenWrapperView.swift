@@ -8,9 +8,11 @@ struct SplashScreenWrapperView: View {
     let onProfileCheck: () -> Void
     
     @EnvironmentObject var authManager: AuthManager
+    @StateObject private var onboardingManager = OnboardingManager.shared
     @State private var showSplash = true
     @State private var hasLoaded = false
     @State private var shouldShowSplashAgain = false // 用于重新显示启动画面
+    @State private var showOnboarding = false // 用于显示新用户引导
     
     var body: some View {
         Group {
@@ -46,12 +48,24 @@ struct SplashScreenWrapperView: View {
                     onProfileCheck()
                 }
             } else if user.profileSetupCompleted || authManager.currentUser?.profileSetupCompleted == true {
-                // 显示主界面
-                // 使用 authManager.currentUser 作为源，因为它在编辑 profile 后会更新
-                MainView()
-                    .onAppear {
-                        print("🏠 主界面已显示，用户: \(user.name)")
-                    }
+                // 显示主界面或新用户引导
+                let shouldShowOnboarding = showOnboarding || !onboardingManager.hasSeenWelcomeOnboarding
+                let _ = print("🔍 [Onboarding Check] showOnboarding: \(showOnboarding), hasSeenWelcomeOnboarding: \(onboardingManager.hasSeenWelcomeOnboarding), shouldShowOnboarding: \(shouldShowOnboarding)")
+                
+                if shouldShowOnboarding {
+                    // 显示新用户引导
+                    WelcomeOnboardingView(isPresented: $showOnboarding)
+                        .onAppear {
+                            showOnboarding = true
+                            print("👋 新用户引导已显示")
+                        }
+                } else {
+                    // 使用 authManager.currentUser 作为源，因为它在编辑 profile 后会更新
+                    MainView()
+                        .onAppear {
+                            print("🏠 主界面已显示，用户: \(user.name)")
+                        }
+                }
             } else {
                 // 显示资料设置界面
                 ProfileSetupView()

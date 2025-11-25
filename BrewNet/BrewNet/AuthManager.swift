@@ -317,6 +317,9 @@ class AuthManager: ObservableObject {
                 
                 await MainActor.run {
                     saveUser(appUser)
+                    // 自动注册的用户都是新用户，重置引导状态
+                    OnboardingManager.shared.resetAllOnboarding()
+                    print("🔄 [自动注册] 新用户引导状态已重置")
                 }
                 
                 // 在线状态功能已移除
@@ -372,6 +375,12 @@ class AuthManager: ObservableObject {
                 await MainActor.run {
                     saveUser(finalAppUser)
                     print("✅ 用户登录成功: \(finalAppUser.name), profile completed: \(finalAppUser.profileSetupCompleted)")
+                    
+                    // 如果是新用户（还没完成资料设置），重置引导状态
+                    if !finalAppUser.profileSetupCompleted {
+                        OnboardingManager.shared.resetAllOnboarding()
+                        print("🔄 [登录] 检测到新用户，引导状态已重置")
+                    }
                 }
                 
                 // 在线状态功能已移除
@@ -520,6 +529,11 @@ class AuthManager: ObservableObject {
             if let userData = try? JSONEncoder().encode(user) {
                 userDefaults.set(userData, forKey: "apple_user_\(userID)")
             }
+            // 新用户注册时，重置引导状态
+            if !user.profileSetupCompleted {
+                OnboardingManager.shared.resetAllOnboarding()
+                print("🔄 [Apple Sign In] 新用户引导状态已重置")
+            }
         }
         
         print("✅ Apple Sign In completed successfully")
@@ -605,6 +619,9 @@ class AuthManager: ObservableObject {
         
         await MainActor.run {
             saveUser(user)
+            // 新用户注册时，重置引导状态
+            OnboardingManager.shared.resetAllOnboarding()
+            print("🔄 [本地注册] 新用户引导状态已重置")
         }
         return .success(user)
     }
@@ -673,6 +690,9 @@ class AuthManager: ObservableObject {
                 
                 await MainActor.run {
                     saveUser(appUser)
+                    // 新用户注册时，重置引导状态
+                    OnboardingManager.shared.resetAllOnboarding()
+                    print("🔄 [注册] 新用户引导状态已重置")
                 }
                 
                 print("✅ [注册] 注册流程完成: \(appUser.name)")
@@ -825,6 +845,9 @@ class AuthManager: ObservableObject {
                     
                     await MainActor.run {
                         saveUser(appUser)
+                        // 新用户注册时，重置引导状态
+                        OnboardingManager.shared.resetAllOnboarding()
+                        print("🔄 [手机号注册] 新用户引导状态已重置")
                     }
                     
                     return .success(appUser)

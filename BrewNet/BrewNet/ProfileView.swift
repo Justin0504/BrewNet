@@ -16,6 +16,7 @@ struct ProfileView: View {
     @State private var showingEditProfile = false
     @State private var showSubscriptionPayment = false
     @State private var showProExpiredPopup = false
+    @State private var showOnboardingResetAlert = false
     
     var body: some View {
         Group {
@@ -140,6 +141,19 @@ struct ProfileView: View {
                     
                     Divider()
                     
+                    // 查看新手引导
+                    Button(action: {
+                        OnboardingManager.shared.resetAllOnboarding()
+                        showOnboardingResetAlert = true
+                        // 触觉反馈
+                        let generator = UINotificationFeedbackGenerator()
+                        generator.notificationOccurred(.success)
+                    }) {
+                        Label("View Tutorial", systemImage: "questionmark.circle")
+                    }
+                    
+                    Divider()
+                    
                     Button(authManager.isCurrentUserGuest() ? "Exit Guest Mode" : "Logout", role: .destructive) {
                         showLogoutAlert = true
                     }
@@ -167,6 +181,11 @@ struct ProfileView: View {
             }
         } message: {
             Text("After upgrading to a regular user, your data will be permanently saved and you'll enjoy full functionality.")
+        }
+        .alert("Tutorial Restart", isPresented: $showOnboardingResetAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("You'll see the welcome tutorial and helpful tips again. Visit any tab to start the guided tour!")
         }
         .sheet(isPresented: $showingEditProfile) {
             ProfileSetupView()
