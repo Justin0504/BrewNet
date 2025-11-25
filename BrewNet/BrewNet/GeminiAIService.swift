@@ -598,6 +598,9 @@ class GeminiAIService: ObservableObject {
                     contentPart = contentPart.trimmingCharacters(in: .whitespaces)
                 }
                 
+                // 移除双引号（开头和结尾）
+                contentPart = contentPart.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                
                 // 尝试匹配风格
                 if let suggestionStyle = SuggestionStyle(rawValue: style), !contentPart.isEmpty {
                     suggestions.append(AISuggestion(
@@ -615,6 +618,9 @@ class GeminiAIService: ObservableObject {
                 cleaned.removeSubrange(match)
                 cleaned = cleaned.trimmingCharacters(in: .whitespaces)
             }
+            
+            // 移除双引号（开头和结尾）
+            cleaned = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
             
             // 如果清理后的内容不为空，添加为无风格的建议
             if !cleaned.isEmpty {
