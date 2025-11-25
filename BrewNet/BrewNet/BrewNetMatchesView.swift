@@ -249,7 +249,7 @@ struct BrewNetMatchesView: View {
                 showInviteLimitAlert = false
             }
         } message: {
-            Text("You've used all 10 connects for today. Upgrade to BrewNet Pro for unlimited connections and more exclusive features.")
+            Text("You've used all 6 connects for today. Upgrade to BrewNet Pro for unlimited connections and more exclusive features.")
         }
         .onAppear {
             // 预加载当前用户的 Pro 状态，优化临时聊天打开速度
