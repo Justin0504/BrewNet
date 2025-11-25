@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "linkedin-callback-server.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/auth/linkedin/callback",
+      "dest": "/linkedin-callback-server.js"
+    },
+    {
+      "src": "/health",
+      "dest": "/linkedin-callback-server.js"
+    }
+  ]
+}
+

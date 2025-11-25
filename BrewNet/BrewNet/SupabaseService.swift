@@ -5432,6 +5432,121 @@ extension SupabaseService {
             .execute()
     }
     
+    /// Check if this is the user's first like/swipe today
+    /// Returns true if this is the first like today, false otherwise
+    func isFirstLikeToday(userId: String) async throws -> Bool {
+        print("🔍 [First Like] Checking if user \(userId) has liked today")
+        
+        do {
+            let response = try await client
+                .from("users")
+                .select("first_like_today")
+                .eq("id", value: userId)
+                .single()
+                .execute()
+            
+            let data = response.data
+            print("📊 [First Like] Response data received, size: \(data.count) bytes")
+            
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                print("❌ [First Like] Failed to parse JSON response")
+                throw NSError(domain: "FirstLikeError", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法获取用户首次点赞信息"])
+            }
+            
+            print("📋 [First Like] JSON keys: \(json.keys)")
+            
+            // Get first_like_today value (format: "YYYY-MM-DD" or nil)
+            if let firstLikeDateStr = json["first_like_today"] as? String {
+                print("📅 [First Like] Found existing date: \(firstLikeDateStr)")
+                
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyy-MM-dd"
+                dateFormatter.timeZone = TimeZone.current
+                
+                let todayStr = dateFormatter.string(from: Date())
+                print("📅 [First Like] Today is: \(todayStr)")
+                
+                if let firstLikeDate = dateFormatter.date(from: firstLikeDateStr) {
+                    let today = Calendar.current.startOfDay(for: Date())
+                    let firstLikeDay = Calendar.current.startOfDay(for: firstLikeDate)
+                    
+                    if firstLikeDay == today {
+                        // Already liked today
+                        print("❌ [First Like] User already liked today (\(firstLikeDateStr))")
+                        return false
+                    } else {
+                        // Last like was on a different day, this is first like today
+                        print("✅ [First Like] User's last like was \(firstLikeDateStr), today is first like")
+                        return true
+                    }
+                } else {
+                    print("⚠️ [First Like] Failed to parse date string: \(firstLikeDateStr)")
+                }
+            } else {
+                print("📋 [First Like] first_like_today value: \(json["first_like_today"] ?? "nil")")
+            }
+            
+            // No previous like recorded, this is definitely first like today
+            print("✅ [First Like] No previous like recorded, this is first like today")
+            return true
+        } catch {
+            print("❌ [First Like] Error checking first like: \(error)")
+            print("❌ [First Like] Error details: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    /// Update the user's first_like_today to current date
+    func updateFirstLikeToday(userId: String) async throws {
+        print("🔄 [First Like] Starting update for user \(userId)")
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        dateFormatter.timeZone = TimeZone.current
+        let todayStr = dateFormatter.string(from: Date())
+        
+        print("📅 [First Like] Today's date: \(todayStr)")
+        
+        struct FirstLikeUpdate: Encodable {
+            let first_like_today: String
+        }
+        
+        let update = FirstLikeUpdate(first_like_today: todayStr)
+        
+        do {
+            let response = try await client
+                .from("users")
+                .update(update)
+                .eq("id", value: userId)
+                .execute()
+            
+            print("✅ [First Like] Update response received")
+            print("📊 [First Like] Response status: \(response.response.statusCode)")
+            
+            // Verify the update
+            let verifyResponse = try await client
+                .from("users")
+                .select("first_like_today")
+                .eq("id", value: userId)
+                .single()
+                .execute()
+            
+            let verifyData = verifyResponse.data
+            if let json = try? JSONSerialization.jsonObject(with: verifyData) as? [String: Any],
+               let updatedDate = json["first_like_today"] as? String {
+                print("✅ [First Like] Verified: first_like_today = \(updatedDate)")
+            } else {
+                print("⚠️ [First Like] Could not verify update, field might still be NULL")
+            }
+            
+            print("✅ [First Like] Updated first_like_today to \(todayStr) for user \(userId)")
+        } catch {
+            print("❌ [First Like] Update failed: \(error)")
+            print("❌ [First Like] Error details: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
     /// Get user's current likes remaining
     func getUserLikesRemaining(userId: String) async throws -> Int {
         let response = try await client
