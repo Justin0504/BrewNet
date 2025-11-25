@@ -33,7 +33,7 @@ struct ExploreMainView: View {
     @State private var loadingTimer: Timer? = nil  // ⭐ 加载动画定时器
     @State private var showTalentScoutTip: Bool = false     // 新用户提示
     @State private var showAddMessagePrompt = false         // 显示添加消息提示窗
-    @State private var profilePendingInvitation: BrewMetProfile? = nil  // 待发送邀请的profile
+    @State private var profilePendingInvitation: BrewNetProfile? = nil  // 待发送邀请的profile
 
     
     private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
