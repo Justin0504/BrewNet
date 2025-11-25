@@ -33,12 +33,6 @@ struct ConnectionRequestsView: View {
                     // Top Bar
                     topBarView()
                     
-                    // Contextual Tip - Temporary chat hint
-                    if showRequestsTip {
-                        ContextualTip.requestsTemporaryChatTip(isVisible: $showRequestsTip)
-                            .padding(.top, 8)
-                    }
-                    
                     // Main Content
                     if isLoading {
                         loadingView()
@@ -48,6 +42,11 @@ struct ConnectionRequestsView: View {
                         // List View
                         listView()
                     }
+                }
+                
+                // Requests Tip Overlay - 全屏弹窗
+                if showRequestsTip {
+                    RequestsTipOverlay(isVisible: $showRequestsTip)
                 }
             }
             .navigationBarHidden(true)
@@ -124,12 +123,19 @@ struct ConnectionRequestsView: View {
                 .environmentObject(databaseManager)
                 .environmentObject(supabaseService)
             }
+            .onChange(of: onboardingManager.hasSeenRequestsTip) { hasSeenTip in
+                // 监听状态变化，当重置引导时自动显示提示
+                if !hasSeenTip && !requests.isEmpty {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        showRequestsTip = true
+                    }
+                }
+            }
             .onAppear {
                 // 显示新用户引导提示
                 if !onboardingManager.hasSeenRequestsTip && !requests.isEmpty {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         showRequestsTip = true
-                        onboardingManager.markRequestsTipAsSeen()
                     }
                 }
                 
@@ -2334,6 +2340,334 @@ struct TemporaryMessageBubbleView: View {
         formatter.dateStyle = .none
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+}
+
+// MARK: - Requests Tip Overlay (全屏弹窗)
+struct RequestsTipOverlay: View {
+    @Binding var isVisible: Bool
+    @State private var overlayOpacity: Double = 0
+    @State private var showCard = false
+    @State private var showMessageIcon = false
+    @State private var messageIconScale: CGFloat = 1.0
+    @State private var showChatBubble = false
+    @State private var chatBubbleOpacity: Double = 0
+    @State private var showButtons = false
+    @State private var acceptButtonScale: CGFloat = 1.0
+    @State private var declineButtonScale: CGFloat = 1.0
+    
+    private let themeColor = Color(red: 0.4, green: 0.2, blue: 0.1)
+    
+    var body: some View {
+        ZStack {
+            // 半透明背景
+            Color.black.opacity(overlayOpacity * 0.7)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    dismissTip()
+                }
+            
+            VStack(spacing: 0) {
+                Spacer()
+                
+                // 标题和说明
+                VStack(spacing: 12) {
+                    Text("Temporary Chat")
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundColor(.white)
+                    
+                    Text("Get to know them before connecting")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.white.opacity(0.85))
+                }
+                .padding(.bottom, 40)
+                
+                // 模拟连接请求卡片
+                ZStack {
+                    if showCard {
+                        VStack(spacing: 0) {
+                            // 模拟请求卡片
+                            HStack(spacing: 16) {
+                                // 头像
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                Color(red: 0.6, green: 0.4, blue: 0.2),
+                                                Color(red: 0.4, green: 0.2, blue: 0.1)
+                                            ]),
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 60, height: 60)
+                                    .overlay(
+                                        Image(systemName: "person.fill")
+                                            .font(.system(size: 28))
+                                            .foregroundColor(.white.opacity(0.8))
+                                    )
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text("Sarah Chen")
+                                            .font(.system(size: 20, weight: .bold))
+                                            .foregroundColor(themeColor)
+                                        
+                                        Text("Pro")
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 3)
+                                            .background(Color.orange)
+                                            .cornerRadius(8)
+                                    }
+                                    
+                                    Text("Product Designer • Google")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(themeColor.opacity(0.7))
+                                }
+                                
+                                Spacer()
+                                
+                                // 消息图标
+                                if showMessageIcon {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color.blue)
+                                            .frame(width: 50, height: 50)
+                                            .shadow(color: Color.blue.opacity(0.5), radius: 15, x: 0, y: 5)
+                                        
+                                        Image(systemName: "message.fill")
+                                            .font(.system(size: 24))
+                                            .foregroundColor(.white)
+                                    }
+                                    .scaleEffect(messageIconScale)
+                                    .transition(.scale.combined(with: .opacity))
+                                }
+                            }
+                            .padding(20)
+                            .background(Color.white)
+                            .cornerRadius(20)
+                            .shadow(color: Color.black.opacity(0.1), radius: 15, x: 0, y: 8)
+                            
+                            // 聊天气泡
+                            if showChatBubble {
+                                VStack(spacing: 12) {
+                                    // 对方消息
+                                    HStack {
+                                        HStack(spacing: 8) {
+                                            Circle()
+                                                .fill(themeColor)
+                                                .frame(width: 28, height: 28)
+                                                .overlay(
+                                                    Image(systemName: "person.fill")
+                                                        .font(.system(size: 12))
+                                                        .foregroundColor(.white)
+                                                )
+                                            
+                                            Text("Hi! Thanks for reaching out!")
+                                                .font(.system(size: 14))
+                                                .foregroundColor(.white)
+                                                .padding(.horizontal, 14)
+                                                .padding(.vertical, 8)
+                                                .background(themeColor)
+                                                .cornerRadius(16)
+                                        }
+                                        Spacer()
+                                    }
+                                    .opacity(chatBubbleOpacity)
+                                    
+                                    // 你的消息
+                                    HStack {
+                                        Spacer()
+                                        Text("Great to connect! ☕️")
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 8)
+                                            .background(Color.blue)
+                                            .cornerRadius(16)
+                                    }
+                                    .opacity(chatBubbleOpacity)
+                                }
+                                .padding(.top, 20)
+                                .padding(.horizontal, 20)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                            }
+                            
+                            // Accept/Decline 按钮
+                            if showButtons {
+                                HStack(spacing: 16) {
+                                    // Decline 按钮
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 18, weight: .semibold))
+                                        Text("Decline")
+                                            .font(.system(size: 16, weight: .semibold))
+                                    }
+                                    .foregroundColor(.red)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 48)
+                                    .background(Color.white)
+                                    .cornerRadius(24)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 24)
+                                            .stroke(Color.red.opacity(0.3), lineWidth: 2)
+                                    )
+                                    .scaleEffect(declineButtonScale)
+                                    
+                                    // Accept 按钮
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 18, weight: .semibold))
+                                        Text("Accept")
+                                            .font(.system(size: 16, weight: .semibold))
+                                    }
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 48)
+                                    .background(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                Color.green,
+                                                Color.green.opacity(0.8)
+                                            ]),
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .cornerRadius(24)
+                                    .shadow(color: Color.green.opacity(0.3), radius: 10, x: 0, y: 5)
+                                    .scaleEffect(acceptButtonScale)
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.top, 20)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                            }
+                        }
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .frame(height: 380)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 30)
+                
+                Spacer()
+                
+                // "Got it" 按钮
+                Button(action: {
+                    dismissTip()
+                }) {
+                    Text("Got it!")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(themeColor)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(Color.white)
+                        .cornerRadius(28)
+                        .shadow(color: Color.black.opacity(0.2), radius: 15, x: 0, y: 8)
+                }
+                .padding(.horizontal, 40)
+                .padding(.bottom, 50)
+            }
+        }
+        .opacity(overlayOpacity)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                overlayOpacity = 1
+            }
+            startAnimation()
+        }
+    }
+    
+    private func startAnimation() {
+        // 显示卡片
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
+                showCard = true
+            }
+            
+            // 显示消息图标
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.6)) {
+                    showMessageIcon = true
+                }
+                
+                // 消息图标脉冲动画
+                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                    messageIconScale = 1.15
+                }
+                
+                // 点击后显示聊天
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    showChatSequence()
+                }
+            }
+        }
+    }
+    
+    private func showChatSequence() {
+        // 显示聊天气泡
+        withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
+            showChatBubble = true
+        }
+        
+        // 聊天气泡淡入
+        withAnimation(.easeIn(duration: 0.5)) {
+            chatBubbleOpacity = 1
+        }
+        
+        // 显示按钮
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
+                showButtons = true
+            }
+            
+            // 按钮脉冲动画
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                acceptButtonScale = 1.05
+            }
+            
+            // 3秒后重置
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                resetAnimation()
+            }
+        }
+    }
+    
+    private func resetAnimation() {
+        // 重置所有状态
+        withAnimation(.easeOut(duration: 0.3)) {
+            showButtons = false
+            showChatBubble = false
+            chatBubbleOpacity = 0
+            showMessageIcon = false
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            // 重新开始
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.6)) {
+                showMessageIcon = true
+            }
+            
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                messageIconScale = 1.15
+            }
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                showChatSequence()
+            }
+        }
+    }
+    
+    private func dismissTip() {
+        OnboardingManager.shared.markRequestsTipAsSeen()
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            overlayOpacity = 0
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            isVisible = false
+        }
     }
 }
 

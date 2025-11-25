@@ -44,6 +44,7 @@ struct ChatInterfaceView: View {
     @State private var showingLocationErrorAlert = false // 显示地点错误提示
     @State private var cancelledInvitationIds: Set<String> = [] // 已取消的邀请ID集合，防止重新加载
     private let cancelledInvitationIdsKey = "cancelled_coffee_chat_invitation_ids" // UserDefaults key
+    @State private var showChatTip = false // 💡 新用户提示
     
     var body: some View {
         mainContent
@@ -74,7 +75,30 @@ struct ChatInterfaceView: View {
                 }
             }
             .toolbar(selectedSession != nil ? .hidden : .visible, for: .navigationBar)
+            .onChange(of: OnboardingManager.shared.hasSeenChatTip) { hasSeenTip in
+                // 监听状态变化，当重置引导时自动显示提示
+                if !hasSeenTip && selectedSession != nil && !chatSessions.isEmpty {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        showChatTip = true
+                    }
+                }
+            }
+            .onChange(of: selectedSession?.id) { sessionId in
+                // 当进入聊天详情时，检查是否需要显示提示
+                if sessionId != nil && !OnboardingManager.shared.hasSeenChatTip && !chatSessions.isEmpty {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        showChatTip = true
+                    }
+                }
+            }
             .onAppear {
+                // 显示新用户引导提示
+                if !OnboardingManager.shared.hasSeenChatTip && selectedSession != nil && !chatSessions.isEmpty {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        showChatTip = true
+                    }
+                }
+                
                 loadChatSessions()
                 startMessageRefreshTimer()
                 // 确保初始状态正确
@@ -404,6 +428,11 @@ struct ChatInterfaceView: View {
                 } else {
                     chatListView
                 }
+            }
+            
+            // Chat Tip Overlay - 全屏弹窗
+            if showChatTip && selectedSession != nil {
+                ChatTipOverlay(isVisible: $showChatTip)
             }
         }
         .sheet(isPresented: $showingSendInvitationSheet) {
@@ -3445,7 +3474,7 @@ struct MessageBubbleView: View {
             }
             
             Text(message.content)
-                .font(.system(size: 16))
+                .font(Font.system(size: 16))
                 .foregroundColor(message.isFromUser ? .white : Color(red: 0.4, green: 0.2, blue: 0.1))
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)

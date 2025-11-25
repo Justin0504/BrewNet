@@ -31,6 +31,7 @@ struct ExploreMainView: View {
     @State private var loadingMessageIndex = 0  // ⭐ 加载消息索引
     @State private var loadingProgress: Double = 0.0  // ⭐ 加载进度
     @State private var loadingTimer: Timer? = nil  // ⭐ 加载动画定时器
+    @State private var showTalentScoutTip: Bool = false  // 💡 新用户提示
     
     private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
     private var backgroundColor: Color { Color(red: 0.98, green: 0.97, blue: 0.95) }
@@ -62,8 +63,29 @@ struct ExploreMainView: View {
                     .padding(.horizontal, 20)
                     .padding(.vertical, 24)
                 }
+                
+                // Talent Scout Tip Overlay - 全屏弹窗
+                if showTalentScoutTip {
+                    TalentScoutTipOverlay(isVisible: $showTalentScoutTip)
+                }
             }
             .navigationBarHidden(true)
+            .onChange(of: OnboardingManager.shared.hasSeenTalentScoutTip) { hasSeenTip in
+                // 监听状态变化，当重置引导时自动显示提示
+                if !hasSeenTip {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        showTalentScoutTip = true
+                    }
+                }
+            }
+            .onAppear {
+                // 显示新用户引导提示
+                if !OnboardingManager.shared.hasSeenTalentScoutTip {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        showTalentScoutTip = true
+                    }
+                }
+            }
         }
         .sheet(item: $selectedProfile) { profile in
             TalentScoutProfileCardSheet(
@@ -2125,6 +2147,238 @@ private struct UserProfileCardPreview: View {
             }
         } catch {
             print("⚠️ [TalentScoutProfileCard] 刷新信誉评分失败: \(error.localizedDescription)")
+        }
+    }
+}
+
+// MARK: - Talent Scout Tip Overlay (全屏弹窗)
+struct TalentScoutTipOverlay: View {
+    @Binding var isVisible: Bool
+    @State private var overlayOpacity: Double = 0
+    @State private var typedText: String = ""
+    @State private var showSearchBar = false
+    @State private var showResults = false
+    @State private var resultOffsets: [CGFloat] = [300, 300, 300]
+    @State private var resultOpacities: [Double] = [0, 0, 0]
+    
+    private let themeColor = Color(red: 0.4, green: 0.2, blue: 0.1)
+    private let fullText = "alumni from Stanford"
+    
+    var body: some View {
+        ZStack {
+            // 半透明背景
+            Color.black.opacity(overlayOpacity * 0.7)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    dismissTip()
+                }
+            
+            VStack(spacing: 0) {
+                Spacer()
+                
+                // 标题和说明
+                VStack(spacing: 12) {
+                    Text("Natural Language Search")
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundColor(.white)
+                    
+                    Text("Describe who you want to meet")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.white.opacity(0.85))
+                }
+                .padding(.bottom, 40)
+                
+                // 模拟搜索界面
+                VStack(spacing: 20) {
+                    // 搜索框
+                    if showSearchBar {
+                        HStack(spacing: 12) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 20))
+                                .foregroundColor(themeColor.opacity(0.6))
+                            
+                            Text(typedText)
+                                .font(.system(size: 17))
+                                .foregroundColor(themeColor)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            
+                            if typedText.count < fullText.count {
+                                Text("|")
+                                    .font(.system(size: 17))
+                                    .foregroundColor(themeColor.opacity(0.3))
+                            }
+                        }
+                        .padding()
+                        .background(Color.white)
+                        .cornerRadius(16)
+                        .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                    
+                    // 搜索结果
+                    if showResults {
+                        VStack(spacing: 12) {
+                            ForEach(0..<3) { index in
+                                HStack(spacing: 12) {
+                                    // 模拟头像
+                                    Circle()
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(colors: [
+                                                    Color(red: 0.6, green: 0.4, blue: 0.2),
+                                                    Color(red: 0.4, green: 0.2, blue: 0.1)
+                                                ]),
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .frame(width: 50, height: 50)
+                                        .overlay(
+                                            Image(systemName: "person.fill")
+                                                .font(.system(size: 20))
+                                                .foregroundColor(.white.opacity(0.8))
+                                        )
+                                    
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            RoundedRectangle(cornerRadius: 4)
+                                                .fill(Color.gray.opacity(0.3))
+                                                .frame(width: 120, height: 14)
+                                            
+                                            Image(systemName: "checkmark.seal.fill")
+                                                .font(.system(size: 14))
+                                                .foregroundColor(.blue)
+                                        }
+                                        
+                                        RoundedRectangle(cornerRadius: 4)
+                                            .fill(Color.gray.opacity(0.2))
+                                            .frame(width: 180, height: 12)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    // Stanford 徽章
+                                    Image(systemName: "building.columns.fill")
+                                        .font(.system(size: 20))
+                                        .foregroundColor(themeColor.opacity(0.6))
+                                }
+                                .padding()
+                                .background(Color.white)
+                                .cornerRadius(16)
+                                .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 4)
+                                .offset(y: resultOffsets[index])
+                                .opacity(resultOpacities[index])
+                            }
+                        }
+                    }
+                }
+                .frame(height: 320)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 30)
+                
+                Spacer()
+                
+                // "Got it" 按钮
+                Button(action: {
+                    dismissTip()
+                }) {
+                    Text("Got it!")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(themeColor)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(Color.white)
+                        .cornerRadius(28)
+                        .shadow(color: Color.black.opacity(0.2), radius: 15, x: 0, y: 8)
+                }
+                .padding(.horizontal, 40)
+                .padding(.bottom, 50)
+            }
+        }
+        .opacity(overlayOpacity)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                overlayOpacity = 1
+            }
+            
+            startAnimation()
+        }
+    }
+    
+    private func startAnimation() {
+        // 延迟0.5秒后显示搜索框
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                showSearchBar = true
+            }
+            
+            // 开始打字动画
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                startTypingAnimation()
+            }
+        }
+    }
+    
+    private func startTypingAnimation() {
+        guard typedText.count < fullText.count else {
+            // 打字完成，显示搜索结果
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                showResults = true
+                animateResults()
+            }
+            
+            // 3秒后重置动画
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+                resetAnimation()
+            }
+            return
+        }
+        
+        let nextIndex = typedText.count
+        let nextChar = fullText[fullText.index(fullText.startIndex, offsetBy: nextIndex)]
+        typedText.append(nextChar)
+        
+        // 继续打字，每个字符间隔0.1秒
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            startTypingAnimation()
+        }
+    }
+    
+    private func animateResults() {
+        // 依次显示三个结果
+        for i in 0..<3 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.2) {
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
+                    resultOffsets[i] = 0
+                    resultOpacities[i] = 1
+                }
+            }
+        }
+    }
+    
+    private func resetAnimation() {
+        // 重置所有状态
+        withAnimation(.easeOut(duration: 0.3)) {
+            showResults = false
+            resultOffsets = [300, 300, 300]
+            resultOpacities = [0, 0, 0]
+        }
+        
+        typedText = ""
+        
+        // 重新开始
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            startTypingAnimation()
+        }
+    }
+    
+    private func dismissTip() {
+        OnboardingManager.shared.markTalentScoutTipAsSeen()
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            overlayOpacity = 0
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            isVisible = false
         }
     }
 }
