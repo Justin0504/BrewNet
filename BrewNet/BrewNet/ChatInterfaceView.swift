@@ -3821,8 +3821,14 @@ struct MessageBubbleView: View {
                     notes: notesText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notesText.trimmingCharacters(in: .whitespacesAndNewlines)
                 )
                 
+                // 获取当前用户的 profile，使用 profile 中可修改的用户名
+                var userName = currentUser.name // 默认使用 currentUser.name
+                if let currentUserProfile = try? await supabaseService.getProfile(userId: currentUser.id) {
+                    userName = currentUserProfile.coreIdentity.name
+                }
+                
                 // 在数据库中保存系统消息给a："b accepted your coffee chat invitation"
-                let acceptMessageContent = "\(currentUser.name) accepted your coffee chat invitation"
+                let acceptMessageContent = "\(userName) accepted your coffee chat invitation"
                 let _ = try await supabaseService.sendMessage(
                     senderId: receiverId, // b发送给a
                     receiverId: senderId,
