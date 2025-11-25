@@ -31,7 +31,10 @@ struct ExploreMainView: View {
     @State private var loadingMessageIndex = 0  // ⭐ 加载消息索引
     @State private var loadingProgress: Double = 0.0  // ⭐ 加载进度
     @State private var loadingTimer: Timer? = nil  // ⭐ 加载动画定时器
-    @State private var showTalentScoutTip: Bool = false  // 💡 新用户提示
+    @State private var showTalentScoutTip: Bool = false     // 新用户提示
+    @State private var showAddMessagePrompt = false         // 显示添加消息提示窗
+    @State private var profilePendingInvitation: BrewMetProfile? = nil  // 待发送邀请的profile
+
     
     private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
     private var backgroundColor: Color { Color(red: 0.98, green: 0.97, blue: 0.95) }
@@ -152,7 +155,12 @@ struct ExploreMainView: View {
                 showingInviteLimitAlert = false
             }
         } message: {
-            Text("You've used all 10 connects for today. Upgrade to BrewNet Pro for unlimited connections and more exclusive features.")
+            Text("You've used all 6 connects for today. Upgrade to BrewNet Pro for unlimited connections and more exclusive features.")
+        }
+        .overlay {
+            if showAddMessagePrompt {
+                addMessagePromptView
+            }
         }
         .onAppear {
             // 预加载当前用户的 Pro 状态，加快后续临时聊天检查速度
@@ -1367,6 +1375,19 @@ struct ExploreMainView: View {
                 return
             }
             
+            // Check if this is the first like today - show prompt only on first like
+            let isFirstLike = try await supabaseService.isFirstLikeToday(userId: currentUser.id)
+            if isFirstLike {
+                // Update the first_like_today to current date
+                try await supabaseService.updateFirstLikeToday(userId: currentUser.id)
+                
+                await MainActor.run {
+                    profilePendingInvitation = profile
+                    showAddMessagePrompt = true
+                }
+                return // Stop here and wait for user action
+            }
+            
             var senderProfile: InvitationProfile? = nil
             if let supabaseProfile = try await supabaseService.getProfile(userId: currentUser.id) {
                 let brewNetProfile = supabaseProfile.toBrewNetProfile()
@@ -1393,6 +1414,113 @@ struct ExploreMainView: View {
             engagedProfileIds.insert(profile.userId)
         }
         openTemporaryChat(profile: profile)
+    }
+    
+    private func sendInvitationWithoutMessage(profile: BrewNetProfile) async {
+        guard let currentUser = authManager.currentUser else { return }
+        
+        do {
+            var senderProfile: InvitationProfile? = nil
+            if let supabaseProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                let brewNetProfile = supabaseProfile.toBrewNetProfile()
+                senderProfile = brewNetProfile.toInvitationProfile()
+            }
+            
+            _ = try await supabaseService.sendInvitation(
+                senderId: currentUser.id,
+                receiverId: profile.userId,
+                reasonForInterest: "Talent Scout coffee chat",
+                senderProfile: senderProfile
+            )
+            
+            await MainActor.run {
+                engagedProfileIds.insert(profile.userId)
+                profilePendingInvitation = nil
+            }
+            
+            print("✅ Invitation sent successfully (without message)")
+        } catch {
+            print("❌ Failed to send invitation: \(error.localizedDescription)")
+            await MainActor.run {
+                profilePendingInvitation = nil
+            }
+        }
+    }
+    
+    // MARK: - Add Message Prompt View
+    private var addMessagePromptView: some View {
+        ZStack {
+            // Background overlay
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    // Dismiss when tapping outside
+                }
+            
+            // Alert dialog
+            VStack(spacing: 20) {
+                // Title
+                Text("ADD A MESSAGE TO YOUR INVITATION?")
+                    .font(.system(size: 18, weight: .bold))
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 24)
+                
+                // Message
+                Text("Personalize your request by adding a message. People are more likely to accept requests that include a message.")
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20)
+                
+                // Buttons
+                VStack(spacing: 12) {
+                    // Add a Message button
+                    Button(action: {
+                        showAddMessagePrompt = false
+                        if let profile = profilePendingInvitation {
+                            selectedProfileForChat = profile
+                            showingTemporaryChat = true
+                        }
+                    }) {
+                        Text("Add a Message")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .cornerRadius(25)
+                    }
+                    
+                    // Send Anyway button
+                    Button(action: {
+                        showAddMessagePrompt = false
+                        if let profile = profilePendingInvitation {
+                            Task {
+                                await sendInvitationWithoutMessage(profile: profile)
+                            }
+                        }
+                    }) {
+                        Text("Send Anyway")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(Color.white)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 25)
+                                    .stroke(Color(red: 0.4, green: 0.2, blue: 0.1), lineWidth: 1.5)
+                            )
+                            .cornerRadius(25)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
+            }
+            .frame(maxWidth: 340)
+            .background(Color.white)
+            .cornerRadius(20)
+            .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 10)
+        }
     }
 }
 

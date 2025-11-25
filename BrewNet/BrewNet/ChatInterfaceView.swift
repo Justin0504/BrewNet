@@ -1265,44 +1265,56 @@ struct ChatInterfaceView: View {
         return user.avatar
     }
     
-    /// 更新聊天会话的头像（当头像更新时调用）
+    /// 更新聊天会话的头像和名字（当 profile 更新时调用）
     private func updateChatSessionsWithAvatars() {
         // 由于 ChatSession 的 user 是 let，需要重新创建整个会话
         var updatedSessions: [ChatSession] = []
         for session in chatSessions {
             if let userId = session.user.userId {
-                // 获取最新的头像（从 profile map 中获取）
+                // 获取最新的头像和名字（从 profile map 中获取）
                 var avatar = session.user.avatar
+                var name = session.user.name
                 let oldAvatar = avatar
-                if let profile = userIdToFullProfileMap[userId],
-                   let newAvatar = profile.coreIdentity.profileImage,
-                   !newAvatar.isEmpty {
-                    // 即使 URL 相同也要更新（确保显示最新数据）
-                    avatar = newAvatar
+                
+                if let profile = userIdToFullProfileMap[userId] {
+                    // 更新名字（使用 profile 中可修改的名字）
+                    name = profile.coreIdentity.name
                     
-                    // 如果头像URL变化了，清除旧头像的缓存
-                    if oldAvatar != newAvatar && (oldAvatar.hasPrefix("http://") || oldAvatar.hasPrefix("https://")) {
-                        ImageCacheManager.shared.removeImage(for: oldAvatar)
-                        print("   🗑️ [头像更新] 已清除旧头像缓存: \(oldAvatar)")
+                    // 更新头像
+                    if let newAvatar = profile.coreIdentity.profileImage,
+                       !newAvatar.isEmpty {
+                        // 即使 URL 相同也要更新（确保显示最新数据）
+                        avatar = newAvatar
+                        
+                        // 如果头像URL变化了，清除旧头像的缓存
+                        if oldAvatar != newAvatar && (oldAvatar.hasPrefix("http://") || oldAvatar.hasPrefix("https://")) {
+                            ImageCacheManager.shared.removeImage(for: oldAvatar)
+                            print("   🗑️ [头像更新] 已清除旧头像缓存: \(oldAvatar)")
+                        }
+                        
+                        // 即使 URL 相同，也清除缓存以确保显示最新图片
+                        if oldAvatar == newAvatar && (newAvatar.hasPrefix("http://") || newAvatar.hasPrefix("https://")) {
+                            ImageCacheManager.shared.removeImage(for: newAvatar)
+                            // 增加刷新版本号，强制刷新视图
+                            avatarRefreshVersions[userId] = (avatarRefreshVersions[userId] ?? 0) + 1
+                            print("   🔄 [头像更新] 头像URL相同但强制刷新缓存: \(newAvatar) (版本: \(avatarRefreshVersions[userId] ?? 0))")
+                        } else if oldAvatar != newAvatar {
+                            // URL 变化时也更新版本号
+                            avatarRefreshVersions[userId] = (avatarRefreshVersions[userId] ?? 0) + 1
+                        }
+                        
+                        print("   ✅ [头像更新] 用户 \(userId) 头像: \(oldAvatar) -> \(newAvatar)")
                     }
                     
-                    // 即使 URL 相同，也清除缓存以确保显示最新图片
-                    if oldAvatar == newAvatar && (newAvatar.hasPrefix("http://") || newAvatar.hasPrefix("https://")) {
-                        ImageCacheManager.shared.removeImage(for: newAvatar)
-                        // 增加刷新版本号，强制刷新视图
-                        avatarRefreshVersions[userId] = (avatarRefreshVersions[userId] ?? 0) + 1
-                        print("   🔄 [头像更新] 头像URL相同但强制刷新缓存: \(newAvatar) (版本: \(avatarRefreshVersions[userId] ?? 0))")
-                    } else if oldAvatar != newAvatar {
-                        // URL 变化时也更新版本号
-                        avatarRefreshVersions[userId] = (avatarRefreshVersions[userId] ?? 0) + 1
+                    // 如果名字变化了，打印日志
+                    if name != session.user.name {
+                        print("   🔄 [名字更新] 名字已更新: \(session.user.name) -> \(name)")
                     }
-                    
-                    print("   ✅ [头像更新] 用户 \(userId) 头像: \(oldAvatar) -> \(newAvatar)")
                 }
                 
-                // 创建更新后的 ChatUser
+                // 创建更新后的 ChatUser（更新头像和名字）
                 let updatedChatUser = ChatUser(
-                    name: session.user.name,
+                    name: name, // 使用 profile 中的名字
                     avatar: avatar,
                     interests: session.user.interests,
                     bio: session.user.bio,
@@ -1672,7 +1684,6 @@ struct ChatInterfaceView: View {
             for data in basicSessionData {
                 let match = data.match
                 let matchedUserId = data.matchedUserId
-                let matchedUserName = data.matchedUserName
                 
                 // 使用从消息任务中解析的正确匹配时间
                 let messageData = userIdToMessages[matchedUserId] ?? ([], Date(), Date())
@@ -1681,8 +1692,11 @@ struct ChatInterfaceView: View {
                 let profile = userIdToFullProfileMap[matchedUserId]
                 let avatarString = profile?.coreIdentity.profileImage ?? "person.circle.fill"
                 
+                // 优先使用 profile 中的名字，确保使用可修改的名字
+                let matchedUserName = profile?.coreIdentity.name ?? data.matchedUserName
+                
                 let chatUser = ChatUser(
-                    name: matchedUserName,
+                    name: matchedUserName, // 使用 profile 中的名字
                     avatar: avatarString,
                     interests: profile?.personalitySocial.hobbies ?? [],
                     bio: profile?.coreIdentity.bio ?? "",
@@ -1987,11 +2001,17 @@ struct ChatInterfaceView: View {
                     receiverName = receiverProfile.coreIdentity.name
                 }
                 
+                // 获取发送者名称（使用 profile 中可修改的名字）
+                var senderName = currentUser.name
+                if let senderProfile = try? await supabaseService.getProfile(userId: currentUser.id) {
+                    senderName = senderProfile.coreIdentity.name
+                }
+                
                 // 创建邀请记录（包含发送者填写的信息）
                 let invitationId = try await supabaseService.createCoffeeChatInvitation(
                     senderId: currentUser.id,
                     receiverId: receiverUserId,
-                    senderName: currentUser.name,
+                    senderName: senderName, // 使用 profile 中的名字
                     receiverName: receiverName,
                     scheduledDate: sendInvitationDate,
                     location: sendInvitationLocation.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -2000,7 +2020,7 @@ struct ChatInterfaceView: View {
                 
                 // 为接收方创建新的邀请消息（这样每次新邀请都会显示新的消息）
                 // 发送邀请消息到数据库，让接收方能够看到新的邀请
-                let invitationMessageContent = "\(currentUser.name) invited you to a coffee chat"
+                let invitationMessageContent = "\(senderName) invited you to a coffee chat" // 使用 profile 中的名字
                 let _ = try await supabaseService.sendMessage(
                     senderId: currentUser.id,
                     receiverId: receiverUserId,
@@ -3076,25 +3096,46 @@ struct ChatInterfaceView: View {
         
         // 检查是否是自己的邀请被接受（自己是发送者）
         if senderId == currentUser.id {
-            // 找到对应的会话
-            if let session = chatSessions.first(where: { $0.user.userId == receiverId }) {
-                let sessionId = session.id.uuidString
+            // 清除缓存，强制重新加载以确保使用最新的 profile 名字
+            Task {
+                // 清除持久化缓存
+                await MainActor.run {
+                    if let currentUser = authManager.currentUser {
+                        let cacheKey = "chat_sessions_cache_\(currentUser.id)"
+                        let timeKey = "chat_sessions_cache_time_\(currentUser.id)"
+                        UserDefaults.standard.removeObject(forKey: cacheKey)
+                        UserDefaults.standard.removeObject(forKey: timeKey)
+                        cachedChatSessions = []
+                        lastChatLoadTime = nil
+                        print("🗑️ [接受邀请] 清除缓存，强制重新加载")
+                    }
+                }
                 
-                // 更新邀请信息
-                currentInvitationInfo[sessionId] = (
-                    status: .accepted,
-                    scheduledDate: scheduledDate,
-                    location: location,
-                    invitationId: nil, // 需要重新加载获取
-                    isSentByMe: true
-                )
+                // 重新加载会话列表，确保使用最新的 profile 名字
+                await loadChatSessionsFromDatabase()
                 
-                // 重新加载邀请信息以获取invitationId
-                loadInvitationInfo(for: session)
-                
-                // 系统消息已经在acceptCoffeeChatInvitation中保存到数据库
-                // 发送通知触发消息刷新
-                NotificationCenter.default.post(name: NSNotification.Name("RefreshMessages"), object: nil)
+                // 找到对应的会话
+                await MainActor.run {
+                    if let session = chatSessions.first(where: { $0.user.userId == receiverId }) {
+                        let sessionId = session.id.uuidString
+                        
+                        // 更新邀请信息
+                        currentInvitationInfo[sessionId] = (
+                            status: .accepted,
+                            scheduledDate: scheduledDate,
+                            location: location,
+                            invitationId: nil, // 需要重新加载获取
+                            isSentByMe: true
+                        )
+                        
+                        // 重新加载邀请信息以获取invitationId
+                        loadInvitationInfo(for: session)
+                        
+                        // 系统消息已经在acceptCoffeeChatInvitation中保存到数据库
+                        // 发送通知触发消息刷新
+                        NotificationCenter.default.post(name: NSNotification.Name("RefreshMessages"), object: nil)
+                    }
+                }
             }
         } else if receiverId == currentUser.id {
             // 自己接受了对方的邀请，更新邀请信息
@@ -3850,10 +3891,17 @@ struct MessageBubbleView: View {
                     notes: notesText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notesText.trimmingCharacters(in: .whitespacesAndNewlines)
                 )
                 
-                // 在数据库中保存系统消息给a："b accepted your coffee chat invitation"
-                let acceptMessageContent = "\(currentUser.name) accepted your coffee chat invitation"
+                // 获取当前用户（接受者）的 profile，使用 profile 中可修改的用户名
+                var receiverName = currentUser.name // 默认使用 currentUser.name
+                if let currentUserProfile = try? await supabaseService.getProfile(userId: currentUser.id) {
+                    receiverName = currentUserProfile.coreIdentity.name
+                }
+                
+                // 在数据库中保存系统消息给发送者："接受者名字 accepted your coffee chat invitation"
+                // 注意：这里的 receiverName 是接受邀请的人（当前用户）的名字
+                let acceptMessageContent = "\(receiverName) accepted your coffee chat invitation"
                 let _ = try await supabaseService.sendMessage(
-                    senderId: receiverId, // b发送给a
+                    senderId: receiverId, // 接受者发送给发送者
                     receiverId: senderId,
                     content: acceptMessageContent,
                     messageType: "system"

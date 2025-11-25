@@ -1,0 +1,91 @@
+{
+  "categories": [
+    {
+      "name": "Tech / Internet",
+      "subcategories": [
+        "Software Engineer",
+        "Backend / Infrastructure",
+        "Frontend Engineer",
+        "DevOps / SRE",
+        "Mobile Engineer",
+        "Product Manager (Tech)",
+        "Data Engineer",
+        "Machine Learning / AI Engineer"
+      ]
+    },
+    {
+      "name": "Business & Finance",
+      "subcategories": [
+        "Finance / Investment Banking",
+        "Equity Research / Asset Mgmt",
+        "Corporate Strategy / BizOps",
+        "Management Consulting",
+        "Accounting / FP&A",
+        "Sales & Business Development",
+        "Corporate Development / M&A"
+      ]
+    },
+    {
+      "name": "Consumer & Retail (FMCG / CPG)",
+      "subcategories": [
+        "Brand / Marketing Manager",
+        "Category Manager / Merchandising",
+        "Supply Chain / Ops",
+        "Retail Strategy",
+        "eCommerce Manager",
+        "Product Marketing"
+      ]
+    },
+    {
+      "name": "Product & Design",
+      "subcategories": [
+        "Product Manager",
+        "UX/UI Designer",
+        "Product Designer",
+        "UX Research / Researcher",
+        "Product Ops",
+        "Growth PM"
+      ]
+    },
+    {
+      "name": "Data & Research",
+      "subcategories": [
+        "Data Scientist",
+        "Data Analyst / BI",
+        "Research Scientist",
+        "Causal Inference / Uplift Specialist",
+        "Quant / ML Research"
+      ]
+    },
+    {
+      "name": "Hardware & Engineering",
+      "subcategories": [
+        "Hardware Engineer",
+        "Mechanical Engineer",
+        "Systems / Firmware Engineer",
+        "Robotics / Controls Engineer",
+        "Hardware PM"
+      ]
+    },
+    {
+      "name": "Healthcare & Life Sciences",
+      "subcategories": [
+        "Clinical Research / Scientist",
+        "Biotech / Pharma R&D",
+        "Healthcare Product Manager",
+        "Health Data Scientist",
+        "Medical Professional (MD/NP)"
+      ]
+    },
+    {
+      "name": "Other / Startup & Ops",
+      "subcategories": [
+        "Founder / Co-founder",
+        "Operations / Program Manager",
+        "HR / Recruiting",
+        "Legal / Compliance",
+        "Customer Success / Support"
+      ]
+    }
+  ]
+}

@@ -29,6 +29,8 @@ struct CategoryRecommendationsView: View {
     @State private var showInviteLimitAlert = false
     @State private var isTransitioning = false // 标记是否正在过渡
     @State private var nextProfileOffset: CGFloat = 0 // 下一个 profile 的偏移量
+    @State private var showAddMessagePrompt = false // 显示添加消息提示弹窗
+    @State private var profilePendingInvitation: BrewNetProfile? = nil // 待发送邀请的profile
     
     private let screenWidth = UIScreen.main.bounds.width
     private let screenHeight = UIScreen.main.bounds.height
@@ -183,7 +185,12 @@ struct CategoryRecommendationsView: View {
                 showInviteLimitAlert = false
             }
         } message: {
-            Text("You've used all 10 connects for today. Upgrade to BrewNet Pro for unlimited connections and more exclusive features.")
+            Text("You've used all 6 connects for today. Upgrade to BrewNet Pro for unlimited connections and more exclusive features.")
+        }
+        .overlay {
+            if showAddMessagePrompt {
+                addMessagePromptView
+            }
         }
     }
     
@@ -510,6 +517,24 @@ struct CategoryRecommendationsView: View {
                     return
                 }
                 
+                // Check if this is the first like today - show prompt only on first like
+                let isFirstLike = try await supabaseService.isFirstLikeToday(userId: currentUser.id)
+                if isFirstLike {
+                    // Update the first_like_today to current date
+                    try await supabaseService.updateFirstLikeToday(userId: currentUser.id)
+                    
+                    await MainActor.run {
+                        profilePendingInvitation = profile
+                        showAddMessagePrompt = true
+                        // Reset animation
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                            dragOffset = .zero
+                            rotationAngle = 0
+                        }
+                    }
+                    return // Stop here and wait for user action
+                }
+                
                 await MainActor.run {
                     likedProfiles.append(profile)
                 }
@@ -685,6 +710,151 @@ struct CategoryRecommendationsView: View {
             rotationAngle = 0
             isTransitioning = false
             nextProfileOffset = 0
+        }
+    }
+    
+    // MARK: - Send Invitation Without Message
+    private func sendInvitationWithoutMessage(profile: BrewNetProfile) async {
+        guard let currentUser = authManager.currentUser else {
+            print("❌ No current user found")
+            return
+        }
+        
+        do {
+            await MainActor.run {
+                likedProfiles.append(profile)
+            }
+
+            await recommendationService.recordLike(
+                userId: currentUser.id,
+                targetUserId: profile.userId
+            )
+
+            var senderProfile: InvitationProfile? = nil
+            if let currentUserProfile = try await supabaseService.getProfile(userId: currentUser.id) {
+                let brewNetProfile = currentUserProfile.toBrewNetProfile()
+                senderProfile = brewNetProfile.toInvitationProfile()
+            }
+
+            let invitation = try await supabaseService.sendInvitation(
+                senderId: currentUser.id,
+                receiverId: profile.userId,
+                reasonForInterest: nil,
+                senderProfile: senderProfile
+            )
+            print("✅ Invitation sent successfully (without message): \(invitation.id)")
+
+            await MainActor.run {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    isTransitioning = true
+                    nextProfileOffset = 0
+                }
+                
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    let removedIndex = profiles.firstIndex { $0.userId == profile.userId }
+                    if let index = removedIndex {
+                        verifiedUsers.remove(profile.userId)
+                        profiles.remove(at: index)
+                        if index < currentIndex {
+                            currentIndex -= 1
+                        }
+                    }
+                    
+                    if currentIndex >= profiles.count && !profiles.isEmpty {
+                        currentIndex = profiles.count - 1
+                    } else if profiles.isEmpty {
+                        loadMoreProfiles()
+                    }
+                    
+                    dragOffset = .zero
+                    rotationAngle = 0
+                    isTransitioning = false
+                    nextProfileOffset = 0
+                    profilePendingInvitation = nil
+                }
+            }
+
+            Task {
+                await authManager.refreshUser()
+            }
+        } catch {
+            print("❌ Failed to send invitation: \(error.localizedDescription)")
+            await MainActor.run {
+                profilePendingInvitation = nil
+                withAnimation(.spring()) {
+                    dragOffset = .zero
+                    rotationAngle = 0
+                }
+            }
+        }
+    }
+    
+    // MARK: - Add Message Prompt View
+    private var addMessagePromptView: some View {
+        ZStack {
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    // Dismiss when tapping outside
+                }
+            
+            VStack(spacing: 20) {
+                Text("ADD A MESSAGE TO YOUR INVITATION?")
+                    .font(.system(size: 18, weight: .bold))
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 24)
+                
+                Text("Personalize your request by adding a message. People are more likely to accept requests that include a message.")
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20)
+                
+                VStack(spacing: 12) {
+                    Button(action: {
+                        showAddMessagePrompt = false
+                        if let profile = profilePendingInvitation {
+                            selectedProfileForChat = profile
+                            showingTemporaryChat = true
+                        }
+                    }) {
+                        Text("Add a Message")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .cornerRadius(25)
+                    }
+                    
+                    Button(action: {
+                        showAddMessagePrompt = false
+                        if let profile = profilePendingInvitation {
+                            Task {
+                                await sendInvitationWithoutMessage(profile: profile)
+                            }
+                        }
+                    }) {
+                        Text("Send Anyway")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(Color.white)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 25)
+                                    .stroke(Color(red: 0.4, green: 0.2, blue: 0.1), lineWidth: 1.5)
+                            )
+                            .cornerRadius(25)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
+            }
+            .frame(maxWidth: 340)
+            .background(Color.white)
+            .cornerRadius(20)
+            .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 10)
         }
     }
     
