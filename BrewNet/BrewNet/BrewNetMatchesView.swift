@@ -221,6 +221,48 @@ struct BrewNetMatchesView: View {
                         }
                         // 重新加载 Pro 状态
                         preloadCurrentUserProStatus()
+                        
+                        // 如果购买前有待发送邀请的 profile，购买后自动打开临时聊天界面
+                        await MainActor.run {
+                            if let pendingProfile = profilePendingInvitation,
+                               let userId = authManager.currentUser?.id {
+                                // 等待 Pro 状态更新后再打开
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                    // 再次检查 Pro 状态
+                                    Task {
+                                        guard let currentUser = authManager.currentUser else {
+                                            print("❌ [购买后] 无法获取当前用户")
+                                            return
+                                        }
+                                        
+                                        if currentUser.isProActive {
+                                            // 确认是 Pro 用户后，打开临时聊天界面
+                                            await MainActor.run {
+                                                selectedProfileForChat = pendingProfile
+                                                showingTemporaryChat = true
+                                                currentUserIsPro = true
+                                                print("✅ [购买后] 自动打开临时聊天界面")
+                                            }
+                                        } else {
+                                            // 如果还不是 Pro，再次检查
+                                            do {
+                                                let canChat = try await supabaseService.canSendTemporaryChat(userId: userId)
+                                                if canChat {
+                                                    await MainActor.run {
+                                                        selectedProfileForChat = pendingProfile
+                                                        showingTemporaryChat = true
+                                                        currentUserIsPro = true
+                                                        print("✅ [购买后] 自动打开临时聊天界面（通过检查）")
+                                                    }
+                                                }
+                                            } catch {
+                                                print("❌ [购买后] 检查 Pro 状态失败: \(error.localizedDescription)")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -230,6 +272,13 @@ struct BrewNetMatchesView: View {
             if let isPro = isPro {
                 currentUserIsPro = isPro
                 print("✅ [临时聊天] Pro 状态已更新: \(isPro ? "Pro用户" : "普通用户")")
+                
+                // 如果刚变成 Pro 用户，且有待发送邀请的 profile，自动打开临时聊天界面
+                if isPro, let pendingProfile = profilePendingInvitation {
+                    selectedProfileForChat = pendingProfile
+                    showingTemporaryChat = true
+                    print("✅ [Pro状态更新] 自动打开临时聊天界面")
+                }
             }
         }
         .onChange(of: currentIndex) { _ in
