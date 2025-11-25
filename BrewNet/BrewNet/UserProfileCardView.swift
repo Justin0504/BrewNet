@@ -619,8 +619,13 @@ struct ProfileCardContentView: View {
             return AnyView(EmptyView())
         }
         
+        // 优先使用 coreIdentity.timeZone，如果没有则使用 timeslotTimezone
+        let profileTimezone = profile.coreIdentity.timeZone.isEmpty ? 
+            profile.networkingPreferences.timeslotTimezone : 
+            profile.coreIdentity.timeZone
+        
         // 即使没有timeslot，如果有时区信息也显示
-        let hasTimezone = profile.networkingPreferences.timeslotTimezone != nil
+        let hasTimezone = profileTimezone != nil && !profileTimezone!.isEmpty
         
         if !hasAvailableTimes && !hasTimezone {
             return AnyView(EmptyView())
@@ -630,9 +635,9 @@ struct ProfileCardContentView: View {
             sectionContainer(title: "Available Times", icon: "calendar") {
                 VStack(alignment: .leading, spacing: 12) {
                     // Timezone info - 始终显示（如果有）
-                    if let profileTimezone = profile.networkingPreferences.timeslotTimezone {
+                    if let timezone = profileTimezone, !timezone.isEmpty {
                         TimezoneInfoView(
-                            profileTimezone: profileTimezone,
+                            profileTimezone: timezone,
                             viewerTimezone: TimeZone.current.identifier,
                             accentColor: accentBrown,
                             textColor: themeBrown
