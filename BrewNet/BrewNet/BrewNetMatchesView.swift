@@ -59,12 +59,6 @@ struct BrewNetMatchesView: View {
                 .ignoresSafeArea()
             
             VStack(spacing: 0) {
-                // Contextual Tip - Swipe hint
-                if showSwipeTip {
-                    ContextualTip.matchesSwipeTip(isVisible: $showSwipeTip)
-                        .padding(.top, 50)
-                }
-                
                 // Header Buttons - 放在卡片上方
                 HStack {
                     // 左上角按钮 - Match Filter
@@ -179,6 +173,12 @@ struct BrewNetMatchesView: View {
                         .cornerRadius(10)
                         .padding(.bottom, 100)
                 }
+            }
+            
+            // Swipe Gesture Hint - 全屏弹窗提示（在最上层）
+            if showSwipeTip {
+                SwipeGestureHint(isVisible: $showSwipeTip)
+                    .zIndex(200) // 确保提示在所有内容之上
             }
             
             // Action Buttons - 保持在卡片上层（只在有卡片时显示）
@@ -315,12 +315,19 @@ struct BrewNetMatchesView: View {
                 addMessagePromptView
             }
         }
+        .onChange(of: onboardingManager.hasSeenMatchesSwipeTip) { hasSeenTip in
+            // 监听状态变化，当重置引导时自动显示提示
+            if !hasSeenTip && !profiles.isEmpty {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    showSwipeTip = true
+                }
+            }
+        }
         .onAppear {
             // 显示新用户引导提示
             if !onboardingManager.hasSeenMatchesSwipeTip {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     showSwipeTip = true
-                    onboardingManager.markMatchesSwipeTipAsSeen()
                 }
             }
             
@@ -3670,6 +3677,236 @@ struct ExposureBoostCard: View {
         .background(Color.white)
         .cornerRadius(20)
         .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 2)
+    }
+}
+
+// MARK: - Swipe Gesture Hint (全屏弹窗)
+struct SwipeGestureHint: View {
+    @Binding var isVisible: Bool
+    @State private var overlayOpacity: Double = 0
+    @State private var cardOffset: CGFloat = 0
+    @State private var cardRotation: Double = 0
+    @State private var handOffset: CGFloat = 0
+    @State private var showLeftIndicator = false
+    @State private var showRightIndicator = false
+    @State private var animationPhase = 0 // 0: right, 1: left, 2: center
+    
+    private let themeColor = Color(red: 0.4, green: 0.2, blue: 0.1)
+    
+    var body: some View {
+        ZStack {
+            // 半透明背景
+            Color.black.opacity(overlayOpacity * 0.7)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    dismissTip()
+                }
+            
+            VStack(spacing: 0) {
+                Spacer()
+                
+                // 标题和说明
+                VStack(spacing: 12) {
+                    Text("Swipe to Connect")
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundColor(.white)
+                    
+                    Text("Swipe right to like, left to pass")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.white.opacity(0.85))
+                }
+                .padding(.bottom, 40)
+                
+                // 模拟卡片区域
+                ZStack {
+                    // 背景卡片（模拟下一张）
+                    RoundedRectangle(cornerRadius: 24)
+                        .fill(Color.white.opacity(0.3))
+                        .frame(width: 300, height: 400)
+                        .scaleEffect(0.95)
+                    
+                    // 主卡片
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 24)
+                            .fill(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(red: 0.95, green: 0.93, blue: 0.90),
+                                        Color(red: 0.98, green: 0.97, blue: 0.95)
+                                    ]),
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 10)
+                        
+                        // 卡片内容
+                        VStack(spacing: 16) {
+                            // 模拟头像
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [
+                                            Color(red: 0.6, green: 0.4, blue: 0.2),
+                                            Color(red: 0.4, green: 0.2, blue: 0.1)
+                                        ]),
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 120, height: 120)
+                                .overlay(
+                                    Image(systemName: "person.fill")
+                                        .font(.system(size: 50))
+                                        .foregroundColor(.white.opacity(0.8))
+                                )
+                            
+                            // 模拟名字
+                            VStack(spacing: 6) {
+                                Text("Sarah Johnson")
+                                    .font(.system(size: 24, weight: .bold))
+                                    .foregroundColor(themeColor)
+                                
+                                Text("Product Manager • Tech")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(themeColor.opacity(0.7))
+                            }
+                        }
+                        .padding(.top, 60)
+                        
+                        // 左滑指示器
+                        if showLeftIndicator {
+                            VStack {
+                                HStack {
+                                    Spacer()
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 80, weight: .bold))
+                                        .foregroundColor(.red)
+                                        .padding(30)
+                                }
+                                Spacer()
+                            }
+                        }
+                        
+                        // 右滑指示器
+                        if showRightIndicator {
+                            VStack {
+                                HStack {
+                                    Image(systemName: "heart.fill")
+                                        .font(.system(size: 80, weight: .bold))
+                                        .foregroundColor(.green)
+                                        .padding(30)
+                                    Spacer()
+                                }
+                                Spacer()
+                            }
+                        }
+                    }
+                    .frame(width: 300, height: 400)
+                    .offset(x: cardOffset)
+                    .rotationEffect(.degrees(cardRotation))
+                    
+                    // 滑动的手势图标
+                    Image(systemName: "hand.point.up.fill")
+                        .font(.system(size: 50, weight: .medium))
+                        .foregroundColor(.white)
+                        .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 5)
+                        .offset(x: handOffset, y: 150)
+                }
+                .frame(height: 450)
+                .padding(.horizontal, 40)
+                
+                Spacer()
+                
+                // "Got it" 按钮
+                Button(action: {
+                    dismissTip()
+                }) {
+                    Text("Got it!")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(themeColor)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(Color.white)
+                        .cornerRadius(28)
+                        .shadow(color: Color.black.opacity(0.2), radius: 15, x: 0, y: 8)
+                }
+                .padding(.horizontal, 40)
+                .padding(.bottom, 50)
+            }
+        }
+        .opacity(overlayOpacity)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                overlayOpacity = 1
+            }
+            startSwipeAnimation()
+        }
+    }
+    
+    private func startSwipeAnimation() {
+        // 延迟0.5秒后开始动画
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            performSwipeRightAnimation()
+        }
+    }
+    
+    private func performSwipeRightAnimation() {
+        // 右滑动画
+        showRightIndicator = true
+        withAnimation(.easeInOut(duration: 1.0)) {
+            cardOffset = 120
+            cardRotation = 12
+            handOffset = 120
+        }
+        
+        // 等待1秒后回到中心，然后左滑
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation(.easeInOut(duration: 0.8)) {
+                cardOffset = 0
+                cardRotation = 0
+                handOffset = 0
+                showRightIndicator = false
+            }
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                performSwipeLeftAnimation()
+            }
+        }
+    }
+    
+    private func performSwipeLeftAnimation() {
+        // 左滑动画
+        showLeftIndicator = true
+        withAnimation(.easeInOut(duration: 1.0)) {
+            cardOffset = -120
+            cardRotation = -12
+            handOffset = -120
+        }
+        
+        // 等待1秒后回到中心，然后重复
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation(.easeInOut(duration: 0.8)) {
+                cardOffset = 0
+                cardRotation = 0
+                handOffset = 0
+                showLeftIndicator = false
+            }
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                performSwipeRightAnimation()
+            }
+        }
+    }
+    
+    private func dismissTip() {
+        OnboardingManager.shared.markMatchesSwipeTipAsSeen()
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            overlayOpacity = 0
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            isVisible = false
+        }
     }
 }
 
