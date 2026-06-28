@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![BrewNet Logo](BrewNet/BrewNet/Assets.xcassets/Logo.imageset/Logo.png)
+![BrewNet Logo](BrewNet/BrewNet/Assets.xcassets/AppIcon.appiconset/Logo.png)
 
 **用 AI 找到你的职场伙伴，一杯咖啡开启新机遇**
 
