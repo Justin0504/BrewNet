@@ -207,6 +207,10 @@ struct BrewAgentView: View {
                     Task { await sendInvite(to: profile, message: finalText) }
                 },
                 onCancel: {
+                    // 🧠 Stage 2:记录拒绝,供后续排序/对话参考
+                    if let uid = authManager.currentUser?.id {
+                        BrewMemoryStore.shared.recordDeclined(name: profile.coreIdentity.name, userId: uid)
+                    }
                     appendAgent("No problem — tell me if you'd like a different match or a new search.")
                 }
             )
@@ -272,9 +276,13 @@ struct BrewAgentView: View {
             isThinking = true
         }
 
+        let memoryContext = authManager.currentUser.flatMap {
+            BrewMemoryStore.shared.contextSummary(userId: $0.id)
+        }
         guard let turn = await BrewAgentService.shared.nextTurn(
             history: history,
-            requesterProfile: currentUserProfile
+            requesterProfile: currentUserProfile,
+            memoryContext: memoryContext
         ) else {
             await MainActor.run {
                 isThinking = false
@@ -335,6 +343,10 @@ struct BrewAgentView: View {
                     lastPicks = outcome.top
                     history.append(BrewChatEntry(role: .tool, text: BrewAgentService.toolResultSummary(for: outcome.top)))
                     messages.append(BrewMessage(kind: .agentText("Tap a card to see more, or tell me which one you'd like to meet — I'll draft the invite.")))
+                    // 🧠 Stage 2:目标持久化为常驻 mission
+                    if let uid = authManager.currentUser?.id {
+                        BrewMemoryStore.shared.recordSearch(goal: query, userId: uid)
+                    }
                 }
             }
         } catch {
@@ -382,6 +394,8 @@ struct BrewAgentView: View {
             )
             await MainActor.run {
                 engagedProfileIds.insert(profile.userId)
+                // 🧠 Stage 2:记录已邀请,避免重复推荐
+                BrewMemoryStore.shared.recordInviteSent(to: profile.coreIdentity.name, userId: currentUser.id)
                 messages.append(BrewMessage(kind: .note("☕️ Invitation sent to \(profile.coreIdentity.name)")))
                 messages.append(BrewMessage(kind: .agentText("Done! I'll let you know when \(profile.coreIdentity.name.components(separatedBy: " ").first ?? "they") responds. Anything else you're looking for?")))
                 history.append(BrewChatEntry(role: .tool, text: "Invitation sent to \(profile.coreIdentity.name)."))
@@ -411,8 +425,28 @@ struct BrewAgentView: View {
         guard !didGreet else { return }
         didGreet = true
         let firstName = authManager.currentUser?.name.components(separatedBy: " ").first
-        let greeting = firstName.map { "Hi \($0)! Who would you like to meet? Describe them in your own words — role, industry, vibe, anything." }
-            ?? "Hi! Who would you like to meet? Describe them in your own words — role, industry, vibe, anything."
+        let userId = authManager.currentUser?.id
+
+        // 🧠 Stage 2:有常驻 mission 且距上次 >20h → 主动替用户再跑一轮并汇报
+        if let uid = userId, let dueMission = BrewMemoryStore.shared.missionDueForProactiveRun(userId: uid) {
+            let greeting = "Welcome back\(firstName.map { ", \($0)" } ?? "")! I kept your mission in mind — \"\(dueMission.goal)\". Let me check who's a good fit today…"
+            messages.append(BrewMessage(kind: .agentText(greeting)))
+            history.append(BrewChatEntry(role: .agent, text: greeting))
+            lastGoal = dueMission.goal
+            Task {
+                await MainActor.run { isThinking = true }
+                await runSearch(query: dueMission.goal)
+            }
+            return
+        }
+
+        // 有 mission 但最近跑过 → 提及即可;无 mission → 标准开场
+        var greeting: String
+        if let uid = userId, let mission = BrewMemoryStore.shared.load(userId: uid).activeMission {
+            greeting = "Hi\(firstName.map { " \($0)" } ?? "")! Your standing mission is \"\(mission.goal)\" — say \"run it again\" anytime, or tell me about someone new you'd like to meet."
+        } else {
+            greeting = "Hi\(firstName.map { " \($0)" } ?? "")! Who would you like to meet? Describe them in your own words — role, industry, vibe, anything."
+        }
         messages.append(BrewMessage(kind: .agentText(greeting)))
         history.append(BrewChatEntry(role: .agent, text: greeting))
     }

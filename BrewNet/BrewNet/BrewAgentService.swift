@@ -55,14 +55,15 @@ final class BrewAgentService {
     /// 返回 nil = LLM 不可用,调用方应降级。
     func nextTurn(
         history: [BrewChatEntry],
-        requesterProfile: BrewNetProfile?
+        requesterProfile: BrewNetProfile?,
+        memoryContext: String? = nil
     ) async -> BrewAgentTurn? {
         guard !isCircuitOpen else {
             print("⛔️ [BrewAgent] 熔断已开,跳过 LLM")
             return nil
         }
 
-        let prompt = buildConversationPrompt(history: history, requester: requesterProfile)
+        let prompt = buildConversationPrompt(history: history, requester: requesterProfile, memoryContext: memoryContext)
         guard let raw = await callEdgeFunction(prompt: prompt, maxTokens: 512) else {
             consecutiveFailures += 1
             print("⚠️ [BrewAgent] 对话调用失败(连续 \(consecutiveFailures))")
@@ -120,7 +121,7 @@ final class BrewAgentService {
 
     // MARK: - Prompt
 
-    private func buildConversationPrompt(history: [BrewChatEntry], requester: BrewNetProfile?) -> String {
+    private func buildConversationPrompt(history: [BrewChatEntry], requester: BrewNetProfile?, memoryContext: String? = nil) -> String {
         var userLine = "the user"
         if let r = requester {
             var parts = [r.coreIdentity.name]
@@ -156,6 +157,7 @@ final class BrewAgentService {
         5. Reply with ONLY valid JSON, no markdown fences:
         {"say":"...","action":"none|search|draft_invite","params":{"query":"...","target_user_id":"..."}}
 
+        \(memoryContext.map { "WHAT YOU REMEMBER ABOUT THIS USER (use it — reference their mission, respect their preferences, never re-suggest people already invited):\n\($0)\n" } ?? "")
         CONVERSATION:
         \(historyText)
 

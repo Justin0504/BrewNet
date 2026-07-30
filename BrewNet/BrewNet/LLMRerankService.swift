@@ -29,8 +29,8 @@ final class LLMRerankService {
     /// 单次调用超时(秒)。超时即放弃,调用方退回规则排序
     /// (15 候选大 prompt 经多 provider 链,实测 8s 偶发不够)
     private let timeoutSeconds: TimeInterval = 12.0
-    /// 传给 LLM 的最大候选数(研究结论:≤20-30 可单窗 listwise,取 15 控制延迟)
-    static let maxCandidates = 15
+    /// 传给 LLM 的最大候选数(研究结论:≤20-30 可单窗 listwise;12 平衡质量与生成延迟)
+    static let maxCandidates = 12
 
     /// 熔断器:连续失败(配额爆/网络断)达到阈值后,本次 app 会话内跳过 LLM,
     /// 避免每次搜索都白等超时(Gemini 429 时 edge function 重试可达 10s+)
@@ -112,14 +112,15 @@ final class LLMRerankService {
         \(candidateJSON)
         ]
 
-        For EVERY candidate, output:
+        Score EVERY candidate (be terse — numbers only):
         - "fit": 0-100, how well the candidate matches the REQUEST (semantic match, not just keywords: role, seniority, domain, topics they can speak to).
-        - "accept": 0-100, how likely this candidate would welcome a coffee chat from the REQUESTER, judged from the candidate's "looking_for" intention and profile (e.g. someone "Learn & Grow" junior may not welcome mentoring requests; someone open to mentoring welcomes mentees).
-        - "evidence": 1-2 short strings, each grounded in a specific field of that candidate's data (quote or close paraphrase). No generic praise, no invented facts.
+        - "accept": 0-100, how likely this candidate would welcome a coffee chat from the REQUESTER, judged from the candidate's "looking_for" intention and profile.
+
+        Then for ONLY your top 3 candidates (highest fit×accept), give "evidence": 1-2 short strings, each grounded in a specific field of that candidate's data (quote or close paraphrase). No generic praise, no invented facts.
 
         Return ONLY valid JSON, no markdown fences, exactly this shape:
-        {"rankings":[{"id":"<candidate id>","fit":85,"accept":70,"evidence":["...","..."]}]}
-        Include every candidate exactly once.
+        {"scores":[{"id":"...","fit":85,"accept":70}],"top":[{"id":"...","evidence":["...","..."]}]}
+        Include every candidate exactly once in "scores".
         """
     }
 
@@ -196,7 +197,7 @@ final class LLMRerankService {
                 "temperature": 0.2,       // 低温:排序稳定性
                 "topK": 40,
                 "topP": 0.95,
-                "maxOutputTokens": 2048   // 15 候选 × ~60 token 输出
+                "maxOutputTokens": 1024   // 全员分数 + 仅 top3 证据 ≈ 400 token
             ]
         ]
 
@@ -235,24 +236,34 @@ final class LLMRerankService {
 
         guard let data = cleaned.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let rankings = json["rankings"] as? [[String: Any]] else {
+              let scores = json["scores"] as? [[String: Any]] else {
             return nil
         }
 
-        var seen = Set<String>()
-        var results: [LLMRerankResult] = []
-        for item in rankings {
-            guard let id = item["id"] as? String,
-                  allowedIds.contains(id),        // 只接受传入过的候选(防幻觉 id)
-                  !seen.contains(id) else { continue }
-            let fit = clamp(item["fit"])
-            let accept = clamp(item["accept"])
+        // top-3 的 grounded 证据(输出瘦身:只为最终展示的候选生成理由)
+        var evidenceById: [String: [String]] = [:]
+        for item in (json["top"] as? [[String: Any]] ?? []) {
+            guard let id = item["id"] as? String else { continue }
             let evidence = (item["evidence"] as? [String] ?? [])
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
                 .map { String($0.prefix(120)) }
+            if !evidence.isEmpty { evidenceById[id] = Array(evidence.prefix(2)) }
+        }
+
+        var seen = Set<String>()
+        var results: [LLMRerankResult] = []
+        for item in scores {
+            guard let id = item["id"] as? String,
+                  allowedIds.contains(id),        // 只接受传入过的候选(防幻觉 id)
+                  !seen.contains(id) else { continue }
             seen.insert(id)
-            results.append(LLMRerankResult(userId: id, fitScore: fit, acceptScore: accept, evidence: Array(evidence.prefix(2))))
+            results.append(LLMRerankResult(
+                userId: id,
+                fitScore: clamp(item["fit"]),
+                acceptScore: clamp(item["accept"]),
+                evidence: evidenceById[id] ?? []
+            ))
         }
         return results.isEmpty ? nil : results
     }

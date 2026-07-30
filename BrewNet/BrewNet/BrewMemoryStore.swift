@@ -1,0 +1,129 @@
+import Foundation
+
+// MARK: - Brew Memory Store(Stage 2)
+//
+// Brew 的持久记忆:常驻任务(mission)+ 学到的用户偏好 + 行为记录。
+// 本地优先(UserDefaults,按 userId 隔离)——零后端迁移即可上线;
+// 云同步表见 create_brew_missions.sql(Stage 3 主动推送需要服务端跑 mission 时启用)。
+
+struct BrewMission: Codable {
+    var goal: String            // 用户目标原文("senior founder to talk AI startups")
+    var createdAt: Date
+    var lastRunAt: Date         // 上次替用户跑这个 mission 的时间
+    var timesRun: Int
+}
+
+struct BrewMemory: Codable {
+    var activeMission: BrewMission?
+    var preferences: [String] = []       // 学到的偏好/反馈("嫌太 junior","偏好技术型 founder")
+    var sentInviteNames: [String] = []   // 已代发邀请的对象(避免重复推)
+    var declinedNames: [String] = []     // 用户明确说"不"的对象
+}
+
+final class BrewMemoryStore {
+
+    static let shared = BrewMemoryStore()
+    private init() {}
+
+    private let maxPreferences = 10
+    private let maxNames = 30
+
+    private func key(for userId: String) -> String { "brew_memory_\(userId)" }
+
+    // MARK: - Load / Save
+
+    func load(userId: String) -> BrewMemory {
+        guard let data = UserDefaults.standard.data(forKey: key(for: userId)),
+              let memory = try? JSONDecoder().decode(BrewMemory.self, from: data) else {
+            return BrewMemory()
+        }
+        return memory
+    }
+
+    private func save(_ memory: BrewMemory, userId: String) {
+        if let data = try? JSONEncoder().encode(memory) {
+            UserDefaults.standard.set(data, forKey: key(for: userId))
+        }
+    }
+
+    // MARK: - Mission
+
+    /// 每次成功搜索后调用:目标持久化为常驻任务
+    func recordSearch(goal: String, userId: String) {
+        var memory = load(userId: userId)
+        if var mission = memory.activeMission, mission.goal == goal {
+            mission.lastRunAt = Date()
+            mission.timesRun += 1
+            memory.activeMission = mission
+        } else {
+            memory.activeMission = BrewMission(goal: goal, createdAt: Date(), lastRunAt: Date(), timesRun: 1)
+        }
+        save(memory, userId: userId)
+        print("🧠 [BrewMemory] mission saved: \"\(goal.prefix(60))\"")
+    }
+
+    func clearMission(userId: String) {
+        var memory = load(userId: userId)
+        memory.activeMission = nil
+        save(memory, userId: userId)
+    }
+
+    /// 该不该主动替用户再跑一次 mission(距上次 >20h)
+    func missionDueForProactiveRun(userId: String) -> BrewMission? {
+        guard let mission = load(userId: userId).activeMission else { return nil }
+        return Date().timeIntervalSince(mission.lastRunAt) > 20 * 3600 ? mission : nil
+    }
+
+    // MARK: - Learning
+
+    func addPreference(_ note: String, userId: String) {
+        var memory = load(userId: userId)
+        let trimmed = String(note.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100))
+        guard !trimmed.isEmpty, !memory.preferences.contains(trimmed) else { return }
+        memory.preferences.append(trimmed)
+        if memory.preferences.count > maxPreferences {
+            memory.preferences.removeFirst(memory.preferences.count - maxPreferences)
+        }
+        save(memory, userId: userId)
+        print("🧠 [BrewMemory] learned: \(trimmed)")
+    }
+
+    func recordInviteSent(to name: String, userId: String) {
+        var memory = load(userId: userId)
+        if !memory.sentInviteNames.contains(name) { memory.sentInviteNames.append(name) }
+        if memory.sentInviteNames.count > maxNames {
+            memory.sentInviteNames.removeFirst(memory.sentInviteNames.count - maxNames)
+        }
+        save(memory, userId: userId)
+    }
+
+    func recordDeclined(name: String, userId: String) {
+        var memory = load(userId: userId)
+        if !memory.declinedNames.contains(name) { memory.declinedNames.append(name) }
+        if memory.declinedNames.count > maxNames {
+            memory.declinedNames.removeFirst(memory.declinedNames.count - maxNames)
+        }
+        save(memory, userId: userId)
+    }
+
+    // MARK: - Context for LLM
+
+    /// 注入 agent 系统 prompt 的记忆摘要;空记忆返回 nil
+    func contextSummary(userId: String) -> String? {
+        let memory = load(userId: userId)
+        var lines: [String] = []
+        if let mission = memory.activeMission {
+            lines.append("Standing mission: \"\(mission.goal)\" (searched \(mission.timesRun)x)")
+        }
+        if !memory.preferences.isEmpty {
+            lines.append("Learned preferences: \(memory.preferences.joined(separator: "; "))")
+        }
+        if !memory.sentInviteNames.isEmpty {
+            lines.append("Already invited (do not re-suggest): \(memory.sentInviteNames.suffix(10).joined(separator: ", "))")
+        }
+        if !memory.declinedNames.isEmpty {
+            lines.append("User declined before (avoid similar unless asked): \(memory.declinedNames.suffix(10).joined(separator: ", "))")
+        }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+}
