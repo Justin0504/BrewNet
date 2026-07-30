@@ -4,7 +4,7 @@ struct MainView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var databaseManager: DatabaseManager
     @EnvironmentObject var supabaseService: SupabaseService
-    @State private var selectedTab = 0
+    @State private var selectedTab = 1 // 默认落在 Talent Scout(agent 入口),滑卡浏览降级为第二位
     @State private var profilesPreloaded = false // 标记是否已预加载
     @State private var unreadMessageCount = 0 // 未读消息总数
     @State private var chatListRefreshTimer: Timer? // 用于刷新未读消息数
@@ -17,7 +17,14 @@ struct MainView: View {
     
     var body: some View {
         TabView(selection: $selectedTab) {
-            // Matches
+            // Talent Scout(首位:告诉 agent 你要谁,它去找并给出理由)
+            ExploreView()
+                .tabItem {
+                    Image(systemName: "sparkle.magnifyingglass")
+                }
+                .tag(1)
+
+            // Matches(滑卡浏览,降级为第二位)
             NavigationStack {
                 MatchesView()
             }
@@ -25,13 +32,6 @@ struct MainView: View {
                     Image(systemName: "cup.and.saucer.fill")
                 }
                 .tag(0)
-            
-            // Talent Scout
-            ExploreView()
-                .tabItem {
-                    Image(systemName: "person.crop.rectangle.stack.fill")
-                }
-                .tag(1)
             
             // Requests
             RequestsView()
@@ -344,9 +344,10 @@ struct ChatView: View {
 }
 
 // MARK: - Explore View
+// Stage 1(AI-native):Scout Tab = 与 Brew 的对话;经典表单作为降级/手动切换保留
 struct ExploreView: View {
     var body: some View {
-        ExploreMainView()
+        BrewAgentView()
     }
 }
 

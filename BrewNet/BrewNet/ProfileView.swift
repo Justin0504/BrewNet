@@ -317,7 +317,7 @@ struct ProfileView: View {
                                     .foregroundColor(.gray)
                             }
                             
-                            Text("Match faster\nConnect smarter\nGrow further")
+                            Text("Unlimited connects\nFull-power scouting\nGrow further")
                                 .font(.system(size: 16, weight: .bold))
                                 .foregroundColor(.primary)
                                 .lineLimit(3)

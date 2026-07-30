@@ -718,13 +718,14 @@ struct ProfileDisplayView: View {
                     .padding(.horizontal, 24)
                     .padding(.top, 16)
                     
-                    // Boost Card
-                    BoostCard {
-                        showingBoostPurchase = true
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.top, 12)
-                    
+                    // Boost Card — 已下线:"付费被看见"会放大对稀缺用户的轰炸,与 agent 定位相悖
+                    // (BoostCard/BoostPurchaseView 代码保留,如需恢复取消注释即可)
+                    // BoostCard {
+                    //     showingBoostPurchase = true
+                    // }
+                    // .padding(.horizontal, 24)
+                    // .padding(.top, 12)
+
                     // ⭐ Token 充值卡片
                     TokenCard {
                         showingTokenPurchase = true
