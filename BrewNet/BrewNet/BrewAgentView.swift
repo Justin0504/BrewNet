@@ -40,6 +40,7 @@ struct BrewAgentView: View {
     @State private var showingInviteLimitAlert = false
     @State private var selectedProfile: BrewNetProfile?
     @State private var didGreet = false
+    @State private var animatedMessageIds: Set<UUID> = []  // 打字机动画只放一次
     @FocusState private var composerFocused: Bool
 
     private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
@@ -48,8 +49,27 @@ struct BrewAgentView: View {
     var body: some View {
         Group {
             if useClassicSearch {
-                // 降级/手动切换:经典搜索表单(原功能完整保留)
-                ExploreMainView()
+                // 降级/手动切换:经典搜索表单(原功能完整保留)+ 返回 Brew 浮钮
+                ZStack(alignment: .bottomTrailing) {
+                    ExploreMainView()
+                    Button {
+                        useClassicSearch = false
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("Brew")
+                                .font(.system(size: 14, weight: .bold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 10)
+                        .background(Capsule().fill(themeColor))
+                        .shadow(color: themeColor.opacity(0.35), radius: 8, x: 0, y: 3)
+                    }
+                    .padding(.trailing, 18)
+                    .padding(.bottom, 24)
+                }
             } else {
                 conversationBody
             }
@@ -173,7 +193,11 @@ struct BrewAgentView: View {
         case .agentText(let text):
             HStack(alignment: .bottom, spacing: 8) {
                 agentAvatar(size: 24)
-                Text(text)
+                BrewTypewriterText(
+                    text: text,
+                    animate: !animatedMessageIds.contains(message.id),
+                    onDone: { animatedMessageIds.insert(message.id) }
+                )
                     .font(.system(size: 15))
                     .foregroundColor(.primary)
                     .padding(.horizontal, 14)
@@ -221,6 +245,24 @@ struct BrewAgentView: View {
                     guard let uid = authManager.currentUser?.id else { return }
                     let name = profile.coreIdentity.name
                     BrewMemoryStore.shared.recordWorthIt(name: name, worthIt: worthIt, userId: uid)
+                    // ☁️ 北极星指标落云(表未建则静默跳过,见 create_brew_worthit_votes.sql)
+                    Task {
+                        struct WorthItInsert: Encodable {
+                            let user_id: String
+                            let subject_user_id: String?
+                            let subject_name: String
+                            let worth_it: Bool
+                        }
+                        do {
+                            _ = try await SupabaseConfig.shared.client
+                                .from("brew_worthit_votes")
+                                .insert(WorthItInsert(user_id: uid, subject_user_id: profile.userId, subject_name: name, worth_it: worthIt))
+                                .execute()
+                            print("☁️ [WorthIt] synced to cloud")
+                        } catch {
+                            print("⚠️ [WorthIt] cloud sync skipped: \(error.localizedDescription)")
+                        }
+                    }
                     appendAgent(worthIt
                         ? "Love to hear it! I'll look for more people like \(name)."
                         : "Got it — I'll adjust what I look for. Thanks for telling me.")
@@ -405,11 +447,15 @@ struct BrewAgentView: View {
             return
         }
         do {
+            // 🧠 记忆排除:已邀请/已拒绝的人不再出现在推荐里
+            let memory = BrewMemoryStore.shared.load(userId: currentUser.id)
+            let excludeNames = Set(memory.sentInviteNames + memory.declinedNames)
             let outcome = try await ScoutSearchEngine.shared.search(
                 query: query,
                 currentUserId: currentUser.id,
                 currentUserProfile: currentUserProfile,
-                topCount: 3
+                topCount: 3,
+                excludeNames: excludeNames
             )
             await MainActor.run {
                 isThinking = false
@@ -854,6 +900,34 @@ struct BrewWorthItCard: View {
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(themeColor.opacity(0.12), lineWidth: 1))
         .opacity(didAct ? 0.55 : 1)
         .disabled(didAct)
+    }
+}
+
+// MARK: - Typewriter Text(agent 文字逐字浮现,流式感)
+
+struct BrewTypewriterText: View {
+    let text: String
+    let animate: Bool
+    var onDone: (() -> Void)? = nil
+
+    @State private var shown: String = ""
+
+    var body: some View {
+        Text(animate ? shown : text)
+            .fixedSize(horizontal: false, vertical: true)
+            .onAppear {
+                guard animate else { return }
+                shown = ""
+                Task { @MainActor in
+                    // 总时长封顶 1.2s,长文本加速
+                    let perChar = min(0.022, 1.2 / Double(max(text.count, 1)))
+                    for char in text {
+                        shown.append(char)
+                        try? await Task.sleep(nanoseconds: UInt64(perChar * 1_000_000_000))
+                    }
+                    onDone?()
+                }
+            }
     }
 }
 

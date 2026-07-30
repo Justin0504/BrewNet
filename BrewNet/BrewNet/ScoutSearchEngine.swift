@@ -32,6 +32,7 @@ final class ScoutSearchEngine {
         currentUserId: String,
         currentUserProfile: BrewNetProfile?,
         topCount: Int = 3,
+        excludeNames: Set<String> = [],   // 🧠 agent 记忆:已邀请/已拒绝的人不再推荐
         progress: (@MainActor (Double, Int) -> Void)? = nil
     ) async throws -> SearchOutcome {
         let searchStart = Date()
@@ -62,11 +63,16 @@ final class ScoutSearchEngine {
         // 4. V2 规则排序
         await progress?(0.8, 4)
         let step2 = Date()
-        let ranked = rankRecommendationsV2(
+        var ranked = rankRecommendationsV2(
             validRecommendations,
             parsedQuery: parsedQuery,
             currentUserProfile: currentUserProfile
         )
+        if !excludeNames.isEmpty {
+            let before = ranked.count
+            ranked = ranked.filter { !excludeNames.contains($0.profile.coreIdentity.name) }
+            print("  🧠 Memory exclude: filtered \(before - ranked.count) already-engaged people")
+        }
         print("  ⏱️  Ranking: \(Date().timeIntervalSince(step2) * 1000)ms")
 
         // 5. V3 LLM 互惠精排(失败无缝退回规则序)
