@@ -13,8 +13,9 @@ struct BrewMessage: Identifiable {
     enum Kind {
         case agentText(String)
         case userText(String)
-        case picks([(profile: BrewNetProfile, reasons: [String])])
+        case picks([(profile: BrewNetProfile, reasons: [String], matchPercent: Int?)])
         case inviteDraft(profile: BrewNetProfile, initialText: String)
+        case survey(profile: BrewNetProfile)   // worth-it 一键问卷(北极星指标)
         case note(String)
     }
     let id = UUID()
@@ -31,7 +32,7 @@ struct BrewAgentView: View {
     @State private var history: [BrewChatEntry] = []
     @State private var inputText = ""
     @State private var isThinking = false
-    @State private var lastPicks: [(profile: BrewNetProfile, reasons: [String])] = []
+    @State private var lastPicks: [(profile: BrewNetProfile, reasons: [String], matchPercent: Int?)] = []
     @State private var lastGoal = ""
     @State private var currentUserProfile: BrewNetProfile?
     @State private var useClassicSearch = false
@@ -69,7 +70,10 @@ struct BrewAgentView: View {
         }
         .onAppear {
             loadRequesterProfile()
-            greetIfNeeded()
+            let proactiveRunStarted = greetIfNeeded()
+            if !proactiveRunStarted {
+                maybeAskWorthIt()   // 📊 北极星:见面后的 worth-it 回访
+            }
             autoChatIfNeeded()
         }
         .alert("No Connects Left", isPresented: $showingInviteLimitAlert) {
@@ -139,6 +143,10 @@ struct BrewAgentView: View {
                         messageBubble(message)
                             .id(message.id)
                     }
+                    // 快速起步建议:用户还没说过话时显示(降低第一句输入门槛)
+                    if !hasUserSpoken && !isThinking {
+                        suggestionChips
+                    }
                     if isThinking {
                         thinkingBubble.id("thinking")
                     }
@@ -163,15 +171,22 @@ struct BrewAgentView: View {
     private func messageBubble(_ message: BrewMessage) -> some View {
         switch message.kind {
         case .agentText(let text):
-            HStack(alignment: .top) {
+            HStack(alignment: .bottom, spacing: 8) {
+                agentAvatar(size: 24)
                 Text(text)
                     .font(.system(size: 15))
                     .foregroundColor(.primary)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 16).fill(Color.white))
-                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(themeColor.opacity(0.08), lineWidth: 1))
-                Spacer(minLength: 40)
+                    .background(
+                        UnevenRoundedRectangle(topLeadingRadius: 16, bottomLeadingRadius: 4, bottomTrailingRadius: 16, topTrailingRadius: 16)
+                            .fill(Color.white)
+                    )
+                    .overlay(
+                        UnevenRoundedRectangle(topLeadingRadius: 16, bottomLeadingRadius: 4, bottomTrailingRadius: 16, topTrailingRadius: 16)
+                            .stroke(themeColor.opacity(0.08), lineWidth: 1)
+                    )
+                Spacer(minLength: 32)
             }
         case .userText(let text):
             HStack {
@@ -190,6 +205,7 @@ struct BrewAgentView: View {
                         profile: entry.profile,
                         reasons: entry.reasons,
                         rank: index + 1,
+                        matchPercent: entry.matchPercent,
                         isEngaged: engagedProfileIds.contains(entry.profile.userId),
                         onTap: { selectedProfile = entry.profile },
                         onConnect: {
@@ -198,6 +214,21 @@ struct BrewAgentView: View {
                     )
                 }
             }
+        case .survey(let profile):
+            BrewWorthItCard(
+                profile: profile,
+                onAnswer: { worthIt in
+                    guard let uid = authManager.currentUser?.id else { return }
+                    let name = profile.coreIdentity.name
+                    BrewMemoryStore.shared.recordWorthIt(name: name, worthIt: worthIt, userId: uid)
+                    appendAgent(worthIt
+                        ? "Love to hear it! I'll look for more people like \(name)."
+                        : "Got it — I'll adjust what I look for. Thanks for telling me.")
+                },
+                onNotMetYet: {
+                    appendAgent("No rush — I'll check back later.")
+                }
+            )
         case .inviteDraft(let profile, let initialText):
             BrewInviteDraftCard(
                 profile: profile,
@@ -225,15 +256,61 @@ struct BrewAgentView: View {
         }
     }
 
-    private var thinkingBubble: some View {
-        HStack(spacing: 6) {
-            ProgressView().scaleEffect(0.7)
-            Text("Brew is working…")
-                .font(.system(size: 13))
-                .foregroundColor(.gray)
+    private var hasUserSpoken: Bool {
+        messages.contains { if case .userText = $0.kind { return true } else { return false } }
+    }
+
+    private var suggestionChips: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach([
+                "🎯 Find me a mentor in my field",
+                "🚀 Meet startup founders near me",
+                "🎓 Alumni I could grab coffee with"
+            ], id: \.self) { chip in
+                Button {
+                    let text = String(chip.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                    Task { await send(userText: text) }
+                } label: {
+                    Text(chip)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(themeColor)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(Capsule().fill(Color.white))
+                        .overlay(Capsule().stroke(themeColor.opacity(0.25), lineWidth: 1))
+                }
+            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.top, 2)
+        .transition(.opacity)
+    }
+
+    private var thinkingBubble: some View {
+        HStack(spacing: 8) {
+            agentAvatar(size: 24)
+            BrewTypingDots()
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
+    }
+
+    private func agentAvatar(size: CGFloat) -> some View {
+        ZStack {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            themeColor.opacity(0.18),
+                            Color(red: 0.85, green: 0.65, blue: 0.4).opacity(0.25)
+                        ]),
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: size, height: size)
+            Image(systemName: "sparkles")
+                .font(.system(size: size * 0.45, weight: .semibold))
+                .foregroundColor(themeColor)
+        }
     }
 
     // MARK: - Composer
@@ -336,17 +413,18 @@ struct BrewAgentView: View {
             )
             await MainActor.run {
                 isThinking = false
+                // 🧠 目标一律持久化为常驻 mission(空结果时它是"我持续帮你盯着"的承诺)
+                if let uid = authManager.currentUser?.id {
+                    BrewMemoryStore.shared.recordSearch(goal: query, userId: uid)
+                }
                 if outcome.top.isEmpty {
-                    messages.append(BrewMessage(kind: .agentText("I couldn't find a strong fit yet. Try telling me more — industry, seniority, or what you want to talk about.")))
+                    // 冷启动缓冲:把"现在没人"转化为 agent 的主动性承诺
+                    messages.append(BrewMessage(kind: .agentText("No strong fits in the pool right now — but I've saved this as your mission. I'll keep scouting and report back as soon as someone good joins. Add more detail anytime to widen the net.")))
                 } else {
                     messages.append(BrewMessage(kind: .picks(outcome.top)))
                     lastPicks = outcome.top
-                    history.append(BrewChatEntry(role: .tool, text: BrewAgentService.toolResultSummary(for: outcome.top)))
+                    history.append(BrewChatEntry(role: .tool, text: BrewAgentService.toolResultSummary(for: outcome.top.map { ($0.profile, $0.reasons) })))
                     messages.append(BrewMessage(kind: .agentText("Tap a card to see more, or tell me which one you'd like to meet — I'll draft the invite.")))
-                    // 🧠 Stage 2:目标持久化为常驻 mission
-                    if let uid = authManager.currentUser?.id {
-                        BrewMemoryStore.shared.recordSearch(goal: query, userId: uid)
-                    }
                 }
             }
         } catch {
@@ -421,8 +499,9 @@ struct BrewAgentView: View {
         }
     }
 
-    private func greetIfNeeded() {
-        guard !didGreet else { return }
+    @discardableResult
+    private func greetIfNeeded() -> Bool {
+        guard !didGreet else { return false }
         didGreet = true
         let firstName = authManager.currentUser?.name.components(separatedBy: " ").first
         let userId = authManager.currentUser?.id
@@ -437,7 +516,7 @@ struct BrewAgentView: View {
                 await MainActor.run { isThinking = true }
                 await runSearch(query: dueMission.goal)
             }
-            return
+            return true
         }
 
         // 有 mission 但最近跑过 → 提及即可;无 mission → 标准开场
@@ -449,6 +528,28 @@ struct BrewAgentView: View {
         }
         messages.append(BrewMessage(kind: .agentText(greeting)))
         history.append(BrewChatEntry(role: .agent, text: greeting))
+        return false
+    }
+
+    /// 📊 worth-it 回访:对已匹配但未回访过的对象,让 Brew 顺口问一句(一次一个)
+    private func maybeAskWorthIt() {
+        guard let currentUser = authManager.currentUser else { return }
+        Task {
+            guard let matches = try? await supabaseService.getActiveMatches(userId: currentUser.id),
+                  !matches.isEmpty else { return }
+            let surveyed = Set(BrewMemoryStore.shared.load(userId: currentUser.id).surveyedNames ?? [])
+            for match in matches {
+                let otherId = match.userId == currentUser.id ? match.matchedUserId : match.userId
+                guard let supabaseProfile = try? await supabaseService.getProfile(userId: otherId) else { continue }
+                let profile = supabaseProfile.toBrewNetProfile()
+                guard !surveyed.contains(profile.coreIdentity.name) else { continue }
+                await MainActor.run {
+                    messages.append(BrewMessage(kind: .agentText("By the way — you matched with \(profile.coreIdentity.name) a while back. Did you two end up meeting?")))
+                    messages.append(BrewMessage(kind: .survey(profile: profile)))
+                }
+                break   // 一次会话只问一个,不轰炸
+            }
+        }
     }
 
     private func autoChatIfNeeded() {
@@ -484,6 +585,7 @@ struct BrewPickCard: View {
     let profile: BrewNetProfile
     let reasons: [String]
     let rank: Int
+    var matchPercent: Int? = nil
     let isEngaged: Bool
     var onTap: () -> Void
     var onConnect: () -> Void
@@ -512,6 +614,31 @@ struct BrewPickCard: View {
                         .lineLimit(2)
                 }
                 Spacer()
+                // ⭐ 互惠匹配度徽章(fit×accept,LLM 路径才有)
+                if let percent = matchPercent, percent > 0 {
+                    VStack(spacing: 0) {
+                        Text("\(percent)%")
+                            .font(.system(size: 15, weight: .heavy))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(red: 0.85, green: 0.6, blue: 0.1),
+                                        Color(red: 0.65, green: 0.42, blue: 0.12)
+                                    ]),
+                                    startPoint: .top, endPoint: .bottom
+                                )
+                            )
+                        Text("match")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.gray)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color(red: 1.0, green: 0.95, blue: 0.85))
+                    )
+                }
             }
 
             if !reasons.isEmpty {
@@ -670,5 +797,93 @@ struct BrewInviteDraftCard: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(themeColor.opacity(0.25), lineWidth: 1.5)
         )
+    }
+}
+
+// MARK: - Worth-It Card(📊 北极星指标:见面后一键回访)
+
+struct BrewWorthItCard: View {
+    let profile: BrewNetProfile
+    var onAnswer: (Bool) -> Void
+    var onNotMetYet: () -> Void
+
+    @State private var didAct = false
+    private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Button {
+                    guard !didAct else { return }
+                    didAct = true
+                    onAnswer(true)
+                } label: {
+                    Label("Worth it", systemImage: "hand.thumbsup.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(didAct ? Color.gray.opacity(0.4) : themeColor))
+                }
+                Button {
+                    guard !didAct else { return }
+                    didAct = true
+                    onAnswer(false)
+                } label: {
+                    Label("Not really", systemImage: "hand.thumbsdown")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(themeColor)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(themeColor.opacity(0.08)))
+                }
+            }
+            Button {
+                guard !didAct else { return }
+                didAct = true
+                onNotMetYet()
+            } label: {
+                Text("We haven't met yet")
+                    .font(.system(size: 13))
+                    .foregroundColor(.gray)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color.white))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(themeColor.opacity(0.12), lineWidth: 1))
+        .opacity(didAct ? 0.55 : 1)
+        .disabled(didAct)
+    }
+}
+
+// MARK: - Typing Dots(打字动画)
+
+struct BrewTypingDots: View {
+    @State private var animating = false
+    private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(themeColor.opacity(0.45))
+                    .frame(width: 7, height: 7)
+                    .offset(y: animating ? -3 : 2)
+                    .animation(
+                        .easeInOut(duration: 0.5)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(index) * 0.15),
+                        value: animating
+                    )
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            UnevenRoundedRectangle(topLeadingRadius: 16, bottomLeadingRadius: 4, bottomTrailingRadius: 16, topTrailingRadius: 16)
+                .fill(Color.white)
+        )
+        .onAppear { animating = true }
     }
 }

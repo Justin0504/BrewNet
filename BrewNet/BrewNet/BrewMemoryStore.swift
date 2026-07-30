@@ -18,6 +18,7 @@ struct BrewMemory: Codable {
     var preferences: [String] = []       // 学到的偏好/反馈("嫌太 junior","偏好技术型 founder")
     var sentInviteNames: [String] = []   // 已代发邀请的对象(避免重复推)
     var declinedNames: [String] = []     // 用户明确说"不"的对象
+    var surveyedNames: [String]? = nil   // 已做过 worth-it 回访的对象(optional:兼容旧数据解码)
 }
 
 final class BrewMemoryStore {
@@ -104,6 +105,21 @@ final class BrewMemoryStore {
             memory.declinedNames.removeFirst(memory.declinedNames.count - maxNames)
         }
         save(memory, userId: userId)
+    }
+
+    /// 📊 worth-it 回访结果:北极星指标数据点 + 偏好养料
+    func recordWorthIt(name: String, worthIt: Bool, userId: String) {
+        var memory = load(userId: userId)
+        var surveyed = memory.surveyedNames ?? []
+        if !surveyed.contains(name) { surveyed.append(name) }
+        memory.surveyedNames = Array(surveyed.suffix(maxNames))
+        memory.preferences.append("Coffee chat with \(name): \(worthIt ? "worth it 👍" : "not worth it 👎")")
+        if memory.preferences.count > maxPreferences {
+            memory.preferences.removeFirst(memory.preferences.count - maxPreferences)
+        }
+        save(memory, userId: userId)
+        // 北极星埋点(先落日志,后接分析后端)
+        print("📊 [WorthIt] user=\(userId.prefix(8)) chat_with=\(name) worth_it=\(worthIt)")
     }
 
     // MARK: - Context for LLM

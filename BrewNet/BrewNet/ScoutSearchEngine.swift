@@ -21,7 +21,8 @@ final class ScoutSearchEngine {
     // MARK: - Public API
 
     struct SearchOutcome {
-        let top: [(profile: BrewNetProfile, reasons: [String])]
+        // matchPercent: LLM 互惠分(fit×accept, 0-100);规则排序路径为 nil
+        let top: [(profile: BrewNetProfile, reasons: [String], matchPercent: Int?)]
         let llmRerankApplied: Bool
     }
 
@@ -71,7 +72,7 @@ final class ScoutSearchEngine {
         // 5. V3 LLM 互惠精排(失败无缝退回规则序)
         await progress?(0.85, 4)
         let llmPool = Array(ranked.prefix(LLMRerankService.maxCandidates))
-        var topEntries: [(profile: BrewNetProfile, reasons: [String])]
+        var topEntries: [(profile: BrewNetProfile, reasons: [String], matchPercent: Int?)]
         var llmApplied = false
 
         if let llmResults = await LLMRerankService.shared.rerank(
@@ -86,19 +87,19 @@ final class ScoutSearchEngine {
             topEntries = llmResults.prefix(topCount).compactMap { result in
                 guard let entry = entryById[result.userId] else { return nil }
                 let reasons = result.evidence.isEmpty ? entry.reasons : result.evidence
-                return (profile: entry.profile, reasons: reasons)
+                return (profile: entry.profile, reasons: reasons, matchPercent: Int(result.reciprocalScore.rounded()))
             }
             if topEntries.count < topCount {
                 let existingIds = Set(topEntries.map { $0.profile.userId })
                 for entry in ranked where !existingIds.contains(entry.profile.userId) {
-                    topEntries.append(entry)
+                    topEntries.append((entry.profile, entry.reasons, nil))
                     if topEntries.count >= topCount { break }
                 }
             }
             llmApplied = true
             print("  🤖 V3.0: LLM reciprocal rerank applied")
         } else {
-            topEntries = Array(ranked.prefix(topCount))
+            topEntries = ranked.prefix(topCount).map { ($0.profile, $0.reasons, nil) }
             print("  🛟 V3.0: LLM unavailable, fell back to rule-based ranking")
         }
 
@@ -281,6 +282,22 @@ final class ScoutSearchEngine {
                 score += 1.0
                 weightedReasons.append((1.0, "Founder / startup experience"))
                 print("  ✓ Founder/Startup match (+1.0)")
+            }
+        }
+
+        // 7.5 密度加权:同校/同城温和加分(general 发布下优先把用户局部池子的人排上来)
+        if let requester = currentUserProfile {
+            if let myLoc = requester.coreIdentity.location?.lowercased().trimmingCharacters(in: .whitespaces), !myLoc.isEmpty,
+               let theirLoc = profile.coreIdentity.location?.lowercased().trimmingCharacters(in: .whitespaces), !theirLoc.isEmpty,
+               myLoc.contains(theirLoc) || theirLoc.contains(myLoc) {
+                score += 0.8
+                weightedReasons.append((0.8, "Nearby — same city as you"))
+            }
+            if let mySchools = requester.professionalBackground.educations?.map({ $0.schoolName.lowercased() }), !mySchools.isEmpty,
+               let theirSchools = profile.professionalBackground.educations?.map({ $0.schoolName.lowercased() }), !theirSchools.isEmpty,
+               !Set(mySchools).isDisjoint(with: Set(theirSchools)) {
+                score += 1.2
+                weightedReasons.append((1.2, "Fellow alum — same school as you"))
             }
         }
 
