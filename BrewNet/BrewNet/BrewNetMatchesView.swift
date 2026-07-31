@@ -468,39 +468,30 @@ struct BrewNetMatchesView: View {
                 .font(.system(size: 80))
                 .foregroundColor(Color(red: 0.6, green: 0.4, blue: 0.2))
             
-            Text(hasMoreProfiles ? "Loading More..." : "No More Profiles")
+            Text(hasMoreProfiles ? "Finding more…" : "You're all caught up ☕️")
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-            
+
             if hasMoreProfiles {
-                Text("You've seen \(profiles.count) profiles.\nLoading more from database...")
+                Text("You've seen \(profiles.count) profiles.\nBringing in more…")
                     .font(.system(size: 16))
                     .foregroundColor(.gray)
                     .multilineTextAlignment(.center)
             } else {
                 if profiles.count == 0 {
-                    VStack(spacing: 8) {
-                        Text("No New Recommendations Available")
-                            .font(.system(size: 16))
-                            .foregroundColor(.gray)
-                            .multilineTextAlignment(.center)
-                        Text("Possible reasons:")
-                            .font(.system(size: 14))
-                            .foregroundColor(.gray)
-                            .padding(.top, 4)
-                        Text("• All users have already been interacted with\n• No more users in the database\n• Please try again later or refresh")
-                            .font(.system(size: 12))
-                            .foregroundColor(.gray.opacity(0.8))
-                            .multilineTextAlignment(.leading)
-                    }
+                    Text("Fresh faces join every week.\nMeanwhile, tell Brew exactly who you're\nlooking for — it'll scout for you.")
+                        .font(.system(size: 16))
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
             } else {
-                Text("You've seen all available profiles!\n\(profiles.count) profiles loaded.")
+                Text("You've met everyone here for now.\nNew people join all the time — check back soon!")
                     .font(.system(size: 16))
                     .foregroundColor(.gray)
                     .multilineTextAlignment(.center)
                 }
             }
-            
+
+            #if DEBUG
             if totalFiltered > 0 {
                 Text("Note: \(totalFiltered) profiles were filtered due to incomplete data")
                     .font(.system(size: 12))
@@ -508,6 +499,7 @@ struct BrewNetMatchesView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
             }
+            #endif
             
             if hasMoreProfiles {
                 Button("Load More") {

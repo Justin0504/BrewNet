@@ -16,6 +16,7 @@ struct BrewMessage: Identifiable {
         case picks([(profile: BrewNetProfile, reasons: [String], matchPercent: Int?)])
         case inviteDraft(profile: BrewNetProfile, initialText: String)
         case survey(profile: BrewNetProfile)   // worth-it 一键问卷(北极星指标)
+        case startersOffer(profile: BrewNetProfile)  // 报喜后:要开场话题吗
         case note(String)
     }
     let id = UUID()
@@ -92,7 +93,13 @@ struct BrewAgentView: View {
             loadRequesterProfile()
             let proactiveRunStarted = greetIfNeeded()
             if !proactiveRunStarted {
-                maybeAskWorthIt()   // 📊 北极星:见面后的 worth-it 回访
+                Task {
+                    // 优先级:报喜(结果回报)> worth-it 回访;一次会话只推一件事
+                    let announced = await maybeAnnounceAcceptances()
+                    if !announced {
+                        maybeAskWorthIt()   // 📊 北极星:见面后的 worth-it 回访
+                    }
+                }
             }
             autoChatIfNeeded()
         }
@@ -287,6 +294,22 @@ struct BrewAgentView: View {
                     appendAgent("No problem — tell me if you'd like a different match or a new search.")
                 }
             )
+        case .startersOffer(let profile):
+            Button {
+                Task { await fetchStarters(for: profile) }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "lightbulb.fill")
+                        .font(.system(size: 14))
+                    Text("Get conversation starters for \(profile.coreIdentity.name.components(separatedBy: " ").first ?? "them")")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .foregroundColor(themeColor)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+                .background(Capsule().fill(Color.white))
+                .overlay(Capsule().stroke(themeColor.opacity(0.3), lineWidth: 1.2))
+            }
         case .note(let text):
             HStack {
                 Spacer()
@@ -574,7 +597,68 @@ struct BrewAgentView: View {
         }
         messages.append(BrewMessage(kind: .agentText(greeting)))
         history.append(BrewChatEntry(role: .agent, text: greeting))
+
+        // 🌱 池子活性播报:本周新加入的人数(查询失败静默跳过)
+        Task {
+            let weekAgo = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-7 * 24 * 3600))
+            if let response = try? await SupabaseConfig.shared.client
+                .from("profiles")
+                .select("user_id", head: true, count: .exact)
+                .gte("created_at", value: weekAgo)
+                .execute(),
+               let count = response.count, count > 0 {
+                await MainActor.run {
+                    messages.append(BrewMessage(kind: .note("🌱 \(count) new \(count == 1 ? "person" : "people") joined this week")))
+                }
+            }
+        }
         return false
+    }
+
+    /// 🎉 结果回报:我发出的邀请被接受了 → Brew 报喜 + 提供开场话题
+    private func maybeAnnounceAcceptances() async -> Bool {
+        guard let currentUser = authManager.currentUser else { return false }
+        let memory = BrewMemoryStore.shared.load(userId: currentUser.id)
+        let sentNames = Set(memory.sentInviteNames)
+        guard !sentNames.isEmpty else { return false }
+        let alreadyAnnounced = Set(memory.announcedMatchNames ?? [])
+
+        guard let matches = try? await supabaseService.getActiveMatches(userId: currentUser.id),
+              !matches.isEmpty else { return false }
+
+        for match in matches {
+            let otherId = match.userId == currentUser.id ? match.matchedUserId : match.userId
+            guard let supabaseProfile = try? await supabaseService.getProfile(userId: otherId) else { continue }
+            let profile = supabaseProfile.toBrewNetProfile()
+            let name = profile.coreIdentity.name
+            guard sentNames.contains(name), !alreadyAnnounced.contains(name) else { continue }
+
+            await MainActor.run {
+                messages.append(BrewMessage(kind: .agentText("🎉 Great news — \(name) accepted your invitation! Your coffee chat is on.")))
+                messages.append(BrewMessage(kind: .startersOffer(profile: profile)))
+                history.append(BrewChatEntry(role: .agent, text: "Announced: \(name) accepted the invitation."))
+            }
+            BrewMemoryStore.shared.recordAnnouncedMatch(name: name, userId: currentUser.id)
+            return true   // 一次会话报一件喜,不刷屏
+        }
+        return false
+    }
+
+    /// 💡 生成开场话题(报喜后的下一步动作)
+    private func fetchStarters(for profile: BrewNetProfile) async {
+        await MainActor.run { isThinking = true }
+        let starters = await BrewAgentService.shared.conversationStarters(
+            requester: currentUserProfile,
+            target: profile
+        )
+        await MainActor.run {
+            isThinking = false
+            if let starters {
+                appendAgent("Here's what I'd open with:\n\(starters)")
+            } else {
+                appendAgent("I couldn't reach my notes just now — try again in a moment.")
+            }
+        }
     }
 
     /// 📊 worth-it 回访:对已匹配但未回访过的对象,让 Brew 顺口问一句(一次一个)
@@ -658,6 +742,15 @@ struct BrewPickCard: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(themeColor)
                         .lineLimit(2)
+                    // 🤝 共同点前置 chip(同校/同城,1 秒可扫描)
+                    if let connection = connectionChip {
+                        Text(connection)
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(Color(red: 0.15, green: 0.45, blue: 0.25))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color(red: 0.88, green: 0.96, blue: 0.9)))
+                    }
                 }
                 Spacer()
                 // ⭐ 互惠匹配度徽章(fit×accept,LLM 路径才有)
@@ -729,6 +822,17 @@ struct BrewPickCard: View {
         if let t = profile.professionalBackground.jobTitle, !t.isEmpty { parts.append(t) }
         if let c = profile.professionalBackground.currentCompany, !c.isEmpty { parts.append(c) }
         return parts.isEmpty ? (profile.coreIdentity.bio ?? "") : parts.joined(separator: " · ")
+    }
+
+    /// 同校/同城理由前置为徽章(从 reasons 里识别密度加权信号)
+    private var connectionChip: String? {
+        if reasons.contains(where: { $0.localizedCaseInsensitiveContains("same school") || $0.localizedCaseInsensitiveContains("fellow alum") }) {
+            return "🎓 Same school"
+        }
+        if reasons.contains(where: { $0.localizedCaseInsensitiveContains("same city") || $0.localizedCaseInsensitiveContains("nearby") }) {
+            return "📍 Same city"
+        }
+        return nil
     }
 
     private var avatar: some View {

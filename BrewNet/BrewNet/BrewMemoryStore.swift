@@ -19,6 +19,7 @@ struct BrewMemory: Codable {
     var sentInviteNames: [String] = []   // 已代发邀请的对象(避免重复推)
     var declinedNames: [String] = []     // 用户明确说"不"的对象
     var surveyedNames: [String]? = nil   // 已做过 worth-it 回访的对象(optional:兼容旧数据解码)
+    var announcedMatchNames: [String]? = nil  // 已报喜过的接受者(避免重复庆祝)
 }
 
 final class BrewMemoryStore {
@@ -104,6 +105,15 @@ final class BrewMemoryStore {
         if memory.declinedNames.count > maxNames {
             memory.declinedNames.removeFirst(memory.declinedNames.count - maxNames)
         }
+        save(memory, userId: userId)
+    }
+
+    /// 🎉 已向用户报喜过某人接受邀请(防重复庆祝)
+    func recordAnnouncedMatch(name: String, userId: String) {
+        var memory = load(userId: userId)
+        var announced = memory.announcedMatchNames ?? []
+        if !announced.contains(name) { announced.append(name) }
+        memory.announcedMatchNames = Array(announced.suffix(maxNames))
         save(memory, userId: userId)
     }
 

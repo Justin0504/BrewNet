@@ -119,6 +119,45 @@ final class BrewAgentService {
         return text.isEmpty ? nil : String(text.prefix(500))
     }
 
+    // MARK: - 开场话题(邀请被接受后的下一步)
+
+    /// 为已约成的 coffee chat 生成 3 个 grounded 开场话题
+    func conversationStarters(
+        requester: BrewNetProfile?,
+        target: BrewNetProfile
+    ) async -> String? {
+        guard !isCircuitOpen else { return nil }
+
+        var targetDesc = [target.coreIdentity.name]
+        if let t = target.professionalBackground.jobTitle, !t.isEmpty { targetDesc.append(t) }
+        if let c = target.professionalBackground.currentCompany, !c.isEmpty { targetDesc.append("at \(c)") }
+        if !target.professionalBackground.skills.isEmpty {
+            targetDesc.append("skills: \(target.professionalBackground.skills.prefix(5).joined(separator: ", "))")
+        }
+        if let bio = target.coreIdentity.bio, !bio.isEmpty { targetDesc.append("bio: \(String(bio.prefix(120)))") }
+
+        var requesterDesc = "a BrewNet user"
+        if let r = requester {
+            var parts = [r.coreIdentity.name]
+            if let t = r.professionalBackground.jobTitle, !t.isEmpty { parts.append(t) }
+            requesterDesc = parts.joined(separator: ", ")
+        }
+
+        let prompt = """
+        \(requesterDesc) has an upcoming coffee chat with \(targetDesc.joined(separator: ", ")).
+        Write exactly 3 short, specific conversation starters grounded in the recipient's actual background above. \
+        No generic questions ("tell me about yourself"). Each under 20 words. \
+        Output as a numbered list, nothing else.
+        """
+        guard let raw = await callEdgeFunction(prompt: prompt, maxTokens: 300) else {
+            consecutiveFailures += 1
+            return nil
+        }
+        consecutiveFailures = 0
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : String(text.prefix(700))
+    }
+
     // MARK: - Prompt
 
     private func buildConversationPrompt(history: [BrewChatEntry], requester: BrewNetProfile?, memoryContext: String? = nil) -> String {

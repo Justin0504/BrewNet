@@ -21,6 +21,7 @@ struct MainView: View {
             ExploreView()
                 .tabItem {
                     Image(systemName: "sparkle.magnifyingglass")
+                    Text("Brew")
                 }
                 .tag(1)
 
@@ -30,6 +31,7 @@ struct MainView: View {
             }
                 .tabItem {
                     Image(systemName: "cup.and.saucer.fill")
+                    Text("Browse")
                 }
                 .tag(0)
             
@@ -37,26 +39,29 @@ struct MainView: View {
             RequestsView()
                 .tabItem {
                     Image(systemName: "person.badge.plus.fill")
+                    Text("Requests")
                 }
                 .tag(2)
                 .badge(pendingRequestCount > 0 ? pendingRequestCount : 0)
-            
+
             // Chat
             NavigationStack {
                 ChatView()
             }
             .tabItem {
                 Image(systemName: "message.fill")
+                Text("Chats")
             }
             .tag(3)
             .badge(unreadMessageCount > 0 ? unreadMessageCount : 0)
-            
+
             // Profile
             NavigationStack {
                 ProfileView()
             }
                 .tabItem {
                     Image(systemName: "person.fill")
+                    Text("Me")
                 }
                 .tag(4)
         }
