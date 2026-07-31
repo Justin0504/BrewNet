@@ -64,6 +64,14 @@ final class BrewMemoryStore {
         print("🧠 [BrewMemory] mission saved: \"\(goal.prefix(60))\"")
     }
 
+    /// onboarding 播种:把"想认识谁"存为 mission,lastRunAt 置远古 → 首次打开 Brew 即自动执行(wow moment)
+    func seedMission(goal: String, userId: String) {
+        var memory = load(userId: userId)
+        memory.activeMission = BrewMission(goal: goal, createdAt: Date(), lastRunAt: .distantPast, timesRun: 0)
+        save(memory, userId: userId)
+        print("🌱 [BrewMemory] mission seeded from onboarding: \"\(goal.prefix(60))\"")
+    }
+
     func clearMission(userId: String) {
         var memory = load(userId: userId)
         memory.activeMission = nil

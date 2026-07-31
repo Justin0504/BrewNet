@@ -67,12 +67,20 @@ struct SplashScreenWrapperView: View {
                         }
                 }
             } else {
-                // 显示资料设置界面
-                ProfileSetupView()
+                // 首次建档:默认走 Brew 对话式 onboarding(内含"Use form instead"回退到经典表单)
+                BrewOnboardingView()
                     .onAppear {
-                        print("📝 资料设置界面已显示，用户: \(user.name)")
+                        print("📝 Brew 对话式建档已显示，用户: \(user.name)")
                     }
             }
+        }
+        .overlay {
+            #if DEBUG
+            // 仅 Debug:环境变量强制预览 onboarding UI(模拟器验收用,不落库路径)
+            if ProcessInfo.processInfo.environment["BREWNET_PREVIEW_ONBOARDING"] == "1" {
+                BrewOnboardingView()
+            }
+            #endif
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ShowSplashScreen"))) { _ in
             // 收到显示启动画面的通知，重置状态并显示启动画面

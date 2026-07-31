@@ -119,6 +119,45 @@ final class BrewAgentService {
         return text.isEmpty ? nil : String(text.prefix(500))
     }
 
+    // MARK: - Onboarding 档案抽取
+
+    /// 从 onboarding 问答里抽取结构化档案(单次调用,失败返回 nil 由调用方走启发式兜底)
+    func extractOnboardingProfile(qa: [(question: String, answer: String)]) async -> [String: Any]? {
+        let transcript = qa.map { "Q: \($0.question)\nA: \($0.answer)" }.joined(separator: "\n")
+        let prompt = """
+        Extract a professional profile from this onboarding conversation. The answers are casual natural language.
+
+        \(transcript)
+
+        Return ONLY valid JSON (no markdown fences), null for unknown fields:
+        {"job_title": "...", "company": "...", "school": "...", "city": "...", "industry": "...",
+         "experience_level": "student|intern|entry|mid|senior|exec",
+         "skills": ["up to 8 short skill strings"],
+         "bio": "one warm first-person sentence summarizing them (max 140 chars)",
+         "intention": "learn_grow|connect_share|build_collaborate|unwind_chat",
+         "mission": "self-contained English description of who they want to meet, merged from their goal"}
+        """
+        guard let raw = await callEdgeFunction(prompt: prompt, maxTokens: 512) else {
+            consecutiveFailures += 1
+            return nil
+        }
+        consecutiveFailures = 0
+
+        var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.hasPrefix("```") {
+            cleaned = cleaned.replacingOccurrences(of: "```json", with: "").replacingOccurrences(of: "```", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let start = cleaned.firstIndex(of: "{"), let end = cleaned.lastIndex(of: "}") {
+            cleaned = String(cleaned[start...end])
+        }
+        guard let data = cleaned.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return json
+    }
+
     // MARK: - 开场话题(邀请被接受后的下一步)
 
     /// 为已约成的 coffee chat 生成 3 个 grounded 开场话题
