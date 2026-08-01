@@ -46,7 +46,8 @@ struct BrewOnboardingView: View {
                 composer
             }
         }
-        .fullScreenCover(isPresented: $showFormFallback) {
+        .sheet(isPresented: $showFormFallback) {
+            // sheet 呈现:下滑即可回到 Brew 对话(fullScreenCover 会困住用户)
             ProfileSetupView()
         }
         .onAppear { startIfNeeded() }
