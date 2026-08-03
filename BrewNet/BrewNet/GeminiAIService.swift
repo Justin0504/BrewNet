@@ -88,8 +88,88 @@ class GeminiAIService: ObservableObject {
     
     // MARK: - Generate Ice Breaker Topics
     func generateIceBreakerTopics(for user: ChatUser, context: String = "") async -> [AISuggestion] {
+        // 🧠 AI 升级(2026-08):有 userId 时拉双方真实档案做 grounding,
+        // 破冰话题引用对方的公司/技能/学校与双方共同点,而非泛泛而谈
+        if let grounded = await buildGroundedProfileBlock(for: user) {
+            let prompt = createGroundedIceBreakerPrompt(for: user, groundedBlock: grounded, context: context)
+            return await generateSuggestions(prompt: prompt, category: .iceBreaker)
+        }
         let prompt = createIceBreakerPrompt(for: user, context: context)
         return await generateSuggestions(prompt: prompt, category: .iceBreaker)
+    }
+
+    // MARK: - Profile Grounding(破冰质量的关键)
+
+    /// 从本地登录态读当前用户 id(AuthManager 存于 UserDefaults)
+    private func storedCurrentUserId() -> String? {
+        guard let data = UserDefaults.standard.data(forKey: "current_user"),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let id = json["id"] as? String else { return nil }
+        return id
+    }
+
+    /// 拉取对方(必要)与自己(尽力)的完整档案,产出 grounded 事实块;失败返回 nil 走旧 prompt
+    private func buildGroundedProfileBlock(for user: ChatUser) async -> String? {
+        guard let targetId = user.userId else { return nil }
+        guard let targetSupabase = try? await SupabaseService.shared.getProfile(userId: targetId) else { return nil }
+        let target = targetSupabase.toBrewNetProfile()
+
+        var lines: [String] = []
+        let pb = target.professionalBackground
+        var who: [String] = []
+        if let t = pb.jobTitle, !t.isEmpty { who.append(t) }
+        if let c = pb.currentCompany, !c.isEmpty { who.append("at \(c)") }
+        if !who.isEmpty { lines.append("They are: \(who.joined(separator: " "))") }
+        if let i = pb.industry, !i.isEmpty { lines.append("Industry: \(i)") }
+        if !pb.skills.isEmpty { lines.append("Skills: \(pb.skills.prefix(6).joined(separator: ", "))") }
+        if let edus = pb.educations, let first = edus.first {
+            lines.append("Education: \(first.schoolName)")
+        } else if let edu = pb.education, !edu.isEmpty {
+            lines.append("Education: \(edu)")
+        }
+        lines.append("They joined BrewNet to: \(target.networkingIntention.selectedIntention.rawValue)")
+        if let bio = target.coreIdentity.bio, !bio.isEmpty { lines.append("Bio: \(String(bio.prefix(140)))") }
+
+        // 双方共同点(最好的破冰素材)
+        if let myId = storedCurrentUserId(),
+           let mySupabase = try? await SupabaseService.shared.getProfile(userId: myId) {
+            let me = mySupabase.toBrewNetProfile()
+            var common: [String] = []
+            if let myLoc = me.coreIdentity.location?.lowercased(), let theirLoc = target.coreIdentity.location?.lowercased(),
+               !myLoc.isEmpty, !theirLoc.isEmpty, (myLoc.contains(theirLoc) || theirLoc.contains(myLoc)) {
+                common.append("same city (\(target.coreIdentity.location!))")
+            }
+            let mySchools = Set((me.professionalBackground.educations ?? []).map { $0.schoolName.lowercased() })
+            let theirSchools = Set((target.professionalBackground.educations ?? []).map { $0.schoolName.lowercased() })
+            if let shared = mySchools.intersection(theirSchools).first {
+                common.append("same school (\(shared.capitalized))")
+            }
+            let sharedSkills = Set(me.professionalBackground.skills.map { $0.lowercased() })
+                .intersection(Set(target.professionalBackground.skills.map { $0.lowercased() }))
+            if !sharedSkills.isEmpty {
+                common.append("shared skills: \(sharedSkills.prefix(3).joined(separator: ", "))")
+            }
+            if !common.isEmpty { lines.append("WHAT YOU TWO HAVE IN COMMON: \(common.joined(separator: "; "))") }
+        }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+
+    private func createGroundedIceBreakerPrompt(for user: ChatUser, groundedBlock: String, context: String) -> String {
+        return """
+        You are the networking assistant inside BrewNet. Generate 5 ice breaker messages to send to \(user.name). \
+        The facts below are the ONLY ground truth — reference them specifically, never invent details.
+
+        ABOUT \(user.name.uppercased()):
+        \(groundedBlock)
+
+        Context: \(context.isEmpty ? "First message after matching for a coffee chat" : context)
+
+        Requirements:
+        1. Each ice breaker must reference at least one SPECIFIC fact above (their company, a skill, their school, their goal, or a shared point).
+        2. Anything listed under "WHAT YOU TWO HAVE IN COMMON" is gold — use it in at least 2 of the 5.
+        3. Friendly, curious, professional; 15-40 words each; natural English; no emojis.
+        4. Return exactly 5 lines, one ice breaker per line, no numbering or extra formatting.
+        """
     }
     
     // MARK: - Generate Follow-up Questions

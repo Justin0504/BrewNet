@@ -633,15 +633,45 @@ struct BrewAgentView: View {
             let name = profile.coreIdentity.name
             guard sentNames.contains(name), !alreadyAnnounced.contains(name) else { continue }
 
+            // 🗓 预约 AI 化:双方空闲时段交集 → 直接给可行的见面窗口
+            let overlapWindows = timeslotOverlap(me: currentUserProfile, them: profile)
             await MainActor.run {
                 messages.append(BrewMessage(kind: .agentText("🎉 Great news — \(name) accepted your invitation! Your coffee chat is on.")))
                 messages.append(BrewMessage(kind: .startersOffer(profile: profile)))
+                if !overlapWindows.isEmpty {
+                    let windows = overlapWindows.prefix(2).joined(separator: " or ")
+                    messages.append(BrewMessage(kind: .agentText("Timing tip: you're both usually free \(windows) — good windows to propose when you schedule the coffee ☕️")))
+                }
                 history.append(BrewChatEntry(role: .agent, text: "Announced: \(name) accepted the invitation."))
             }
             BrewMemoryStore.shared.recordAnnouncedMatch(name: name, userId: currentUser.id)
             return true   // 一次会话报一件喜,不刷屏
         }
         return false
+    }
+
+    /// 🗓 双方空闲时段交集(确定性计算,无需 LLM)
+    private func timeslotOverlap(me: BrewNetProfile?, them: BrewNetProfile) -> [String] {
+        guard let me else { return [] }
+        let mine = me.networkingPreferences.availableTimeslot
+        let theirs = them.networkingPreferences.availableTimeslot
+        let days: [(String, DayTimeslots, DayTimeslots)] = [
+            ("Monday", mine.monday, theirs.monday),
+            ("Tuesday", mine.tuesday, theirs.tuesday),
+            ("Wednesday", mine.wednesday, theirs.wednesday),
+            ("Thursday", mine.thursday, theirs.thursday),
+            ("Friday", mine.friday, theirs.friday),
+            ("Saturday", mine.saturday, theirs.saturday),
+            ("Sunday", mine.sunday, theirs.sunday),
+        ]
+        var windows: [String] = []
+        for (day, m, t) in days {
+            if m.morning && t.morning { windows.append("\(day) morning") }
+            if m.noon && t.noon { windows.append("\(day) noon") }
+            if m.afternoon && t.afternoon { windows.append("\(day) afternoon") }
+            if m.evening && t.evening { windows.append("\(day) evening") }
+        }
+        return windows
     }
 
     /// 💡 生成开场话题(报喜后的下一步动作)
