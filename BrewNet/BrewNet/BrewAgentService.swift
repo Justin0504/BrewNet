@@ -197,6 +197,56 @@ final class BrewAgentService {
         return text.isEmpty ? nil : String(text.prefix(700))
     }
 
+    // MARK: - 见面前简报(Coffee Prep Brief)
+
+    /// 为即将到来的 coffee chat 生成简报:对方是谁 / 聊什么 / 共同点
+    func meetingPrepBrief(
+        requester: BrewNetProfile?,
+        target: BrewNetProfile,
+        when: String,
+        location: String?
+    ) async -> String? {
+        guard !isCircuitOpen else { return nil }
+
+        var facts: [String] = []
+        let pb = target.professionalBackground
+        var who = [target.coreIdentity.name]
+        if let t = pb.jobTitle, !t.isEmpty { who.append(t) }
+        if let c = pb.currentCompany, !c.isEmpty { who.append("at \(c)") }
+        facts.append(who.joined(separator: ", "))
+        if !pb.skills.isEmpty { facts.append("Skills: \(pb.skills.prefix(6).joined(separator: ", "))") }
+        if let edus = pb.educations, let first = edus.first { facts.append("Education: \(first.schoolName)") }
+        facts.append("Their goal on BrewNet: \(target.networkingIntention.selectedIntention.rawValue)")
+        if let bio = target.coreIdentity.bio, !bio.isEmpty { facts.append("Bio: \(String(bio.prefix(140)))") }
+
+        var meDesc = ""
+        if let r = requester {
+            var parts = [r.coreIdentity.name]
+            if let t = r.professionalBackground.jobTitle, !t.isEmpty { parts.append(t) }
+            if !r.professionalBackground.skills.isEmpty { parts.append("skills: \(r.professionalBackground.skills.prefix(4).joined(separator: ", "))") }
+            meDesc = "The reader is \(parts.joined(separator: ", ")). "
+        }
+
+        let prompt = """
+        Write a compact coffee-chat prep brief. \(meDesc)They are meeting this person \(when)\(location.map { " at \($0)" } ?? "").
+        FACTS (only ground truth, never invent):
+        \(facts.joined(separator: "\n"))
+
+        Format exactly:
+        WHO: one line on who they are
+        TALK ABOUT: 3 short bullets, each tied to a specific fact above
+        COMMON GROUND: one line (or 'Ask and find out!' if none evident)
+        Keep the whole brief under 90 words. No emojis, no preamble.
+        """
+        guard let raw = await callEdgeFunction(prompt: prompt, maxTokens: 350) else {
+            consecutiveFailures += 1
+            return nil
+        }
+        consecutiveFailures = 0
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : String(text.prefix(800))
+    }
+
     // MARK: - Prompt
 
     private func buildConversationPrompt(history: [BrewChatEntry], requester: BrewNetProfile?, memoryContext: String? = nil) -> String {

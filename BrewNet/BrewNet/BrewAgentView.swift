@@ -17,6 +17,7 @@ struct BrewMessage: Identifiable {
         case inviteDraft(profile: BrewNetProfile, initialText: String)
         case survey(profile: BrewNetProfile)   // worth-it 一键问卷(北极星指标)
         case startersOffer(profile: BrewNetProfile)  // 报喜后:要开场话题吗
+        case prepOffer(profile: BrewNetProfile, when: String, location: String?)  // ☕ 见面前简报入口
         case note(String)
     }
     let id = UUID()
@@ -94,10 +95,13 @@ struct BrewAgentView: View {
             let proactiveRunStarted = greetIfNeeded()
             if !proactiveRunStarted {
                 Task {
-                    // 优先级:报喜(结果回报)> worth-it 回访;一次会话只推一件事
+                    // 优先级:报喜 > 见面简报 > worth-it 回访;一次会话只推一件事
                     let announced = await maybeAnnounceAcceptances()
                     if !announced {
-                        maybeAskWorthIt()   // 📊 北极星:见面后的 worth-it 回访
+                        let prepped = await maybeOfferCoffeePrep()   // ☕ 即将见面 → 简报
+                        if !prepped {
+                            maybeAskWorthIt()   // 📊 北极星:见面后的 worth-it 回访
+                        }
                     }
                 }
             }
@@ -302,6 +306,22 @@ struct BrewAgentView: View {
                     Image(systemName: "lightbulb.fill")
                         .font(.system(size: 14))
                     Text("Get conversation starters for \(profile.coreIdentity.name.components(separatedBy: " ").first ?? "them")")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .foregroundColor(themeColor)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+                .background(Capsule().fill(Color.white))
+                .overlay(Capsule().stroke(themeColor.opacity(0.3), lineWidth: 1.2))
+            }
+        case .prepOffer(let profile, let when, let location):
+            Button {
+                Task { await fetchPrepBrief(for: profile, when: when, location: location) }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 14))
+                    Text("Prep me for coffee with \(profile.coreIdentity.name.components(separatedBy: " ").first ?? "them")")
                         .font(.system(size: 14, weight: .semibold))
                 }
                 .foregroundColor(themeColor)
@@ -648,6 +668,93 @@ struct BrewAgentView: View {
             return true   // 一次会话报一件喜,不刷屏
         }
         return false
+    }
+
+    /// ☕ 见面前简报:检测即将到来的已接受 coffee chat,主动提供 prep
+    private func maybeOfferCoffeePrep() async -> Bool {
+        guard let currentUser = authManager.currentUser else { return false }
+        let offered = Set(BrewMemoryStore.shared.load(userId: currentUser.id).prepOfferedNames ?? [])
+
+        struct CoffeeInviteRow: Decodable {
+            let senderId: String, receiverId: String, senderName: String?, receiverName: String?
+            let scheduledDate: String?, location: String?
+            enum CodingKeys: String, CodingKey {
+                case senderId = "sender_id", receiverId = "receiver_id"
+                case senderName = "sender_name", receiverName = "receiver_name"
+                case scheduledDate = "scheduled_date", location
+            }
+        }
+        let rows: [CoffeeInviteRow]
+        do {
+            let uid = currentUser.id.lowercased()
+            let response = try await supabaseService.supabase
+                .from("coffee_chat_invitations")
+                .select("sender_id,receiver_id,sender_name,receiver_name,scheduled_date,location")
+                .eq("status", value: "accepted")
+                .or("sender_id.eq.\(uid),receiver_id.eq.\(uid)")
+                .gte("scheduled_date", value: ISO8601DateFormatter().string(from: Date()))
+                .order("scheduled_date", ascending: true)
+                .limit(3)
+                .execute()
+            rows = try JSONDecoder().decode([CoffeeInviteRow].self, from: response.data)
+            print("☕️ [Prep] upcoming coffee rows: \(rows.count)")
+        } catch {
+            print("☕️ [Prep] query failed: \(error)")
+            return false
+        }
+        guard !rows.isEmpty else { return false }
+
+        for row in rows {
+            let otherId = row.senderId == currentUser.id ? row.receiverId : row.senderId
+            let otherName = (row.senderId == currentUser.id ? row.receiverName : row.senderName) ?? ""
+            guard !offered.contains(otherName) || otherName.isEmpty else { continue }
+            guard let supabaseProfile = try? await supabaseService.getProfile(userId: otherId) else { continue }
+            let profile = supabaseProfile.toBrewNetProfile()
+            let name = profile.coreIdentity.name
+            guard !offered.contains(name) else { continue }
+
+            // 友好时间串
+            var whenText = "soon"
+            if let ds = row.scheduledDate {
+                let iso = ISO8601DateFormatter()
+                iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                let date = iso.date(from: ds) ?? { iso.formatOptions = [.withInternetDateTime]; return iso.date(from: ds) }()
+                if let date {
+                    let fmt = DateFormatter()
+                    fmt.dateFormat = "EEEE, MMM d"
+                    whenText = "on \(fmt.string(from: date))"
+                }
+            }
+
+            await MainActor.run {
+                messages.append(BrewMessage(kind: .agentText("☕️ Heads up — your coffee with \(name) is coming up \(whenText)\(row.location.map { " at \($0)" } ?? "").")))
+                messages.append(BrewMessage(kind: .prepOffer(profile: profile, when: whenText, location: row.location)))
+                history.append(BrewChatEntry(role: .agent, text: "Offered prep brief for upcoming coffee with \(name)."))
+            }
+            BrewMemoryStore.shared.recordPrepOffered(name: name, userId: currentUser.id)
+            return true
+        }
+        return false
+    }
+
+    /// ☕ 生成并展示见面简报
+    private func fetchPrepBrief(for profile: BrewNetProfile, when: String, location: String?) async {
+        await MainActor.run { isThinking = true }
+        let brief = await BrewAgentService.shared.meetingPrepBrief(
+            requester: currentUserProfile,
+            target: profile,
+            when: when,
+            location: location
+        )
+        await MainActor.run {
+            isThinking = false
+            if let brief {
+                appendAgent(brief)
+                appendAgent("Good luck — tell me how it went afterwards! 📊")
+            } else {
+                appendAgent("Couldn't pull my notes just now — try again in a moment.")
+            }
+        }
     }
 
     /// 🗓 双方空闲时段交集(确定性计算,无需 LLM)
