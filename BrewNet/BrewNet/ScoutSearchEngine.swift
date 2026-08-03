@@ -109,17 +109,13 @@ final class ScoutSearchEngine {
             print("  🛟 V3.0: LLM unavailable, fell back to rule-based ranking")
         }
 
-        // 6. 最终存在性校验
-        let step2_5 = Date()
-        let finalProfiles = await validateProfilesExist(topEntries.map { $0.profile })
-        let finalIds = Set(finalProfiles.map { $0.userId })
-        let finalEntries = topEntries.filter { finalIds.contains($0.profile.userId) }
-        print("  ⏱️  Final Validation: \(Date().timeIntervalSince(step2_5) * 1000)ms")
+        // ⚡️ 性能修复(2026-08):去掉重复的最终存在性校验——
+        // top 候选全部来自步骤 3 刚验证过的池子,再查一遍纯属浪费一个网络往返
         print("  ⏱️  Total time: \(Date().timeIntervalSince(searchStart) * 1000)ms")
-        print("  ✅ Top \(finalEntries.count) selected from \(recommendations.count) candidates\n")
+        print("  ✅ Top \(topEntries.count) selected from \(recommendations.count) candidates\n")
 
         await progress?(1.0, 4)
-        return SearchOutcome(top: finalEntries, llmRerankApplied: llmApplied)
+        return SearchOutcome(top: topEntries, llmRerankApplied: llmApplied)
     }
 
     // MARK: - Validation(自 ExploreView 移入)

@@ -155,8 +155,8 @@ struct MainView: View {
             await updateUnreadMessageCount()
         }
         
-        // 每5秒刷新一次未读消息数
-        chatListRefreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+        // ⚡️ 每 20 秒刷新未读数(原 5 秒过于激进;切 tab/通知仍即时刷新)
+        chatListRefreshTimer = Timer.scheduledTimer(withTimeInterval: 20.0, repeats: true) { _ in
             Task {
                 await updateUnreadMessageCount()
             }
@@ -180,55 +180,21 @@ struct MainView: View {
         let hiddenUserIds = Set(UserDefaults.standard.stringArray(forKey: hiddenUsersKey) ?? [])
         
         do {
-            // 获取所有活跃的匹配
-            let matches = try await supabaseService.getActiveMatches(userId: currentUser.id)
-            
-            var totalUnread = 0
-            var processedUserIds = Set<String>() // 用于去重，确保每个用户只计算一次
-            
-            // 对每个匹配，获取未读消息数
-            for match in matches {
-                let otherUserId = match.userId == currentUser.id ? match.matchedUserId : match.userId
-                
-                // 跳过已处理的用户，避免重复计算
-                if processedUserIds.contains(otherUserId) {
-                    continue
-                }
-                
-                // 跳过 hidden 的用户，不计算其未读消息数
-                if hiddenUserIds.contains(otherUserId) {
-                    print("⏭️ Skipping hidden user \(otherUserId) for unread count")
-                    continue
-                }
-                
-                processedUserIds.insert(otherUserId)
-                
-                // 获取该用户的所有消息
-                let messages = try await supabaseService.getMessages(
-                    userId1: currentUser.id,
-                    userId2: otherUserId
-                )
-                
-                // 去重：基于消息 ID 去重，确保不会有重复消息
-                var uniqueMessages: [SupabaseMessage] = []
-                var seenMessageIds = Set<String>()
-                for message in messages {
-                    if !seenMessageIds.contains(message.id) {
-                        uniqueMessages.append(message)
-                        seenMessageIds.insert(message.id)
-                    }
-                }
-                
-                // 计算未读消息数（接收者是自己且未读）
-                let unread = uniqueMessages.filter { message in
-                    message.receiverId == currentUser.id && !message.isRead
-                }.count
-                
-                totalUnread += unread
-            }
-            
+            // ⚡️ 性能修复(2026-08):原实现每 5 秒做 1+N 次请求(每个 match 拉全部历史消息)
+            // 现在一条查询取全部未读消息的 sender_id,客户端过滤 hidden 后计数
+            struct UnreadRow: Decodable { let senderId: String
+                enum CodingKeys: String, CodingKey { case senderId = "sender_id" } }
+            let response = try await supabaseService.supabase
+                .from("messages")
+                .select("sender_id")
+                .eq("receiver_id", value: currentUser.id)
+                .eq("is_read", value: false)
+                .execute()
+            let rows = try JSONDecoder().decode([UnreadRow].self, from: response.data)
+            let totalUnread = rows.filter { !hiddenUserIds.contains($0.senderId) }.count
+
             unreadMessageCount = totalUnread
-            print("✅ Updated unread message count: \(totalUnread) (excluded \(hiddenUserIds.count) hidden chats)")
+            print("✅ Updated unread message count: \(totalUnread) (1 query, excluded \(hiddenUserIds.count) hidden chats)")
         } catch {
             print("⚠️ Failed to update unread message count: \(error.localizedDescription)")
         }
@@ -243,8 +209,8 @@ struct MainView: View {
             await updatePendingRequestCount()
         }
         
-        // 每5秒刷新一次请求数
-        requestRefreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+        // ⚡️ 每 20 秒刷新请求数(接受/拒绝事件另有通知即时刷新)
+        requestRefreshTimer = Timer.scheduledTimer(withTimeInterval: 20.0, repeats: true) { _ in
             Task {
                 await updatePendingRequestCount()
             }
@@ -288,6 +254,14 @@ struct MainView: View {
         }
         
         do {
+            #if DEBUG
+            // 🔬 诊断:查询时刻的 auth session 状态
+            if let s = try? await SupabaseConfig.shared.client.auth.session {
+                print("🔑 [DIAG] session uid=\(s.user.id.uuidString.lowercased()) expires=\(s.expiresAt)")
+            } else {
+                print("🔑 [DIAG] NO auth session at query time — queries run as anon!")
+            }
+            #endif
             // 获取所有待处理的邀请
             let pendingInvitations = try await supabaseService.getPendingInvitations(userId: currentUser.id)
             
