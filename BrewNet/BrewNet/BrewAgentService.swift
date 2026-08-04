@@ -86,7 +86,8 @@ final class BrewAgentService {
     func draftInvite(
         requester: BrewNetProfile?,
         target: BrewNetProfile,
-        conversationGoal: String
+        conversationGoal: String,
+        timeHint: String? = nil   // ☕ Weekly Brew:在邀请里直接锚定时间窗口
     ) async -> String? {
         guard !isCircuitOpen else { return nil }
 
@@ -105,6 +106,7 @@ final class BrewAgentService {
         Write a short, warm, specific coffee-chat invitation message (2-3 sentences, first person, English) \
         from \(requesterDesc) to \(targetDesc.joined(separator: ", ")).
         The sender's goal: "\(conversationGoal)".
+        \(timeHint.map { "End by proposing to meet \($0) (phrase it naturally as a question)." } ?? "")
         Reference something concrete about the recipient. No emojis, no subject line, no placeholders. \
         Output ONLY the message text.
         """

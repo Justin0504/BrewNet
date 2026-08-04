@@ -21,6 +21,7 @@ struct BrewMemory: Codable {
     var surveyedNames: [String]? = nil   // 已做过 worth-it 回访的对象(optional:兼容旧数据解码)
     var announcedMatchNames: [String]? = nil  // 已报喜过的接受者(避免重复庆祝)
     var prepOfferedNames: [String]? = nil     // 已提供过见面简报的对象
+    var lastWeeklyBrewAt: Date? = nil         // ☕ Weekly Brew 上次提案时间(7 天节奏)
 }
 
 final class BrewMemoryStore {
@@ -124,6 +125,19 @@ final class BrewMemoryStore {
         if !announced.contains(name) { announced.append(name) }
         memory.announcedMatchNames = Array(announced.suffix(maxNames))
         save(memory, userId: userId)
+    }
+
+    /// ☕ Weekly Brew 是否到期(>6 天未提案)
+    func weeklyBrewDue(userId: String) -> Bool {
+        let last = load(userId: userId).lastWeeklyBrewAt ?? .distantPast
+        return Date().timeIntervalSince(last) > 6 * 24 * 3600
+    }
+
+    func recordWeeklyBrewShown(userId: String) {
+        var memory = load(userId: userId)
+        memory.lastWeeklyBrewAt = Date()
+        save(memory, userId: userId)
+        print("☕ [BrewMemory] weekly brew shown")
     }
 
     /// ☕ 已对某人提供过见面简报(防重复)

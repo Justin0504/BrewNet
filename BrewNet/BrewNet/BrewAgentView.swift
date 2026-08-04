@@ -18,6 +18,7 @@ struct BrewMessage: Identifiable {
         case survey(profile: BrewNetProfile)   // worth-it 一键问卷(北极星指标)
         case startersOffer(profile: BrewNetProfile)  // 报喜后:要开场话题吗
         case prepOffer(profile: BrewNetProfile, when: String, location: String?)  // ☕ 见面前简报入口
+        case weeklyBrew(profile: BrewNetProfile, reasons: [String], matchPercent: Int?, windowText: String?)  // ☕ 每周一杯提案
         case note(String)
     }
     let id = UUID()
@@ -314,6 +315,24 @@ struct BrewAgentView: View {
                 .background(Capsule().fill(Color.white))
                 .overlay(Capsule().stroke(themeColor.opacity(0.3), lineWidth: 1.2))
             }
+        case .weeklyBrew(let profile, let reasons, let matchPercent, let windowText):
+            WeeklyBrewCard(
+                profile: profile,
+                reasons: reasons,
+                matchPercent: matchPercent,
+                windowText: windowText,
+                isEngaged: engagedProfileIds.contains(profile.userId),
+                onTap: { selectedProfile = profile },
+                onSetup: {
+                    Task { await setupWeeklyBrew(profile: profile, windowText: windowText) }
+                },
+                onSkip: {
+                    if let uid = authManager.currentUser?.id {
+                        BrewMemoryStore.shared.recordDeclined(name: profile.coreIdentity.name, userId: uid)
+                    }
+                    appendAgent("No worries — I'll bring someone different next week. You can still search anytime.")
+                }
+            )
         case .prepOffer(let profile, let when, let location):
             Button {
                 Task { await fetchPrepBrief(for: profile, when: when, location: location) }
@@ -608,6 +627,19 @@ struct BrewAgentView: View {
             return true
         }
 
+        // ☕ Weekly Brew:每周一次,Brew 直接端上"这周就见这个人"的完整提案
+        // (mission 刚跑过、且到周了才触发 → 与 mission 自动跑自然错峰)
+        if let uid = userId, BrewMemoryStore.shared.weeklyBrewDue(userId: uid) {
+            let greeting = "☕️ It's Weekly Brew time\(firstName.map { ", \($0)" } ?? "")! Once a week I pick ONE person actually worth your coffee. Give me a moment…"
+            messages.append(BrewMessage(kind: .agentText(greeting)))
+            history.append(BrewChatEntry(role: .agent, text: greeting))
+            Task {
+                await MainActor.run { isThinking = true }
+                await runWeeklyBrew()
+            }
+            return true
+        }
+
         // 有 mission 但最近跑过 → 提及即可;无 mission → 标准开场
         var greeting: String
         if let uid = userId, let mission = BrewMemoryStore.shared.load(userId: uid).activeMission {
@@ -668,6 +700,72 @@ struct BrewAgentView: View {
             return true   // 一次会话报一件喜,不刷屏
         }
         return false
+    }
+
+    /// ☕ Weekly Brew:搜出本周唯一精选 + 时段窗口,端出完整提案
+    private func runWeeklyBrew() async {
+        guard let currentUser = authManager.currentUser else {
+            await MainActor.run { isThinking = false }
+            return
+        }
+        BrewMemoryStore.shared.recordWeeklyBrewShown(userId: currentUser.id)
+
+        let memory = BrewMemoryStore.shared.load(userId: currentUser.id)
+        let excludeNames = Set(memory.sentInviteNames + memory.declinedNames)
+        let goal = memory.activeMission?.goal ?? "interesting professionals nearby worth meeting for a coffee"
+        lastGoal = goal
+
+        let outcome = try? await ScoutSearchEngine.shared.search(
+            query: goal,
+            currentUserId: currentUser.id,
+            currentUserProfile: currentUserProfile,
+            topCount: 3,
+            excludeNames: excludeNames
+        )
+        guard let top = outcome?.top.first else {
+            await MainActor.run {
+                isThinking = false
+                messages.append(BrewMessage(kind: .agentText("The pool's a bit quiet this week — I'll keep scouting and bring you someone great next week.")))
+            }
+            return
+        }
+
+        let windows = timeslotOverlap(me: currentUserProfile, them: top.profile)
+        let windowText = windows.first
+
+        await MainActor.run {
+            isThinking = false
+            lastPicks = [top]
+            messages.append(BrewMessage(kind: .weeklyBrew(
+                profile: top.profile,
+                reasons: top.reasons,
+                matchPercent: top.matchPercent,
+                windowText: windowText
+            )))
+            let followUp = windowText != nil
+                ? "One tap and I'll send an invite proposing \(windowText!). No back-and-forth needed."
+                : "One tap and I'll draft the invite for you."
+            messages.append(BrewMessage(kind: .agentText(followUp)))
+            history.append(BrewChatEntry(role: .tool, text: BrewAgentService.toolResultSummary(for: [(top.profile, top.reasons)])))
+        }
+    }
+
+    /// ☕ Weekly Brew 的"就这么定":时间锚定草稿 → 确认卡(人在环上)
+    private func setupWeeklyBrew(profile: BrewNetProfile, windowText: String?) async {
+        await MainActor.run { isThinking = true }
+        let draft = await BrewAgentService.shared.draftInvite(
+            requester: currentUserProfile,
+            target: profile,
+            conversationGoal: lastGoal.isEmpty ? "meet for a coffee chat" : lastGoal,
+            timeHint: windowText.map { "this \($0)" }
+        )
+        let firstName = profile.coreIdentity.name.components(separatedBy: " ").first ?? profile.coreIdentity.name
+        let fallbackDraft = "Hi \(firstName), Brew matched us this week and your background looks great — would \(windowText.map { "this \($0)" } ?? "sometime this week") work for a quick coffee chat?"
+        await MainActor.run {
+            isThinking = false
+            messages.append(BrewMessage(kind: .inviteDraft(profile: profile, initialText: draft ?? fallbackDraft)))
+            history.append(BrewChatEntry(role: .agent, text: "Weekly Brew: drafted time-anchored invite to \(profile.coreIdentity.name)."))
+        }
     }
 
     /// ☕ 见面前简报:检测即将到来的已接受 coffee chat,主动提供 prep
@@ -1084,6 +1182,112 @@ struct BrewInviteDraftCard: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(themeColor.opacity(0.25), lineWidth: 1.5)
         )
+    }
+}
+
+// MARK: - Weekly Brew Card(☕ 每周一杯:一人 + 一个时间窗 + 一键成局)
+
+struct WeeklyBrewCard: View {
+    let profile: BrewNetProfile
+    let reasons: [String]
+    var matchPercent: Int? = nil
+    let windowText: String?
+    let isEngaged: Bool
+    var onTap: () -> Void
+    var onSetup: () -> Void
+    var onSkip: () -> Void
+
+    @State private var didAct = false
+    private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
+    private var gold: Color { Color(red: 0.85, green: 0.6, blue: 0.1) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // 周选头带
+            HStack(spacing: 6) {
+                Image(systemName: "crown.fill")
+                    .font(.system(size: 12))
+                    .foregroundColor(gold)
+                Text("THIS WEEK'S BREW")
+                    .font(.system(size: 11, weight: .heavy))
+                    .kerning(1)
+                    .foregroundColor(gold)
+                Spacer()
+                if let percent = matchPercent, percent > 0 {
+                    Text("\(percent)% match")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(gold)
+                }
+            }
+
+            BrewPickCard(
+                profile: profile,
+                reasons: reasons,
+                rank: 1,
+                matchPercent: nil,
+                isEngaged: isEngaged,
+                onTap: onTap,
+                onConnect: onSetup
+            )
+            .allowsHitTesting(false)  // 内嵌卡只做展示,动作由下方按钮承担
+            .overlay(Color.clear.contentShape(Rectangle()).onTapGesture(perform: onTap))
+
+            if let window = windowText {
+                HStack(spacing: 8) {
+                    Image(systemName: "calendar.badge.checkmark")
+                        .font(.system(size: 14))
+                        .foregroundColor(themeColor)
+                    Text("You're both free **\(window)**")
+                        .font(.system(size: 14))
+                        .foregroundColor(themeColor)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 10).fill(gold.opacity(0.1)))
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    guard !didAct else { return }
+                    didAct = true
+                    onSetup()
+                } label: {
+                    Label(windowText != nil ? "Set it up" : "Draft the invite", systemImage: "cup.and.saucer.fill")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12).fill(
+                                didAct ? AnyShapeStyle(Color.gray.opacity(0.4)) : AnyShapeStyle(
+                                    LinearGradient(colors: [gold, Color(red: 0.65, green: 0.42, blue: 0.12)],
+                                                   startPoint: .top, endPoint: .bottom))
+                            )
+                        )
+                }
+                Button {
+                    guard !didAct else { return }
+                    didAct = true
+                    onSkip()
+                } label: {
+                    Text("Not this week")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(themeColor)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(themeColor.opacity(0.08)))
+                }
+            }
+            .disabled(didAct)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 18).fill(Color.white))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(LinearGradient(colors: [gold.opacity(0.7), gold.opacity(0.2)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.5)
+        )
+        .shadow(color: gold.opacity(0.15), radius: 10, x: 0, y: 4)
     }
 }
 
