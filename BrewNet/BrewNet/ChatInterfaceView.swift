@@ -1554,7 +1554,8 @@ struct ChatInterfaceView: View {
                         userIdsToFetch.append(matchedUserId)
                     }
                     print("✅ Match 1: Current user is user_id, matched with: \(matchedUserId) (will fetch name)")
-                    basicSessionData.append((match, matchedUserId, "Loading..."))
+                    // UX 修复:matches.matched_user_name(触发器已填对方名字)作占位,避免闪 "Loading..."
+                    basicSessionData.append((match, matchedUserId, match.matchedUserName.isEmpty ? "New match" : match.matchedUserName))
                 } else if match.matchedUserId == currentUser.id {
                     // 当前用户是 matched_user_id，对方是 user_id
                     matchedUserId = match.userId
@@ -1576,9 +1577,9 @@ struct ChatInterfaceView: View {
                     if !userIdsToFetch.contains(matchedUserId) {
                         userIdsToFetch.append(matchedUserId)
                     }
-                    // 暂时使用 "Loading..." 作为占位符，后续会更新
+                    // 此方向 matchedUserName 是自己的名字不能用;占位 "New match",随 profile 解析更新
                     print("✅ Match 2: Current user is matched_user_id, matched with: \(match.userId) (will fetch name)")
-                    basicSessionData.append((match, matchedUserId, "Loading..."))
+                    basicSessionData.append((match, matchedUserId, "New match"))
                 } else {
                     // 这个 match 既不是以当前用户为 user_id，也不是以当前用户为 matched_user_id
                     // 这不应该发生，但为了安全起见，跳过它
@@ -1613,12 +1614,10 @@ struct ChatInterfaceView: View {
                     }
                 }
                 
-                // 更新 basicSessionData 中的名字
+                // 更新 basicSessionData 中的名字(profile 是最权威来源,拿到就覆盖占位)
                 for (index, data) in basicSessionData.enumerated() {
-                    if data.matchedUserName == "Loading..." {
-                        if let profile = userIdToProfile[data.matchedUserId] {
-                            basicSessionData[index] = (data.match, data.matchedUserId, profile.coreIdentity.name)
-                        }
+                    if let profile = userIdToProfile[data.matchedUserId], !profile.coreIdentity.name.isEmpty {
+                        basicSessionData[index] = (data.match, data.matchedUserId, profile.coreIdentity.name)
                     }
                 }
                 

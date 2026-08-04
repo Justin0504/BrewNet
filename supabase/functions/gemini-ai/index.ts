@@ -1,8 +1,29 @@
-// Supabase Edge Function: Gemini AI Proxy
+// Supabase Edge Function: LLM Proxy (multi-provider)
+//
+// v2 (2026-07): 从单一 Gemini SDK 升级为多 provider fetch 直调链:
+//   Gemini(多模型名依次尝试)→ Anthropic Claude Haiku → OpenAI
+// 设计原则:
+//   - 快速失败:单 provider 单次尝试(8s 超时),失败立刻切下一家,
+//     不再做 429 重试等待(旧版重试循环导致客户端白等 10s+)
+//   - 响应契约不变:{ text, category, provider } —— app 端零改动
+// 环境变量(Supabase secrets):GEMINI_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { GoogleGenerativeAI } from "npm:@google/generative-ai@^0.1.0"
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
+const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')
+const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
+
+// Gemini 免费层的模型可用性随时间变化(2.0-flash 免费额度已降为 0),
+// 依次尝试新→旧模型名。2.5 系默认开 thinking(慢 5s+),显式关闭;
+// flash-lite 优先(延迟最低,匹配任务足够)
+const GEMINI_MODELS = [
+  { name: 'gemini-2.5-flash-lite', disableThinking: true },
+  { name: 'gemini-flash-latest', disableThinking: false },
+]
+const ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001'
+const OPENAI_MODEL = 'gpt-4o-mini'
+
+const PER_ATTEMPT_TIMEOUT_MS = 8000
 
 interface RequestBody {
   prompt: string
@@ -15,45 +36,145 @@ interface RequestBody {
   }
 }
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), PER_ATTEMPT_TIMEOUT_MS)
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer))
+}
+
+// ---------- Providers ----------
+
+async function tryGemini(prompt: string, config: Required<Pick<NonNullable<RequestBody['generationConfig']>, never>> & { temperature: number; topK: number; topP: number; maxOutputTokens: number }): Promise<{ text: string; provider: string } | null> {
+  if (!GEMINI_API_KEY) return null
+  for (const model of GEMINI_MODELS) {
+    try {
+      const generationConfig: Record<string, unknown> = {
+        temperature: config.temperature,
+        topK: config.topK,
+        topP: config.topP,
+        maxOutputTokens: config.maxOutputTokens,
+      }
+      if (model.disableThinking) {
+        // 2.5 系默认 thinking 会拖慢 5s+,匹配/对话任务不需要
+        generationConfig.thinkingConfig = { thinkingBudget: 0 }
+      }
+      const res = await fetchWithTimeout(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model.name}:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig,
+          }),
+        },
+      )
+      if (!res.ok) {
+        console.warn(`[gemini:${model.name}] HTTP ${res.status}`)
+        continue
+      }
+      const data = await res.json()
+      const text = data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? '').join('') ?? ''
+      if (text.trim()) return { text, provider: `gemini:${model.name}` }
+    } catch (e) {
+      console.warn(`[gemini:${model.name}] ${e instanceof Error ? e.message : e}`)
+    }
+  }
+  return null
+}
+
+async function tryAnthropic(prompt: string, config: { temperature: number; maxOutputTokens: number }): Promise<{ text: string; provider: string } | null> {
+  if (!ANTHROPIC_API_KEY) return null
+  try {
+    const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: ANTHROPIC_MODEL,
+        max_tokens: config.maxOutputTokens,
+        temperature: Math.min(config.temperature, 1.0),
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    })
+    if (!res.ok) {
+      console.warn(`[anthropic] HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
+      return null
+    }
+    const data = await res.json()
+    const text = (data?.content ?? [])
+      .filter((b: { type?: string }) => b.type === 'text')
+      .map((b: { text?: string }) => b.text ?? '')
+      .join('')
+    if (text.trim()) return { text, provider: `anthropic:${ANTHROPIC_MODEL}` }
+  } catch (e) {
+    console.warn(`[anthropic] ${e instanceof Error ? e.message : e}`)
+  }
+  return null
+}
+
+async function tryOpenAI(prompt: string, config: { temperature: number; maxOutputTokens: number }): Promise<{ text: string; provider: string } | null> {
+  if (!OPENAI_API_KEY) return null
+  try {
+    const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        temperature: config.temperature,
+        max_tokens: config.maxOutputTokens,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    })
+    if (!res.ok) {
+      console.warn(`[openai] HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
+      return null
+    }
+    const data = await res.json()
+    const text = data?.choices?.[0]?.message?.content ?? ''
+    if (text.trim()) return { text, provider: `openai:${OPENAI_MODEL}` }
+  } catch (e) {
+    console.warn(`[openai] ${e instanceof Error ? e.message : e}`)
+  }
+  return null
+}
+
+// ---------- Handler ----------
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-      },
-    })
+    return new Response(null, { headers: corsHeaders })
   }
 
   try {
-    if (!GEMINI_API_KEY) {
-      return new Response(
-        JSON.stringify({ error: 'API Key not configured' }),
-        { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
-      )
-    }
-
     const authHeader = req.headers.get('authorization')
     if (!authHeader) {
       return new Response(
         JSON.stringify({ error: 'Unauthorized' }),
-        { status: 401, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } },
       )
     }
 
     const body: RequestBody = await req.json()
     const { prompt, category, generationConfig } = body
-
     if (!prompt) {
       return new Response(
         JSON.stringify({ error: 'Missing prompt' }),
-        { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } },
       )
     }
-
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
 
     const config = {
       temperature: generationConfig?.temperature ?? 0.7,
@@ -62,50 +183,31 @@ serve(async (req) => {
       maxOutputTokens: generationConfig?.maxOutputTokens ?? 1024,
     }
 
-    // 添加重试逻辑处理 429 错误
-    let result
-    let retries = 3
-    let lastError
-    
-    while (retries > 0) {
-      try {
-        result = await model.generateContent({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: config,
-        })
-        break // 成功，退出循环
-      } catch (error: any) {
-        lastError = error
-        // 如果是 429 错误（配额限制），等待后重试
-        if (error.message?.includes('429') || error.message?.includes('Resource exhausted')) {
-          retries--
-          if (retries > 0) {
-            // 等待 2 秒后重试（指数退避）
-            const waitTime = (4 - retries) * 2000 // 2秒, 4秒, 6秒
-            await new Promise(resolve => setTimeout(resolve, waitTime))
-            continue
-          }
-        }
-        // 其他错误直接抛出
-        throw error
-      }
-    }
-    
+    const started = Date.now()
+    // 顺序:Anthropic Haiku 主力(3-4s 稳定、质量最好)→ OpenAI → Gemini 免费层兜底
+    // (Gemini 免费层 2026-07 实测延迟方差大:2.0-flash 配额归零、2.5 系 thinking 拖慢)
+    const result =
+      (await tryAnthropic(prompt, config)) ??
+      (await tryOpenAI(prompt, config)) ??
+      (await tryGemini(prompt, config))
+
     if (!result) {
-      throw lastError || new Error('Failed to generate content after retries')
+      return new Response(
+        JSON.stringify({ error: 'All LLM providers failed', message: 'Gemini/Anthropic/OpenAI all unavailable' }),
+        { status: 502, headers: { 'Content-Type': 'application/json', ...corsHeaders } },
+      )
     }
 
-    const response = await result.response
-    const text = response.text()
+    console.log(`[llm-proxy] provider=${result.provider} category=${category ?? '-'} latency=${Date.now() - started}ms`)
 
     return new Response(
-      JSON.stringify({ text: text, category: category }),
-      { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+      JSON.stringify({ text: result.text, category: category, provider: result.provider }),
+      { headers: { 'Content-Type': 'application/json', ...corsHeaders } },
     )
   } catch (error) {
     return new Response(
-      JSON.stringify({ error: 'Failed to call Gemini API', message: error instanceof Error ? error.message : 'Unknown error' }),
-      { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+      JSON.stringify({ error: 'LLM proxy error', message: error instanceof Error ? error.message : 'Unknown error' }),
+      { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } },
     )
   }
 })

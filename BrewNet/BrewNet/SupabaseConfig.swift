@@ -16,11 +16,43 @@ class SupabaseConfig {
     lazy var client: SupabaseClient = {
         return SupabaseClient(
             supabaseURL: URL(string: supabaseURL)!,
-            supabaseKey: supabaseKey
+            supabaseKey: supabaseKey,
+            options: SupabaseClientOptions(
+                auth: .init(storage: ResilientAuthStorage())
+            )
         )
     }()
-    
+
     private init() {}
+}
+
+// MARK: - Resilient Auth Storage
+//
+// 修复关键 bug(2026-08):supabase-swift 默认把 auth session 存钥匙串;
+// 钥匙串不可用时(如无签名的模拟器构建)session 静默丢失 →
+// 所有查询以 anon 身份执行 → RLS 把用户自己的数据(邀请等)全部藏起来。
+// 方案:钥匙串优先 + UserDefaults 兜底双写(略降安全换会话可靠性)。
+struct ResilientAuthStorage: AuthLocalStorage {
+    private let keychain = AuthClient.Configuration.defaultLocalStorage
+    private let prefix = "brewnet.auth."
+
+    func store(key: String, value: Data) throws {
+        try? keychain.store(key: key, value: value)
+        // 双写备份;读取时钥匙串优先
+        UserDefaults.standard.set(value, forKey: prefix + key)
+    }
+
+    func retrieve(key: String) throws -> Data? {
+        if let data = try? keychain.retrieve(key: key), data != nil {
+            return data
+        }
+        return UserDefaults.standard.data(forKey: prefix + key)
+    }
+
+    func remove(key: String) throws {
+        try? keychain.remove(key: key)
+        UserDefaults.standard.removeObject(forKey: prefix + key)
+    }
 }
 
 // MARK: - Supabase Tables

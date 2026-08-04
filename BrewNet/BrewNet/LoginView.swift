@@ -225,8 +225,23 @@ struct LoginView: View {
             RegisterView()
                 .environmentObject(authManager)
         }
+        .onAppear {
+            #if DEBUG
+            // 仅 Debug 构建:支持模拟器/UI 测试通过环境变量自动登录
+            // 用法: SIMCTL_CHILD_BREWNET_AUTOLOGIN_EMAIL=... SIMCTL_CHILD_BREWNET_AUTOLOGIN_PASSWORD=... xcrun simctl launch ...
+            let env = ProcessInfo.processInfo.environment
+            if let autoEmail = env["BREWNET_AUTOLOGIN_EMAIL"],
+               let autoPassword = env["BREWNET_AUTOLOGIN_PASSWORD"],
+               !autoEmail.isEmpty, !autoPassword.isEmpty, !isLoading {
+                print("🧪 [DEBUG] Auto-login via env vars: \(autoEmail)")
+                email = autoEmail
+                password = autoPassword
+                performLogin()
+            }
+            #endif
+        }
     }
-    
+
     // MARK: - Login Functions
     private func performLogin() {
         guard !email.isEmpty && !password.isEmpty else {

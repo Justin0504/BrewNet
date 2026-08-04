@@ -12,6 +12,7 @@ struct ExploreMainView: View {
     
     @State private var descriptionText: String = ""
     @State private var recommendedProfiles: [BrewNetProfile] = []
+    @State private var matchReasons: [String: [String]] = [:]  // userId → 证据式匹配理由(来自评分信号)
     @State private var selectedProfile: BrewNetProfile?
     @State private var engagedProfileIds: Set<String> = []
     @State private var proUserIds: Set<String> = []
@@ -88,6 +89,17 @@ struct ExploreMainView: View {
                         showTalentScoutTip = true
                     }
                 }
+                #if DEBUG
+                // 仅 Debug 构建:环境变量自动触发一次 Scout 搜索(模拟器/UI 测试用)
+                if let autoQuery = ProcessInfo.processInfo.environment["BREWNET_AUTOSCOUT_QUERY"],
+                   !autoQuery.isEmpty, !hasSearched, !isLoading {
+                    print("🧪 [DEBUG] Auto-scout via env var: \(autoQuery)")
+                    descriptionText = autoQuery
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        runTalentScoutSearch()
+                    }
+                }
+                #endif
             }
         }
         .sheet(item: $selectedProfile) { profile in
@@ -241,7 +253,7 @@ struct ExploreMainView: View {
     }
     
     private var descriptionSection: some View {
-        Text("Describe who you want to connect with, and we'll scout the perfect talent for you!")
+        Text("Tell your scout who you need. It searches, ranks the best fits, and shows you why each one matches.")
             .font(.system(size: 16, weight: .semibold))
             .foregroundColor(themeColor)
             .opacity(showHeaderAnimation ? 1 : 0)
@@ -555,7 +567,7 @@ struct ExploreMainView: View {
                             .modifier(PulseAnimationModifier())
                     }
                     
-                    Text("Top 5 matches")
+                    Text("Your scout's top picks")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(
                             LinearGradient(
@@ -579,6 +591,7 @@ struct ExploreMainView: View {
                         profile: profile,
                         rank: entry.offset + 1,
                         isEngaged: engagedProfileIds.contains(profile.userId),
+                        reasons: matchReasons[profile.userId] ?? [],
                         onTap: {
                             // 添加触觉反馈
                             let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
@@ -687,67 +700,24 @@ struct ExploreMainView: View {
                     }
                 }
                 
-                // ===== V2.0: NLP 增强 =====
-                // 1. 解析查询
-                await MainActor.run {
-                    loadingProgress = 0.2
-                    loadingMessageIndex = 1
-                }
-                let parsedQuery = queryParser.parse(trimmed)
-                print("\n📊 Query Analysis:")
-                print("  - Difficulty: \(parsedQuery.difficulty)")
-                print("  - Summary: \(parsedQuery.summary)")
-                
-                // 2. 获取推荐候选池（扩大到100人）
-                await MainActor.run {
-                    loadingProgress = 0.4
-                    loadingMessageIndex = 2
-                }
-                let step1 = Date()
-                let recommendations = try await recommendationService.getRecommendations(
-                    for: currentUser.id,
-                    limit: 100,  // V2.0: 从60扩大到100
-                    forceRefresh: true
+                // ===== 共享搜索引擎(V2 规则排序 + V3 LLM 互惠精排,单一事实源)=====
+                let outcome = try await ScoutSearchEngine.shared.search(
+                    query: trimmed,
+                    currentUserId: currentUser.id,
+                    currentUserProfile: currentUserProfile,
+                    topCount: 3,
+                    progress: { p, idx in
+                        loadingProgress = p
+                        loadingMessageIndex = idx
+                    }
                 )
-                print("  ⏱️  Recall: \(Date().timeIntervalSince(step1) * 1000)ms")
-                
-                // 3. 先验证推荐的用户是否仍然存在（过滤已删除的用户）
-                await MainActor.run {
-                    loadingProgress = 0.6
-                    loadingMessageIndex = 3
-                }
-                let step1_5 = Date()
-                let validRecommendations = await validateRecommendations(recommendations)
-                print("  ⏱️  Validation: \(Date().timeIntervalSince(step1_5) * 1000)ms (filtered \(recommendations.count - validRecommendations.count) deleted users)")
-                
-                // 4. V2.0 升级的排序逻辑（只对有效的推荐进行排序）
-                await MainActor.run {
-                    loadingProgress = 0.8
-                    loadingMessageIndex = 4
-                }
-                let step2 = Date()
-                let ranked = rankRecommendationsV2(
-                    validRecommendations, 
-                    parsedQuery: parsedQuery,
-                    currentUserProfile: currentUserProfile
+
+                let topEntries = outcome.top
+                let finalValidProfiles = topEntries.map { $0.profile }
+                let reasonsByUser = Dictionary(
+                    topEntries.map { ($0.profile.userId, $0.reasons) },
+                    uniquingKeysWith: { first, _ in first }
                 )
-                print("  ⏱️  Ranking: \(Date().timeIntervalSince(step2) * 1000)ms")
-                
-                await MainActor.run {
-                    loadingProgress = 1.0
-                }
-                
-                await MainActor.run {
-                    loadingProgress = 1.0
-                }
-                
-                let topProfiles = Array(ranked.prefix(5))
-                
-                // 最终验证：确保所有 Top 5 用户仍然存在（双重检查）
-                let step2_5 = Date()
-                let finalValidProfiles = await validateProfilesExist(topProfiles)
-                print("  ⏱️  Final Validation: \(Date().timeIntervalSince(step2_5) * 1000)ms (filtered \(topProfiles.count - finalValidProfiles.count) deleted users)")
-                
                 let topIds = finalValidProfiles.map { $0.userId }
                 
                 var fetchedProIds = Set<String>()
@@ -766,10 +736,11 @@ struct ExploreMainView: View {
                 }
                 
                 print("  ⏱️  Total time: \(Date().timeIntervalSince(searchStart) * 1000)ms")
-                print("  ✅ Top \(finalValidProfiles.count) selected from \(recommendations.count) candidates (after filtering deleted users)\n")
+                print("  ✅ Top \(finalValidProfiles.count) selected (engine llmRerank=\(outcome.llmRerankApplied))\n")
                 
                 await MainActor.run {
                     self.recommendedProfiles = finalValidProfiles
+                    self.matchReasons = reasonsByUser
                     // 触发结果动画
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         withAnimation {
@@ -784,104 +755,13 @@ struct ExploreMainView: View {
                 await MainActor.run {
                     self.isLoading = false
                     self.recommendedProfiles = []
+                    self.matchReasons = [:]
                     self.showResults = false
                     self.errorMessage = "Unable to complete the talent scout request. Please try again shortly."
                     print("❌ Talent Scout search failed: \(error.localizedDescription)")
                 }
             }
         }
-    }
-    
-    // MARK: - Validation
-    
-    /// 验证推荐用户是否仍然存在（过滤已删除的用户）
-    private func validateRecommendations(
-        _ recommendations: [(userId: String, score: Double, profile: BrewNetProfile)]
-    ) async -> [(userId: String, score: Double, profile: BrewNetProfile)] {
-        var validRecommendations: [(userId: String, score: Double, profile: BrewNetProfile)] = []
-        
-        // 批量验证用户是否存在
-        let userIds = recommendations.map { $0.userId }
-        let profilesDict = try? await supabaseService.getProfilesBatch(userIds: userIds)
-        
-        for item in recommendations {
-            // 只保留仍然存在的用户
-            if profilesDict?[item.userId] != nil {
-                validRecommendations.append(item)
-            } else {
-                print("⚠️ [验证] 用户 \(item.userId) (\(item.profile.coreIdentity.name)) 已被删除，已过滤")
-            }
-        }
-        
-        return validRecommendations
-    }
-    
-    /// 最终验证：确保所有 profile 仍然存在（双重检查）
-    private func validateProfilesExist(
-        _ profiles: [BrewNetProfile]
-    ) async -> [BrewNetProfile] {
-        var validProfiles: [BrewNetProfile] = []
-        
-        // 批量验证用户是否存在
-        let userIds = profiles.map { $0.userId }
-        let profilesDict = try? await supabaseService.getProfilesBatch(userIds: userIds)
-        
-        for profile in profiles {
-            // 只保留仍然存在的用户
-            if profilesDict?[profile.userId] != nil {
-                validProfiles.append(profile)
-            } else {
-                print("⚠️ [最终验证] 用户 \(profile.userId) (\(profile.coreIdentity.name)) 已被删除，已从结果中移除")
-            }
-        }
-        
-        return validProfiles
-    }
-    
-    // MARK: - Ranking Logic V2.0
-    
-    /// V2.0 升级版排序逻辑（使用NLP增强）
-    private func rankRecommendationsV2(
-        _ recommendations: [(userId: String, score: Double, profile: BrewNetProfile)],
-        parsedQuery: ParsedQuery,
-        currentUserProfile: BrewNetProfile?
-    ) -> [BrewNetProfile] {
-        
-        guard !parsedQuery.tokens.isEmpty else {
-            return recommendations.map { $0.profile }
-        }
-        
-        // 动态权重调整
-        let weights = DynamicWeighting.adjustWeights(
-            for: parsedQuery.rawText,
-            parsedQuery: parsedQuery
-        )
-        
-        // 查询的概念标签
-        let queryConceptTags = ConceptTagger.mapQueryToConcepts(query: parsedQuery.rawText)
-        
-        let ranked = recommendations.map { item -> (profile: BrewNetProfile, score: Double) in
-            print("\n👤 Scoring: \(item.profile.coreIdentity.name)")
-            
-            // V2.0 升级的匹配分数
-            let matchScore = computeMatchScoreV2(
-                for: item.profile,
-                parsedQuery: parsedQuery,
-                currentUserProfile: currentUserProfile,
-                queryConceptTags: queryConceptTags
-            )
-            
-            // 动态权重混合
-            let blendedScore = (item.score * weights.recommendation) + (matchScore * weights.textMatch)
-            
-            print("  📊 Final: Rec(\(String(format: "%.2f", item.score))×\(String(format: "%.1f", weights.recommendation))) + Match(\(String(format: "%.2f", matchScore))×\(String(format: "%.1f", weights.textMatch))) = \(String(format: "%.2f", blendedScore))")
-            
-            return (profile: item.profile, score: blendedScore)
-        }
-        
-        return ranked
-            .sorted { $0.score > $1.score }
-            .map { $0.profile }
     }
     
     /// V1.0 原始排序逻辑（保留作为备用）
@@ -908,90 +788,6 @@ struct ExploreMainView: View {
             .map { $0.profile }
     }
     
-    // MARK: - Match Scoring V2.0
-    
-    /// V2.0 升级版匹配分数计算
-    private func computeMatchScoreV2(
-        for profile: BrewNetProfile,
-        parsedQuery: ParsedQuery,
-        currentUserProfile: BrewNetProfile?,
-        queryConceptTags: Set<ConceptTag>
-    ) -> Double {
-        var score: Double = 0.0
-        
-        // 1. 字段感知评分（替代简单的关键词匹配）
-        let fieldScore = fieldAwareScoring.computeScore(
-            profile: profile,
-            tokens: parsedQuery.tokens
-        )
-        score += fieldScore
-        
-        // 2. 实体匹配评分（精确匹配公司、职位、学校等）
-        let entityScore = fieldAwareScoring.computeEntityScore(
-            profile: profile,
-            entities: parsedQuery.entities
-        )
-        score += entityScore
-        
-        // 3. 概念标签匹配
-        let profileConceptTags = profile.conceptTags
-        let conceptScore = ConceptTagger.scoreConceptMatch(
-            profileTags: profileConceptTags,
-            queryTags: queryConceptTags
-        )
-        score += conceptScore
-        
-        // 4. 软年限匹配（使用高斯衰减）
-        if !parsedQuery.entities.numbers.isEmpty {
-            let expScore = SoftMatching.softExperienceMatch(
-                profile: profile,
-                targetYears: parsedQuery.entities.numbers
-            )
-            score += expScore
-        }
-        
-        // 5. Mentor/Mentoring 意图匹配
-        if parsedQuery.tokens.contains(where: { $0.contains("mentor") || $0.contains("mentoring") }) {
-            if profile.networkingIntention.selectedIntention == .learnGrow ||
-                profile.networkingIntention.selectedSubIntentions.contains(.skillDevelopment) ||
-                profile.networkingIntention.selectedSubIntentions.contains(.careerDirection) {
-                score += 1.5
-                print("  ✓ Mentor intention match (+1.5)")
-            }
-        }
-        
-        // 6. 校友匹配（增强版）
-        if parsedQuery.tokens.contains(where: { $0.contains("alum") }) {
-            let alumniScore = computeAlumniScore(
-                profile: profile,
-                parsedQuery: parsedQuery,
-                currentUserProfile: currentUserProfile
-            )
-            score += alumniScore
-        }
-        
-        // 7. Founder/Startup 匹配
-        if parsedQuery.tokens.contains(where: { $0.contains("founder") || $0.contains("startup") || $0.contains("entrepreneur") }) {
-            if profile.professionalBackground.careerStage == .founder ||
-                profile.networkingIntention.selectedIntention == .buildCollaborate {
-                score += 1.0
-                print("  ✓ Founder/Startup match (+1.0)")
-            }
-        }
-        
-        // 8. 否定词处理（降权）
-        for negation in parsedQuery.modifiers.negations {
-            let zonedText = ZonedSearchableText.from(profile: profile)
-            let allText = [zonedText.zoneA, zonedText.zoneB, zonedText.zoneC].joined(separator: " ")
-            if allText.contains(negation) {
-                score -= 2.0
-                print("  ⚠️ Negation match: '\(negation)' (-2.0)")
-            }
-        }
-        
-        return max(0.0, score)  // 确保分数不为负
-    }
-    
     /// V1.0 原始匹配分数计算（保留作为备用）
     private func computeMatchScore(
         for profile: BrewNetProfile,
@@ -1000,7 +796,7 @@ struct ExploreMainView: View {
         currentUserProfile: BrewNetProfile?
     ) -> Double {
         var score: Double = 0.0
-        let searchableText = aggregatedSearchableText(for: profile)
+        let searchableText = ScoutSearchEngine.shared.aggregatedSearchableText(for: profile)
         // 确保所有 tokens 都转换为小写进行比较
         let tokenSet = Set(tokens.map { $0.lowercased() })
         
@@ -1067,124 +863,6 @@ struct ExploreMainView: View {
             if profile.professionalBackground.careerStage == .founder ||
                 profile.networkingIntention.selectedIntention == .buildCollaborate {
                 score += 1.0
-            }
-        }
-        
-        return score
-    }
-    
-    private func aggregatedSearchableText(for profile: BrewNetProfile) -> String {
-        var parts: [String] = [
-            profile.coreIdentity.name,
-            profile.coreIdentity.bio ?? "",
-            profile.coreIdentity.location ?? "",
-            profile.professionalBackground.currentCompany ?? "",
-            profile.professionalBackground.jobTitle ?? "",
-            profile.professionalBackground.industry ?? "",
-            profile.professionalBackground.education ?? "",
-            profile.personalitySocial.selfIntroduction ?? ""
-        ]
-        
-        parts.append(contentsOf: profile.professionalBackground.skills)
-        parts.append(contentsOf: profile.professionalBackground.certifications)
-        parts.append(contentsOf: profile.professionalBackground.languagesSpoken)
-        parts.append(contentsOf: profile.personalitySocial.valuesTags)
-        parts.append(contentsOf: profile.personalitySocial.hobbies)
-        
-        if let educations = profile.professionalBackground.educations {
-            for education in educations {
-                parts.append(education.schoolName)
-                if let field = education.fieldOfStudy {
-                    parts.append(field)
-                }
-                parts.append(education.degree.displayName)
-            }
-        }
-        
-        for experience in profile.professionalBackground.workExperiences {
-            parts.append(experience.companyName)
-            if let role = experience.position {
-                parts.append(role)
-            }
-            parts.append(contentsOf: experience.highlightedSkills)
-            if let responsibilities = experience.responsibilities {
-                parts.append(responsibilities)
-            }
-        }
-        
-        return parts
-            .joined(separator: " ")
-            .lowercased()
-    }
-    
-    // MARK: - 校友匹配增强
-    
-    /// 增强版校友匹配（支持精确和模糊匹配）
-    private func computeAlumniScore(
-        profile: BrewNetProfile,
-        parsedQuery: ParsedQuery,
-        currentUserProfile: BrewNetProfile?
-    ) -> Double {
-        var score: Double = 0.0
-        
-        // 基础分：有教育经历的用户
-        if let educations = profile.professionalBackground.educations, !educations.isEmpty {
-            score += 1.0
-        } else if profile.professionalBackground.education != nil {
-            score += 0.5
-        }
-        
-        // 校友加分：与当前用户同校
-        if let currentUserProfile = currentUserProfile,
-           let currentUserEducations = currentUserProfile.professionalBackground.educations,
-           !currentUserEducations.isEmpty,
-           let targetEducations = profile.professionalBackground.educations,
-           !targetEducations.isEmpty {
-            
-            // 提取当前用户的学校名称集合
-            let currentUserSchools = Set(currentUserEducations.map { 
-                $0.schoolName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) 
-            })
-            
-            // 检查是否同校（精确匹配）
-            for targetEducation in targetEducations {
-                let targetSchool = targetEducation.schoolName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                
-                if currentUserSchools.contains(targetSchool) {
-                    // 精确同校匹配
-                    score += 5.0
-                    print("  🎓 Alumni match (exact): \(targetEducation.schoolName) (+5.0)")
-                    break
-                } else {
-                    // 模糊匹配（处理 "Stanford" vs "Stanford University"）
-                    for currentSchool in currentUserSchools {
-                        let similarity = SoftMatching.fuzzySimilarity(
-                            string1: currentSchool,
-                            string2: targetSchool
-                        )
-                        if similarity > 0.8 {
-                            score += 4.0
-                            print("  🎓 Alumni match (fuzzy): \(targetEducation.schoolName) ≈ \(currentSchool) (+4.0)")
-                            break
-                        }
-                    }
-                }
-            }
-        }
-        
-        // 查询中指定学校（无需当前用户也是校友）
-        if !parsedQuery.entities.schools.isEmpty {
-            if let targetEducations = profile.professionalBackground.educations {
-                for targetEducation in targetEducations {
-                    let targetSchool = targetEducation.schoolName.lowercased()
-                    for querySchool in parsedQuery.entities.schools {
-                        if targetSchool.contains(querySchool) || querySchool.contains(targetSchool) {
-                            score += 2.0
-                            print("  🎓 School match: \(querySchool) (+2.0)")
-                            break
-                        }
-                    }
-                }
             }
         }
         
@@ -1529,6 +1207,7 @@ struct TalentScoutResultCard: View {
     let profile: BrewNetProfile
     let rank: Int
     var isEngaged: Bool
+    var reasons: [String] = []  // 证据式匹配理由(来自评分信号)
     var onTap: (() -> Void)? = nil
     
     private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
@@ -1666,6 +1345,44 @@ struct TalentScoutResultCard: View {
                 }
             }
             
+            // ⭐ Why this match:证据式理由,让推荐可信而非黑箱
+            if !reasons.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(themeColor.opacity(0.7))
+                        Text("Why this match")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(themeColor.opacity(0.7))
+                            .textCase(.uppercase)
+                    }
+                    ForEach(reasons.prefix(3), id: \.self) { reason in
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(themeColor.opacity(0.85))
+                                .padding(.top, 1)
+                            Text(reason)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(themeColor)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(themeColor.opacity(0.06))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(themeColor.opacity(0.12), lineWidth: 1)
+                )
+                .padding(.top, 4)
+            }
+
             if !skillsPreview.isEmpty {
                 HStack(spacing: 8) {
                     ForEach(Array(skillsPreview.enumerated()), id: \.element) { index, skill in
