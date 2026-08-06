@@ -43,3 +43,4 @@ Info-local.plist
 *.swp
 *.swo
 *~
+secrets/

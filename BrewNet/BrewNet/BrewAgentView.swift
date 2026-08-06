@@ -93,6 +93,7 @@ struct BrewAgentView: View {
             .navigationBarHidden(true)
         }
         .onAppear {
+            PushManager.shared.requestIfAppropriate()   // 🔔 权限请求/token 注册(内部去重)
             loadRequesterProfile()
             let proactiveRunStarted = greetIfNeeded()
             if !proactiveRunStarted {

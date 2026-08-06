@@ -9,6 +9,7 @@ import SwiftUI
 
 @main
 struct BrewNetApp: App {
+    @UIApplicationDelegateAdaptor(BrewAppDelegate.self) var appDelegate  // 🔔 推送回调
     let persistenceController = PersistenceController.shared
     @StateObject private var authManager = AuthManager()
     @StateObject private var databaseManager = DatabaseManager.shared
