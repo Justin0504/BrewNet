@@ -60,12 +60,16 @@ final class ScoutSearchEngine {
         let validRecommendations = await validateRecommendations(recommendations)
         print("  ⏱️  Validation: \(Date().timeIntervalSince(step1_5) * 1000)ms (filtered \(recommendations.count - validRecommendations.count) deleted users)")
 
-        // 3.5 🎰 曝光感知(Match v4):查近 14 天各候选被推次数
+        // 3.5 🎰 曝光感知 + 💗 留存偏置(Match v4)
         // 依据:探索给欠曝光者机会同时提升整体质量(Meta epinet, WebConf'25);
-        // 曝光集中会伤害双边留存(MRet, ICLR 2026)
-        let exposureCounts = await fetchExposureCounts(
+        // 匹配少的用户流失风险显著更高,曝光应向其倾斜(MRet, ICLR 2026)
+        async let exposureTask = fetchExposureCounts(
             candidateIds: validRecommendations.map { $0.userId }
         )
+        async let matchCountTask = fetchMatchCounts(
+            candidateIds: validRecommendations.map { $0.userId }
+        )
+        let (exposureCounts, matchCounts) = await (exposureTask, matchCountTask)
 
         // 4. V2 规则排序(含曝光调整)
         await progress?(0.8, 4)
@@ -74,7 +78,8 @@ final class ScoutSearchEngine {
             validRecommendations,
             parsedQuery: parsedQuery,
             currentUserProfile: currentUserProfile,
-            exposureCounts: exposureCounts
+            exposureCounts: exposureCounts,
+            matchCounts: matchCounts
         )
         if !excludeNames.isEmpty {
             let before = ranked.count
@@ -148,6 +153,25 @@ final class ScoutSearchEngine {
             let rows = try? JSONDecoder().decode([Row].self, from: response.data) else { return [:] }
         var counts: [String: Int] = [:]
         for row in rows { counts[row.candidateId, default: 0] += 1 }
+        return counts
+    }
+
+    /// 💗 各候选现有 match 数(留存偏置输入;失败返回空 = 不调整)
+    private func fetchMatchCounts(candidateIds: [String]) async -> [String: Int] {
+        guard !candidateIds.isEmpty else { return [:] }
+        struct Row: Decodable {
+            let userId: String
+            enum CodingKeys: String, CodingKey { case userId = "user_id" }
+        }
+        guard let response = try? await supabaseService.supabase
+            .from("matches")
+            .select("user_id")
+            .in("user_id", values: candidateIds)
+            .eq("is_active", value: true)
+            .execute(),
+            let rows = try? JSONDecoder().decode([Row].self, from: response.data) else { return [:] }
+        var counts: [String: Int] = [:]
+        for row in rows { counts[row.userId, default: 0] += 1 }
         return counts
     }
 
@@ -225,7 +249,8 @@ final class ScoutSearchEngine {
         _ recommendations: [(userId: String, score: Double, profile: BrewNetProfile)],
         parsedQuery: ParsedQuery,
         currentUserProfile: BrewNetProfile?,
-        exposureCounts: [String: Int] = [:]
+        exposureCounts: [String: Int] = [:],
+        matchCounts: [String: Int] = [:]
     ) -> [(profile: BrewNetProfile, reasons: [String])] {
 
         guard !parsedQuery.tokens.isEmpty else {
@@ -256,6 +281,11 @@ final class ScoutSearchEngine {
             } else if exposure >= 3 {
                 blendedScore -= 0.8
                 print("  🎰 Over-exposed (\(exposure)x in 14d): -0.8")
+            }
+
+            // 💗 留存偏置:0-1 个 match 的人流失风险高,轻微上浮(MRet, ICLR 2026)
+            if (matchCounts[item.userId] ?? 0) <= 1 {
+                blendedScore += 0.4
             }
 
             print("  📊 Final: Rec(\(String(format: "%.2f", item.score))×\(String(format: "%.1f", weights.recommendation))) + Match(\(String(format: "%.2f", match.score))×\(String(format: "%.1f", weights.textMatch))) + Exp = \(String(format: "%.2f", blendedScore))")
