@@ -18,8 +18,8 @@ struct BrewMessage: Identifiable {
         case survey(profile: BrewNetProfile)   // worth-it 一键问卷(北极星指标)
         case startersOffer(profile: BrewNetProfile)  // 报喜后:要开场话题吗
         case prepOffer(profile: BrewNetProfile, when: String, location: String?)  // ☕ 见面前简报入口
-        case weeklyBrew(profile: BrewNetProfile, reasons: [String], matchPercent: Int?, windowText: String?)  // ☕ 每周一杯提案
-        case incomingProposal(proposalId: String, profile: BrewNetProfile, windowText: String?)  // 🤝 双盲提案(对方 Brew 发来)
+        case weeklyBrew(profile: BrewNetProfile, reasons: [String], matchPercent: Int?, windowText: String?, venueText: String?)  // ☕ 每周一杯提案
+        case incomingProposal(proposalId: String, profile: BrewNetProfile, windowText: String?, venueText: String?)  // 🤝 双盲提案(对方 Brew 发来)
         case note(String)
     }
     let id = UUID()
@@ -319,16 +319,17 @@ struct BrewAgentView: View {
                 .background(Capsule().fill(Color.white))
                 .overlay(Capsule().stroke(themeColor.opacity(0.3), lineWidth: 1.2))
             }
-        case .weeklyBrew(let profile, let reasons, let matchPercent, let windowText):
+        case .weeklyBrew(let profile, let reasons, let matchPercent, let windowText, let venueText):
             WeeklyBrewCard(
                 profile: profile,
                 reasons: reasons,
                 matchPercent: matchPercent,
                 windowText: windowText,
+                venueText: venueText,
                 isEngaged: engagedProfileIds.contains(profile.userId),
                 onTap: { selectedProfile = profile },
                 onSetup: {
-                    Task { await setupWeeklyBrew(profile: profile, windowText: windowText) }
+                    Task { await setupWeeklyBrew(profile: profile, windowText: windowText, venueText: venueText) }
                 },
                 onSkip: {
                     if let uid = authManager.currentUser?.id {
@@ -337,13 +338,14 @@ struct BrewAgentView: View {
                     appendAgent("No worries — I'll bring someone different next week. You can still search anytime.")
                 }
             )
-        case .incomingProposal(let proposalId, let profile, let windowText):
+        case .incomingProposal(let proposalId, let profile, let windowText, let venueText):
             IncomingProposalCard(
                 profile: profile,
                 windowText: windowText,
+                venueText: venueText,
                 onTap: { selectedProfile = profile },
                 onAccept: {
-                    Task { await acceptProposal(proposalId: proposalId, profile: profile, windowText: windowText) }
+                    Task { await acceptProposal(proposalId: proposalId, profile: profile, windowText: windowText, venueText: venueText) }
                 },
                 onPass: {
                     Task {
@@ -756,6 +758,9 @@ struct BrewAgentView: View {
 
         let windows = timeslotOverlap(me: currentUserProfile, them: top.profile)
         let windowText = windows.first
+        // 🏙 场地规划:双方城市匹配的精选咖啡馆
+        let venue = await pickVenue(myLocation: currentUserProfile?.coreIdentity.location,
+                                    theirLocation: top.profile.coreIdentity.location)
 
         await MainActor.run {
             isThinking = false
@@ -764,27 +769,57 @@ struct BrewAgentView: View {
                 profile: top.profile,
                 reasons: top.reasons,
                 matchPercent: top.matchPercent,
-                windowText: windowText
+                windowText: windowText,
+                venueText: venue
             )))
-            let followUp = windowText != nil
-                ? "One tap and I'll send an invite proposing \(windowText!). No back-and-forth needed."
-                : "One tap and I'll draft the invite for you."
+            let followUp: String
+            if let w = windowText {
+                followUp = venue != nil
+                    ? "One tap and I'll propose \(w) at \(venue!). Fully planned — no back-and-forth."
+                    : "One tap and I'll send an invite proposing \(w). No back-and-forth needed."
+            } else {
+                followUp = "One tap and I'll draft the invite for you."
+            }
             messages.append(BrewMessage(kind: .agentText(followUp)))
             history.append(BrewChatEntry(role: .tool, text: BrewAgentService.toolResultSummary(for: [(top.profile, top.reasons)])))
         }
     }
 
+    /// 🏙 从 brew_venues 里挑一个双方城市都命中的场地("Dulce · USC Village")
+    private func pickVenue(myLocation: String?, theirLocation: String?) async -> String? {
+        struct VenueRow: Decodable {
+            let name: String, area: String?, city: String
+        }
+        guard let response = try? await supabaseService.supabase
+            .from("brew_venues")
+            .select("name,area,city")
+            .eq("active", value: true)
+            .execute(),
+            let venues = try? JSONDecoder().decode([VenueRow].self, from: response.data),
+            !venues.isEmpty else { return nil }
+
+        let locs = [myLocation, theirLocation].compactMap { $0?.lowercased() }
+        guard !locs.isEmpty else { return nil }
+        // 双方都在场地城市 → 优先;只匹配一方也接受(v1)
+        let scored = venues.map { v -> (VenueRow, Int) in
+            let hits = locs.filter { $0.contains(v.city.lowercased()) }.count
+            return (v, hits)
+        }.filter { $0.1 > 0 }.sorted { $0.1 > $1.1 }
+        guard let best = scored.first?.0 else { return nil }
+        return best.area.map { "\(best.name) · \($0)" } ?? best.name
+    }
+
     /// ☕ Weekly Brew 的"就这么定"
     /// 有共同时段 → 🤝 双盲提案(Ditto 式:对方 Brew 收到,拒绝不回传,只有成了才庆祝)
     /// 无共同时段 → 传统时间锚定草稿(人在环上确认)
-    private func setupWeeklyBrew(profile: BrewNetProfile, windowText: String?) async {
+    private func setupWeeklyBrew(profile: BrewNetProfile, windowText: String?, venueText: String? = nil) async {
         guard let currentUser = authManager.currentUser else { return }
 
         if let window = windowText {
             // —— 双盲路径 ——
             struct ProposalInsert: Encodable {
                 let proposer_id: String, target_id: String, proposer_name: String
-                let window_text: String, proposed_date: String?
+                let window_text: String, proposed_date: String?, venue: String?
             }
             let proposedDate = concreteDate(for: window).map { ISO8601DateFormatter().string(from: $0) }
             let insert = ProposalInsert(
@@ -792,15 +827,17 @@ struct BrewAgentView: View {
                 target_id: profile.userId.lowercased(),
                 proposer_name: currentUser.name,
                 window_text: window,
-                proposed_date: proposedDate
+                proposed_date: proposedDate,
+                venue: venueText
             )
             do {
                 _ = try await supabaseService.supabase.from("brew_proposals").insert(insert).execute()
                 BrewMemoryStore.shared.recordInviteSent(to: profile.coreIdentity.name, userId: currentUser.id)
                 await MainActor.run {
                     let firstName = profile.coreIdentity.name.components(separatedBy: " ").first ?? "them"
-                    appendAgent("🤝 Done — I've quietly proposed \(window) to \(firstName)'s Brew. If they're in, it books itself and I'll celebrate with you. If not… you'll simply meet someone else next week. No awkwardness, ever.")
-                    history.append(BrewChatEntry(role: .tool, text: "Blind proposal sent to \(profile.coreIdentity.name) for \(window)."))
+                    let plan = venueText.map { "\(window) at \($0)" } ?? window
+                    appendAgent("🤝 Done — I've quietly proposed \(plan) to \(firstName)'s Brew. If they're in, it books itself and I'll celebrate with you. If not… you'll simply meet someone else next week. No awkwardness, ever.")
+                    history.append(BrewChatEntry(role: .tool, text: "Blind proposal sent to \(profile.coreIdentity.name): \(plan)."))
                 }
             } catch {
                 print("❌ [Handshake] proposal insert failed: \(error)")
@@ -830,15 +867,15 @@ struct BrewAgentView: View {
     private func maybeShowIncomingProposal() async -> Bool {
         guard let currentUser = authManager.currentUser else { return false }
         struct ProposalRow: Decodable {
-            let id: String, proposerId: String, windowText: String?
+            let id: String, proposerId: String, windowText: String?, venue: String?
             enum CodingKeys: String, CodingKey {
-                case id, proposerId = "proposer_id", windowText = "window_text"
+                case id, proposerId = "proposer_id", windowText = "window_text", venue
             }
         }
         let weekAgo = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-7 * 24 * 3600))
         guard let response = try? await supabaseService.supabase
             .from("brew_proposals")
-            .select("id,proposer_id,window_text")
+            .select("id,proposer_id,window_text,venue")
             .eq("target_id", value: currentUser.id.lowercased())
             .eq("status", value: "pending")
             .gte("created_at", value: weekAgo)
@@ -851,15 +888,19 @@ struct BrewAgentView: View {
 
         let profile = supabaseProfile.toBrewNetProfile()
         await MainActor.run {
-            messages.append(BrewMessage(kind: .agentText("🤝 My counterpart on \(profile.coreIdentity.name)'s side thinks you two should grab coffee\(row.windowText.map { " — you're both free \($0)" } ?? ""). One tap and it's booked. They won't know unless you say yes.")))
-            messages.append(BrewMessage(kind: .incomingProposal(proposalId: row.id, profile: profile, windowText: row.windowText)))
+            var planBits: [String] = []
+            if let w = row.windowText { planBits.append("you're both free \(w)") }
+            if let v = row.venue { planBits.append("place picked: \(v)") }
+            let plan = planBits.isEmpty ? "" : " — \(planBits.joined(separator: ", "))"
+            messages.append(BrewMessage(kind: .agentText("🤝 My counterpart on \(profile.coreIdentity.name)'s side thinks you two should grab coffee\(plan). One tap and it's booked. They won't know unless you say yes.")))
+            messages.append(BrewMessage(kind: .incomingProposal(proposalId: row.id, profile: profile, windowText: row.windowText, venueText: row.venue)))
             history.append(BrewChatEntry(role: .agent, text: "Showed incoming blind proposal from \(profile.coreIdentity.name)."))
         }
         return true
     }
 
     /// 🤝 接受提案 = 自动成局:match + 带具体时间的咖啡预约,双边后续流程自动接管
-    private func acceptProposal(proposalId: String, profile: BrewNetProfile, windowText: String?) async {
+    private func acceptProposal(proposalId: String, profile: BrewNetProfile, windowText: String?, venueText: String? = nil) async {
         guard let currentUser = authManager.currentUser else { return }
         await MainActor.run { isThinking = true }
         do {
@@ -882,21 +923,24 @@ struct BrewAgentView: View {
             _ = try await supabaseService.supabase.from("invitations")
                 .update(StatusOnly(status: "accepted")).eq("id", value: invId).execute()
 
-            // 带具体时间的咖啡预约(prep 简报流程会自动接上)
+            // 带具体时间+场地的咖啡预约(prep 简报流程会自动接上)
             struct CoffeeIns: Encodable {
                 let sender_id: String, receiver_id: String, sender_name: String, receiver_name: String
-                let scheduled_date: String?, notes: String, status: String
+                let scheduled_date: String?, location: String?, notes: String, status: String
             }
             let concrete = windowText.flatMap { concreteDate(for: $0) }.map { ISO8601DateFormatter().string(from: $0) }
             _ = try await supabaseService.supabase.from("coffee_chat_invitations")
                 .insert(CoffeeIns(sender_id: profile.userId.lowercased(), receiver_id: currentUser.id.lowercased(),
                                   sender_name: profile.coreIdentity.name, receiver_name: currentUser.name,
-                                  scheduled_date: concrete, notes: "Set up by Brew Handshake ☕", status: "accepted"))
+                                  scheduled_date: concrete, location: venueText,
+                                  notes: "Set up by Brew Handshake ☕", status: "accepted"))
                 .execute()
 
             await MainActor.run {
                 isThinking = false
-                appendAgent("☕️ It's on! You and \(profile.coreIdentity.name.components(separatedBy: " ").first ?? profile.coreIdentity.name) are meeting\(windowText.map { " \($0)" } ?? " this week"). I'll prep you before it — just show up.")
+                var plan = windowText.map { " \($0)" } ?? " this week"
+                if let v = venueText { plan += " at \(v)" }
+                appendAgent("☕️ It's on! You and \(profile.coreIdentity.name.components(separatedBy: " ").first ?? profile.coreIdentity.name) are meeting\(plan). I'll prep you before it — just show up.")
             }
         } catch {
             print("❌ [Handshake] accept failed: \(error)")
@@ -1133,10 +1177,16 @@ struct BrewPickCard: View {
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.black)
                     }
-                    Text(headline)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(themeColor)
-                        .lineLimit(2)
+                    HStack(spacing: 5) {
+                        // 🏢 真实公司 logo(Logo.dev,解析失败首字母兜底)
+                        if let company = profile.professionalBackground.currentCompany, !company.isEmpty {
+                            BrandLogoView(name: company, size: 15)
+                        }
+                        Text(headline)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(themeColor)
+                            .lineLimit(2)
+                    }
                     // 🤝 共同点前置 chip(同校/同城,1 秒可扫描)
                     if let connection = connectionChip {
                         Text(connection)
@@ -1352,6 +1402,7 @@ struct WeeklyBrewCard: View {
     let reasons: [String]
     var matchPercent: Int? = nil
     let windowText: String?
+    var venueText: String? = nil
     let isEngaged: Bool
     var onTap: () -> Void
     var onSetup: () -> Void
@@ -1392,14 +1443,27 @@ struct WeeklyBrewCard: View {
             .allowsHitTesting(false)  // 内嵌卡只做展示,动作由下方按钮承担
             .overlay(Color.clear.contentShape(Rectangle()).onTapGesture(perform: onTap))
 
-            if let window = windowText {
-                HStack(spacing: 8) {
-                    Image(systemName: "calendar.badge.checkmark")
-                        .font(.system(size: 14))
-                        .foregroundColor(themeColor)
-                    Text("You're both free **\(window)**")
-                        .font(.system(size: 14))
-                        .foregroundColor(themeColor)
+            if windowText != nil || venueText != nil {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let window = windowText {
+                        HStack(spacing: 8) {
+                            Image(systemName: "calendar.badge.checkmark")
+                                .font(.system(size: 14))
+                                .foregroundColor(themeColor)
+                            Text("You're both free **\(window)**")
+                                .font(.system(size: 14))
+                                .foregroundColor(themeColor)
+                        }
+                    }
+                    if let venue = venueText {
+                        HStack(spacing: 8) {
+                            // ☕ 场地真实 logo
+                            BrandLogoView(name: venue.components(separatedBy: " ·").first ?? venue, size: 16)
+                            Text("**\(venue)**")
+                                .font(.system(size: 14))
+                                .foregroundColor(themeColor)
+                        }
+                    }
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1456,6 +1520,7 @@ struct WeeklyBrewCard: View {
 struct IncomingProposalCard: View {
     let profile: BrewNetProfile
     let windowText: String?
+    var venueText: String? = nil
     var onTap: () -> Void
     var onAccept: () -> Void
     var onPass: () -> Void
@@ -1487,14 +1552,26 @@ struct IncomingProposalCard: View {
             .allowsHitTesting(false)
             .overlay(Color.clear.contentShape(Rectangle()).onTapGesture(perform: onTap))
 
-            if let window = windowText {
-                HStack(spacing: 8) {
-                    Image(systemName: "calendar.badge.checkmark")
-                        .font(.system(size: 14))
-                        .foregroundColor(teal)
-                    Text("Proposed: **\(window)** — accepting books it instantly")
-                        .font(.system(size: 14))
-                        .foregroundColor(themeColor)
+            if windowText != nil || venueText != nil {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let window = windowText {
+                        HStack(spacing: 8) {
+                            Image(systemName: "calendar.badge.checkmark")
+                                .font(.system(size: 14))
+                                .foregroundColor(teal)
+                            Text("Proposed: **\(window)** — accepting books it instantly")
+                                .font(.system(size: 14))
+                                .foregroundColor(themeColor)
+                        }
+                    }
+                    if let venue = venueText {
+                        HStack(spacing: 8) {
+                            BrandLogoView(name: venue.components(separatedBy: " ·").first ?? venue, size: 16)
+                            Text("**\(venue)**")
+                                .font(.system(size: 14))
+                                .foregroundColor(themeColor)
+                        }
+                    }
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)

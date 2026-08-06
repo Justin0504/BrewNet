@@ -1299,19 +1299,25 @@ struct TalentScoutResultCard: View {
                         .foregroundColor(.black)
                         .shadow(color: Color.black.opacity(0.05), radius: 1, x: 0, y: 1)
                     
-                    Text(primaryHeadline)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(
-                            LinearGradient(
-                                gradient: Gradient(colors: [
-                                    themeColor,
-                                    themeColor.opacity(0.8)
-                                ]),
-                                startPoint: .leading,
-                                endPoint: .trailing
+                    HStack(spacing: 6) {
+                        // 🏢 真实公司 logo
+                        if let company = profile.professionalBackground.currentCompany, !company.isEmpty {
+                            BrandLogoView(name: company, size: 16)
+                        }
+                        Text(primaryHeadline)
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        themeColor,
+                                        themeColor.opacity(0.8)
+                                    ]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
                             )
-                        )
-                        .lineLimit(2)
+                            .lineLimit(2)
+                    }
                     
                     if let location = profile.coreIdentity.location, !location.isEmpty {
                         HStack(spacing: 6) {
