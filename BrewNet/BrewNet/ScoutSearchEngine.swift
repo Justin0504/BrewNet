@@ -60,13 +60,21 @@ final class ScoutSearchEngine {
         let validRecommendations = await validateRecommendations(recommendations)
         print("  ⏱️  Validation: \(Date().timeIntervalSince(step1_5) * 1000)ms (filtered \(recommendations.count - validRecommendations.count) deleted users)")
 
-        // 4. V2 规则排序
+        // 3.5 🎰 曝光感知(Match v4):查近 14 天各候选被推次数
+        // 依据:探索给欠曝光者机会同时提升整体质量(Meta epinet, WebConf'25);
+        // 曝光集中会伤害双边留存(MRet, ICLR 2026)
+        let exposureCounts = await fetchExposureCounts(
+            candidateIds: validRecommendations.map { $0.userId }
+        )
+
+        // 4. V2 规则排序(含曝光调整)
         await progress?(0.8, 4)
         let step2 = Date()
         var ranked = rankRecommendationsV2(
             validRecommendations,
             parsedQuery: parsedQuery,
-            currentUserProfile: currentUserProfile
+            currentUserProfile: currentUserProfile,
+            exposureCounts: exposureCounts
         )
         if !excludeNames.isEmpty {
             let before = ranked.count
@@ -114,8 +122,67 @@ final class ScoutSearchEngine {
         print("  ⏱️  Total time: \(Date().timeIntervalSince(searchStart) * 1000)ms")
         print("  ✅ Top \(topEntries.count) selected from \(recommendations.count) candidates\n")
 
+        // 📓 决策日志(Match v4 反馈闭环的地基:后续 GEPA prompt 自优化的训练素材)
+        logDecisions(searcherId: currentUserId, query: query, entries: topEntries, llmApplied: llmApplied)
+
         await progress?(1.0, 4)
         return SearchOutcome(top: topEntries, llmRerankApplied: llmApplied)
+    }
+
+    // MARK: - Match v4:曝光统计 & 决策日志
+
+    /// 近 14 天各候选出现在别人 top 结果里的次数(单查询,失败返回空 = 不调整)
+    private func fetchExposureCounts(candidateIds: [String]) async -> [String: Int] {
+        guard !candidateIds.isEmpty else { return [:] }
+        struct Row: Decodable {
+            let candidateId: String
+            enum CodingKeys: String, CodingKey { case candidateId = "candidate_id" }
+        }
+        let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-14 * 24 * 3600))
+        guard let response = try? await supabaseService.supabase
+            .from("match_decisions")
+            .select("candidate_id")
+            .in("candidate_id", values: candidateIds)
+            .gte("created_at", value: cutoff)
+            .execute(),
+            let rows = try? JSONDecoder().decode([Row].self, from: response.data) else { return [:] }
+        var counts: [String: Int] = [:]
+        for row in rows { counts[row.candidateId, default: 0] += 1 }
+        return counts
+    }
+
+    /// 记录本次精选(fire-and-forget;后续与 invitations/worthit 结果 join 形成学习信号)
+    private func logDecisions(
+        searcherId: String,
+        query: String,
+        entries: [(profile: BrewNetProfile, reasons: [String], matchPercent: Int?)],
+        llmApplied: Bool
+    ) {
+        guard !entries.isEmpty else { return }
+        struct DecisionInsert: Encodable {
+            let searcher_id: String, candidate_id: String, query: String
+            let rank: Int, fit_score: Int?, accept_score: Int?, llm_applied: Bool, source: String
+        }
+        let rows = entries.enumerated().map { index, entry in
+            DecisionInsert(
+                searcher_id: searcherId.lowercased(),
+                candidate_id: entry.profile.userId.lowercased(),
+                query: String(query.prefix(300)),
+                rank: index + 1,
+                fit_score: entry.matchPercent,
+                accept_score: nil,
+                llm_applied: llmApplied,
+                source: "scout"
+            )
+        }
+        Task {
+            do {
+                _ = try await supabaseService.supabase.from("match_decisions").insert(rows).execute()
+                print("📓 [v4] logged \(rows.count) decisions")
+            } catch {
+                print("⚠️ [v4] decision log failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - Validation(自 ExploreView 移入)
@@ -157,7 +224,8 @@ final class ScoutSearchEngine {
     func rankRecommendationsV2(
         _ recommendations: [(userId: String, score: Double, profile: BrewNetProfile)],
         parsedQuery: ParsedQuery,
-        currentUserProfile: BrewNetProfile?
+        currentUserProfile: BrewNetProfile?,
+        exposureCounts: [String: Int] = [:]
     ) -> [(profile: BrewNetProfile, reasons: [String])] {
 
         guard !parsedQuery.tokens.isEmpty else {
@@ -178,8 +246,19 @@ final class ScoutSearchEngine {
                 currentUserProfile: currentUserProfile,
                 queryConceptTags: queryConceptTags
             )
-            let blendedScore = (item.score * weights.recommendation) + (match.score * weights.textMatch)
-            print("  📊 Final: Rec(\(String(format: "%.2f", item.score))×\(String(format: "%.1f", weights.recommendation))) + Match(\(String(format: "%.2f", match.score))×\(String(format: "%.1f", weights.textMatch))) = \(String(format: "%.2f", blendedScore))")
+            var blendedScore = (item.score * weights.recommendation) + (match.score * weights.textMatch)
+
+            // 🎰 曝光调整(温和,不盖过相关性):
+            //   14 天内从未被推 → +0.6 探索加成;被推 ≥3 次 → -0.8 防垄断
+            let exposure = exposureCounts[item.userId] ?? 0
+            if exposure == 0 {
+                blendedScore += 0.6
+            } else if exposure >= 3 {
+                blendedScore -= 0.8
+                print("  🎰 Over-exposed (\(exposure)x in 14d): -0.8")
+            }
+
+            print("  📊 Final: Rec(\(String(format: "%.2f", item.score))×\(String(format: "%.1f", weights.recommendation))) + Match(\(String(format: "%.2f", match.score))×\(String(format: "%.1f", weights.textMatch))) + Exp = \(String(format: "%.2f", blendedScore))")
             return (profile: item.profile, score: blendedScore, reasons: match.reasons)
         }
 
