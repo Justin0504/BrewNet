@@ -5110,7 +5110,7 @@ struct ProfileCardSheetView: View {
         ZStack {
             if let imageUrl = profile.coreIdentity.profileImage, !imageUrl.isEmpty,
                let url = URL(string: imageUrl) {
-                AsyncImage(url: url) { phase in
+                CachedAsyncImagePhase(url: url) { phase in
                     switch phase {
                     case .success(let image):
                         image

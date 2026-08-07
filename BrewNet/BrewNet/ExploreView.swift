@@ -1643,7 +1643,7 @@ struct TalentScoutResultCard: View {
         Group {
             if let urlString = profile.coreIdentity.profileImage,
                let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
+                CachedAsyncImagePhase(url: url) { phase in
                     switch phase {
                     case .empty:
                         ProgressView()

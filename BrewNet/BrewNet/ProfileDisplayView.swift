@@ -2612,7 +2612,7 @@ struct SentInvitationRowView: View {
                 // Avatar - 加载真实的用户头像
                 Group {
                     if let profileImageURL = receiverProfile?.coreIdentity.profileImage, !profileImageURL.isEmpty {
-                        AsyncImage(url: URL(string: profileImageURL)) { phase in
+                        CachedAsyncImagePhase(url: URL(string: profileImageURL)) { phase in
                             switch phase {
                             case .empty:
                                 ProgressView()
@@ -2828,7 +2828,7 @@ struct PublicProfileHeaderView: View {
             HStack(alignment: .top, spacing: 16) {
                 // Left: Profile Image
                 ZStack {
-                    AsyncImage(url: URL(string: profile.coreIdentity.profileImage ?? "")) { image in
+                    CachedAsyncImage(url: URL(string: profile.coreIdentity.profileImage ?? "")) { image in
                         image
                             .resizable()
                             .aspectRatio(contentMode: .fill)
@@ -3009,7 +3009,7 @@ struct UserProfileCardSheetView: View {
         ZStack {
             if let imageUrl = profile.coreIdentity.profileImage, !imageUrl.isEmpty,
                let url = URL(string: imageUrl) {
-                AsyncImage(url: url) { phase in
+                CachedAsyncImagePhase(url: url) { phase in
                     switch phase {
                     case .success(let image):
                         image

@@ -110,7 +110,7 @@ struct BrandLogoView: View {
     var body: some View {
         Group {
             if let url = BrandLogoService.logoURL(for: name, size: Int(size * 3)) {
-                AsyncImage(url: url) { phase in
+                CachedAsyncImagePhase(url: url) { phase in
                     if case .success(let image) = phase {
                         image.resizable().scaledToFit()
                     } else {

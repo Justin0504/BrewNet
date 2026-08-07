@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import UIKit
+import ImageIO
 
 // MARK: - 图片缓存管理器
 class ImageCacheManager {
@@ -20,7 +21,7 @@ class ImageCacheManager {
         let configuration = URLSessionConfiguration.default
         configuration.urlCache = URLCache(
             memoryCapacity: 20 * 1024 * 1024,  // 20MB 内存缓存
-            diskCapacity: 100 * 1024 * 1024,   // 100MB 磁盘缓存
+            diskCapacity: 512 * 1024 * 1024,   // 512MB 磁盘缓存(原图多 MB,100MB 存不了几张)
             diskPath: "ImageCache"
         )
         configuration.requestCachePolicy = .returnCacheDataElseLoad
@@ -68,8 +69,9 @@ class ImageCacheManager {
             
             do {
                 let (data, _) = try await self.urlSession.data(from: url)
-                if let image = UIImage(data: data) {
-                    // 计算图片成本（宽 * 高 * 4 bytes per pixel）
+                // 降采样解码:原图(4000px 级)解码后 ~48MB,一张就挤爆 50MB 缓存导致
+                // 缓存永远 miss + 反复慢解码;限制长边 1200px 后单张 ≤5.5MB
+                if let image = Self.downsampled(data: data, maxPixel: 1200) {
                     let cost = Int(image.size.width * image.size.height * 4)
                     self.cache.setObject(image, forKey: cacheKey, cost: cost)
                 }
@@ -93,6 +95,24 @@ class ImageCacheManager {
         return cache.object(forKey: cacheKey)
     }
     
+    // MARK: - 降采样解码(ImageIO,不把原图整张解进内存)
+    static func downsampled(data: Data, maxPixel: CGFloat) -> UIImage? {
+        let srcOpts = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let src = CGImageSourceCreateWithData(data as CFData, srcOpts) else {
+            return UIImage(data: data)
+        }
+        let thumbOpts = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel
+        ] as CFDictionary
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, thumbOpts) else {
+            return UIImage(data: data)
+        }
+        return UIImage(cgImage: cg)
+    }
+
     // MARK: - 预加载图片
     func preloadImage(from urlString: String) {
         guard let url = URL(string: urlString) else { return }
@@ -160,6 +180,38 @@ class ImageCacheManager {
         for task in tasks {
             task.cancel()
         }
+    }
+}
+
+// MARK: - AsyncImage(phase 版)的缓存替身
+// 与 AsyncImage { phase in } 同签名,裸 AsyncImage 可原地改名接入共享缓存
+struct CachedAsyncImagePhase<Content: View>: View {
+    let url: URL?
+    @ViewBuilder let content: (AsyncImagePhase) -> Content
+
+    @State private var phase: AsyncImagePhase
+
+    init(url: URL?, @ViewBuilder content: @escaping (AsyncImagePhase) -> Content) {
+        self.url = url
+        self.content = content
+        if let url, let cached = ImageCacheManager.shared.getCachedImage(from: url.absoluteString) {
+            _phase = State(initialValue: .success(Image(uiImage: cached)))
+        } else {
+            _phase = State(initialValue: .empty)
+        }
+    }
+
+    var body: some View {
+        content(phase)
+            .task(id: url) {
+                guard let url else { return }
+                if case .success = phase { return }
+                if let img = await ImageCacheManager.shared.loadImage(from: url.absoluteString) {
+                    phase = .success(Image(uiImage: img))
+                } else {
+                    phase = .failure(URLError(.cannotLoadFromNetwork))
+                }
+            }
     }
 }
 

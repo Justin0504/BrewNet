@@ -848,7 +848,7 @@ struct ProfileCardContentView: View {
         private func photoView(for photo: Photo, height: CGFloat) -> some View {
             Group {
                 if let urlString = photo.imageUrl, let url = URL(string: urlString) {
-                    AsyncImage(url: url) { phase in
+                    CachedAsyncImagePhase(url: url) { phase in
                         switch phase {
                         case .success(let image):
                             image

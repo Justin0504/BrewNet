@@ -1260,7 +1260,7 @@ struct BrewPickCard: View {
     private var avatar: some View {
         Group {
             if let urlString = profile.coreIdentity.profileImage, let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
+                CachedAsyncImagePhase(url: url) { phase in
                     if case .success(let image) = phase {
                         image.resizable().scaledToFill()
                     } else {

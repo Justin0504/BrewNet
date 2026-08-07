@@ -886,7 +886,7 @@ struct CompactRequestCard: View {
             ZStack(alignment: .topTrailing) {
                 Group {
                     if let profileImageURL = request.requesterProfile.profilePhoto, !profileImageURL.isEmpty {
-                        AsyncImage(url: URL(string: profileImageURL)) { phase in
+                        CachedAsyncImagePhase(url: URL(string: profileImageURL)) { phase in
                             switch phase {
                             case .empty:
                                 ProgressView()
@@ -1256,7 +1256,7 @@ struct LeaveMessageView: View {
                     VStack(spacing: 8) {
                         Group {
                             if let profileImageURL = request.requesterProfile.profilePhoto, !profileImageURL.isEmpty {
-                                AsyncImage(url: URL(string: profileImageURL)) { phase in
+                                CachedAsyncImagePhase(url: URL(string: profileImageURL)) { phase in
                                     switch phase {
                                     case .empty:
                                         ProgressView()
@@ -1798,7 +1798,7 @@ struct TemporaryChatCard: View {
             // Profile Avatar - 加载真实的用户头像
             Group {
                 if let profileImageURL = request.requesterProfile.profilePhoto, !profileImageURL.isEmpty {
-                    AsyncImage(url: URL(string: profileImageURL)) { phase in
+                    CachedAsyncImagePhase(url: URL(string: profileImageURL)) { phase in
                         switch phase {
                         case .empty:
                             ProgressView()

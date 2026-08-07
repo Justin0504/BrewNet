@@ -1082,7 +1082,7 @@ struct TemporaryChatFromProfileView: View {
                     VStack(spacing: 8) {
                         Group {
                             if let profileImageURL = profile.coreIdentity.profileImage, !profileImageURL.isEmpty {
-                                AsyncImage(url: URL(string: profileImageURL)) { phase in
+                                CachedAsyncImagePhase(url: URL(string: profileImageURL)) { phase in
                                     switch phase {
                                     case .empty:
                                         ProgressView()

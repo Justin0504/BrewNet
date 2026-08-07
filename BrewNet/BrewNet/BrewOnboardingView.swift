@@ -205,7 +205,7 @@ struct BrewOnboardingView: View {
             VStack(alignment: .leading, spacing: 10) {
                 if let url = photoURL {
                     HStack(spacing: 10) {
-                        AsyncImage(url: URL(string: url)) { phase in
+                        CachedAsyncImagePhase(url: URL(string: url)) { phase in
                             if case .success(let image) = phase {
                                 image.resizable().scaledToFill()
                             } else { Color.gray.opacity(0.2) }

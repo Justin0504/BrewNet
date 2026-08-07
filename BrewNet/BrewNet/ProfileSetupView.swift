@@ -1011,7 +1011,7 @@ struct CoreIdentityStep: View {
                                     .stroke(Color(red: 0.6, green: 0.4, blue: 0.2), lineWidth: 3)
                             )
                     } else if let existingImageURL = profileImageURL, !existingImageURL.isEmpty {
-                        AsyncImage(url: URL(string: existingImageURL)) { phase in
+                        CachedAsyncImagePhase(url: URL(string: existingImageURL)) { phase in
                             switch phase {
                             case .success(let image):
                                 image
@@ -4245,7 +4245,7 @@ struct HighlightUploadCard: View {
                     }
                 } else if let imageURL = uploadedImageURL, !imageURL.isEmpty {
                     // 显示已上传的图片（当本地图片数据被清除后）
-                    AsyncImage(url: URL(string: imageURL)) { phase in
+                    CachedAsyncImagePhase(url: URL(string: imageURL)) { phase in
                         switch phase {
                         case .empty:
                             ProgressView()

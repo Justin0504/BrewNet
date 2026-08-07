@@ -1,6 +1,7 @@
 import Foundation
 import Supabase
 import CoreData
+import UIKit
 
 // MARK: - Supabase Service
 class SupabaseService: ObservableObject {
@@ -513,12 +514,33 @@ class SupabaseService: ObservableObject {
     
     // MARK: - Storage Operations
     
+    /// 上传前压缩:长边 ≤1600px、JPEG 0.78。原图动辄 5-12MB 是图片加载慢的根源
+    private func compressedForUpload(_ data: Data, maxPixel: CGFloat = 1600, quality: CGFloat = 0.78) -> Data {
+        guard let img = UIImage(data: data) else { return data }
+        let longestPx = max(img.size.width, img.size.height) * img.scale
+        let scaled: UIImage
+        if longestPx > maxPixel {
+            let k = maxPixel / longestPx
+            let newSize = CGSize(width: img.size.width * img.scale * k, height: img.size.height * img.scale * k)
+            let fmt = UIGraphicsImageRendererFormat.default()
+            fmt.scale = 1
+            scaled = UIGraphicsImageRenderer(size: newSize, format: fmt).image { _ in
+                img.draw(in: CGRect(origin: .zero, size: newSize))
+            }
+        } else {
+            scaled = img
+        }
+        return scaled.jpegData(compressionQuality: quality) ?? data
+    }
+
     /// 上传用户头像到 Supabase Storage
     func uploadProfileImage(userId: String, imageData: Data, fileExtension: String = "jpg") async throws -> String {
         print("📤 Uploading profile image for user: \(userId)")
-        
-        let fileName = "avatar.\(fileExtension)"
+
+        let fileName = "avatar.jpg"  // 压缩后统一 JPEG
         let filePath = "\(userId)/\(fileName)"
+        let uploadData = compressedForUpload(imageData)
+        print("📦 Compressed \(imageData.count / 1024)KB → \(uploadData.count / 1024)KB")
         
         do {
             // 先尝试删除旧的头像文件（如果存在），避免 "resource already exists" 错误
@@ -538,23 +560,25 @@ class SupabaseService: ObservableObject {
                 .from("avatars")
                 .upload(
                     path: filePath,
-                    file: imageData,
+                    file: uploadData,
                     options: FileOptions(
-                        cacheControl: "3600",
-                        contentType: "image/\(fileExtension == "jpg" ? "jpeg" : fileExtension)"
+                        cacheControl: "31536000",  // 配合版本化 URL 可长缓存
+                        contentType: "image/jpeg"
                     )
                 )
             
             print("✅ Profile image uploaded successfully")
-            
+
             // 获取公共 URL
             let publicURL = try client.storage
                 .from("avatars")
                 .getPublicURL(path: filePath)
-            
-            print("🔗 Public URL: \(publicURL)")
-            return publicURL.absoluteString
-            
+
+            // 版本化 URL:文件名固定 avatar.jpg,换头像后 URL 不变会命中旧缓存
+            let versioned = "\(publicURL.absoluteString)?v=\(Int(Date().timeIntervalSince1970))"
+            print("🔗 Public URL: \(versioned)")
+            return versioned
+
         } catch {
             print("❌ Failed to upload profile image: \(error.localizedDescription)")
             throw error
@@ -585,16 +609,18 @@ class SupabaseService: ObservableObject {
         print("📤 Uploading photo for user: \(userId), fileName: \(fileName)")
         
         let filePath = "\(userId)/photos/\(fileName)"
-        
+        let uploadData = compressedForUpload(imageData)
+        print("📦 Compressed \(imageData.count / 1024)KB → \(uploadData.count / 1024)KB")
+
         do {
             // 上传图片到 storage bucket
             try await client.storage
                 .from("avatars") // 使用现有的 avatars bucket 用于存储工作照片和生活照片
                 .upload(
                     path: filePath,
-                    file: imageData,
+                    file: uploadData,
                     options: FileOptions(
-                        cacheControl: "3600",
+                        cacheControl: "31536000",  // 文件名每次唯一,可长缓存
                         contentType: "image/jpeg"
                     )
                 )

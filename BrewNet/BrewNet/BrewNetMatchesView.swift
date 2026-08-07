@@ -1981,6 +1981,11 @@ struct BrewNetMatchesView: View {
                imageUrl.hasPrefix("http") {
                 imageUrls.append(imageUrl)
             }
+            // 工作照/生活照是卡片大头,只预取当前和下一张,避免带宽浪费
+            if i <= currentIndex + 1 {
+                let photos = (profiles[i].workPhotos?.photos ?? []) + (profiles[i].lifestylePhotos?.photos ?? [])
+                imageUrls.append(contentsOf: photos.compactMap { $0.imageUrl }.filter { $0.hasPrefix("http") })
+            }
         }
         
         // 批量预加载
