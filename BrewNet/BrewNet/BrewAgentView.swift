@@ -905,36 +905,12 @@ struct BrewAgentView: View {
         guard let currentUser = authManager.currentUser else { return }
         await MainActor.run { isThinking = true }
         do {
-            struct StatusUpdate: Encodable { let status: String; let responded_at: String }
-            _ = try await supabaseService.supabase.from("brew_proposals")
-                .update(StatusUpdate(status: "accepted", responded_at: ISO8601DateFormatter().string(from: Date())))
-                .eq("id", value: proposalId).execute()
-
-            // 建立 match:插入 invitation(pending→accepted 触发器自动建双向 match)
-            struct InvIns: Encodable {
-                let sender_id: String, receiver_id: String, status: String, reason_for_interest: String
-            }
-            struct InvRow: Decodable { let id: String }
-            let invResponse = try await supabaseService.supabase.from("invitations")
-                .insert(InvIns(sender_id: profile.userId.lowercased(), receiver_id: currentUser.id.lowercased(),
-                               status: "pending", reason_for_interest: "Brew Handshake — set up by our agents"))
-                .select("id").single().execute()
-            let invId = (try JSONDecoder().decode(InvRow.self, from: invResponse.data)).id
-            struct StatusOnly: Encodable { let status: String }
-            _ = try await supabaseService.supabase.from("invitations")
-                .update(StatusOnly(status: "accepted")).eq("id", value: invId).execute()
-
-            // 带具体时间+场地的咖啡预约(prep 简报流程会自动接上)
-            struct CoffeeIns: Encodable {
-                let sender_id: String, receiver_id: String, sender_name: String, receiver_name: String
-                let scheduled_date: String?, location: String?, notes: String, status: String
-            }
+            // 原子 RPC:提案→邀请→(触发器建双向 match)→咖啡预约,一步到位
+            // 客户端替提案人写记录会被 RLS 拒(auth.uid ≠ sender),故下沉 SECURITY DEFINER
+            struct AcceptParams: Encodable { let p_proposal_id: String; let p_scheduled_date: String? }
             let concrete = windowText.flatMap { concreteDate(for: $0) }.map { ISO8601DateFormatter().string(from: $0) }
-            _ = try await supabaseService.supabase.from("coffee_chat_invitations")
-                .insert(CoffeeIns(sender_id: profile.userId.lowercased(), receiver_id: currentUser.id.lowercased(),
-                                  sender_name: profile.coreIdentity.name, receiver_name: currentUser.name,
-                                  scheduled_date: concrete, location: venueText,
-                                  notes: "Set up by Brew Handshake ☕", status: "accepted"))
+            _ = try await supabaseService.supabase
+                .rpc("accept_brew_proposal", params: AcceptParams(p_proposal_id: proposalId, p_scheduled_date: concrete))
                 .execute()
 
             await MainActor.run {
