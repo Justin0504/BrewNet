@@ -884,9 +884,18 @@ struct BrewAgentView: View {
             .limit(1)
             .execute(),
             let rows = try? JSONDecoder().decode([ProposalRow].self, from: response.data),
-            let row = rows.first,
-            let supabaseProfile = try? await supabaseService.getProfile(userId: row.proposerId) else { return false }
+            let row = rows.first else { return false }
 
+        // 会话内去重:切 tab 反复触发 onAppear,同一提案卡只贴一次
+        let alreadyShown = await MainActor.run {
+            messages.contains {
+                if case .incomingProposal(let pid, _, _, _) = $0.kind { return pid == row.id }
+                return false
+            }
+        }
+        if alreadyShown { return true }
+
+        guard let supabaseProfile = try? await supabaseService.getProfile(userId: row.proposerId) else { return false }
         let profile = supabaseProfile.toBrewNetProfile()
         await MainActor.run {
             var planBits: [String] = []
