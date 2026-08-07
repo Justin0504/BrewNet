@@ -105,7 +105,7 @@ struct BrandLogoView: View {
     let name: String
     var size: CGFloat = 18
 
-    private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
+    private var themeColor: Color { Brew.brand }
 
     var body: some View {
         Group {

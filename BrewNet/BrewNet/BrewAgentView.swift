@@ -47,8 +47,8 @@ struct BrewAgentView: View {
     @State private var animatedMessageIds: Set<UUID> = []  // 打字机动画只放一次
     @FocusState private var composerFocused: Bool
 
-    private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
-    private var backgroundColor: Color { Color(red: 0.98, green: 0.97, blue: 0.95) }
+    private var themeColor: Color { Brew.brand }
+    private var backgroundColor: Color { Brew.bg }
 
     var body: some View {
         Group {
@@ -68,7 +68,7 @@ struct BrewAgentView: View {
                         .foregroundColor(.white)
                         .padding(.horizontal, 15)
                         .padding(.vertical, 10)
-                        .background(Capsule().fill(themeColor))
+                        .background(Capsule().fill(Brew.brandFill))
                         .shadow(color: themeColor.opacity(0.35), radius: 8, x: 0, y: 3)
                     }
                     .padding(.trailing, 18)
@@ -163,7 +163,7 @@ struct BrewAgentView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(themeColor.opacity(0.7))
                     .padding(8)
-                    .background(Circle().fill(Color.white))
+                    .background(Circle().fill(Brew.surface))
             }
         }
         .padding(.horizontal, 18)
@@ -221,7 +221,7 @@ struct BrewAgentView: View {
                     .padding(.vertical, 10)
                     .background(
                         UnevenRoundedRectangle(topLeadingRadius: 16, bottomLeadingRadius: 4, bottomTrailingRadius: 16, topTrailingRadius: 16)
-                            .fill(Color.white)
+                            .fill(Brew.surface)
                     )
                     .overlay(
                         UnevenRoundedRectangle(topLeadingRadius: 16, bottomLeadingRadius: 4, bottomTrailingRadius: 16, topTrailingRadius: 16)
@@ -237,7 +237,7 @@ struct BrewAgentView: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 16).fill(themeColor))
+                    .background(RoundedRectangle(cornerRadius: 16).fill(Brew.brandFill))
             }
         case .picks(let entries):
             VStack(alignment: .leading, spacing: 10) {
@@ -317,7 +317,7 @@ struct BrewAgentView: View {
                 .foregroundColor(themeColor)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 11)
-                .background(Capsule().fill(Color.white))
+                .background(Capsule().fill(Brew.surface))
                 .overlay(Capsule().stroke(themeColor.opacity(0.3), lineWidth: 1.2))
             }
         case .weeklyBrew(let profile, let reasons, let matchPercent, let windowText, let venueText):
@@ -373,7 +373,7 @@ struct BrewAgentView: View {
                 .foregroundColor(themeColor)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 11)
-                .background(Capsule().fill(Color.white))
+                .background(Capsule().fill(Brew.surface))
                 .overlay(Capsule().stroke(themeColor.opacity(0.3), lineWidth: 1.2))
             }
         case .note(let text):
@@ -407,7 +407,7 @@ struct BrewAgentView: View {
                         .foregroundColor(themeColor)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 9)
-                        .background(Capsule().fill(Color.white))
+                        .background(Capsule().fill(Brew.surface))
                         .overlay(Capsule().stroke(themeColor.opacity(0.25), lineWidth: 1))
                 }
             }
@@ -432,7 +432,7 @@ struct BrewAgentView: View {
                     LinearGradient(
                         gradient: Gradient(colors: [
                             themeColor.opacity(0.18),
-                            Color(red: 0.85, green: 0.65, blue: 0.4).opacity(0.25)
+                            BrewTheme.accentColor.opacity(0.25)
                         ]),
                         startPoint: .topLeading, endPoint: .bottomTrailing
                     )
@@ -454,7 +454,7 @@ struct BrewAgentView: View {
                 .font(.system(size: 15))
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(RoundedRectangle(cornerRadius: 20).fill(Color.white))
+                .background(RoundedRectangle(cornerRadius: 20).fill(Brew.surface))
                 .overlay(RoundedRectangle(cornerRadius: 20).stroke(themeColor.opacity(composerFocused ? 0.4 : 0.12), lineWidth: 1.2))
 
             Button {
@@ -1160,7 +1160,7 @@ struct BrewPickCard: View {
     var onTap: () -> Void
     var onConnect: () -> Void
 
-    private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
+    private var themeColor: Color { Brew.brand }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1173,10 +1173,10 @@ struct BrewPickCard: View {
                             .foregroundColor(.white)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 2)
-                            .background(Capsule().fill(themeColor))
+                            .background(Capsule().fill(Brew.brandFill))
                         Text(profile.coreIdentity.name)
                             .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.black)
+                            .foregroundColor(.primary)
                     }
                     HStack(spacing: 5) {
                         // 🏢 真实公司 logo(Logo.dev,解析失败首字母兜底)
@@ -1192,10 +1192,10 @@ struct BrewPickCard: View {
                     if let connection = connectionChip {
                         Text(connection)
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(Color(red: 0.15, green: 0.45, blue: 0.25))
+                            .foregroundColor(Brew.chipGreenText)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
-                            .background(Capsule().fill(Color(red: 0.88, green: 0.96, blue: 0.9)))
+                            .background(Capsule().fill(Brew.chipGreenBg))
                     }
                 }
                 Spacer()
@@ -1207,8 +1207,8 @@ struct BrewPickCard: View {
                             .foregroundStyle(
                                 LinearGradient(
                                     gradient: Gradient(colors: [
-                                        Color(red: 0.85, green: 0.6, blue: 0.1),
-                                        Color(red: 0.65, green: 0.42, blue: 0.12)
+                                        Brew.gold,
+                                        Brew.goldDeep
                                     ]),
                                     startPoint: .top, endPoint: .bottom
                                 )
@@ -1221,7 +1221,7 @@ struct BrewPickCard: View {
                     .padding(.vertical, 5)
                     .background(
                         RoundedRectangle(cornerRadius: 10)
-                            .fill(Color(red: 1.0, green: 0.95, blue: 0.85))
+                            .fill(Brew.goldSoftBg)
                     )
                 }
             }
@@ -1252,12 +1252,12 @@ struct BrewPickCard: View {
                     .foregroundColor(isEngaged ? .gray : .white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 9)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(isEngaged ? Color.gray.opacity(0.15) : themeColor))
+                    .background(RoundedRectangle(cornerRadius: 12).fill(isEngaged ? Color.gray.opacity(0.15) : Brew.brandFill))
             }
             .disabled(isEngaged)
         }
         .padding(14)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color.white))
+        .background(RoundedRectangle(cornerRadius: 16).fill(Brew.surface))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(themeColor.opacity(0.1), lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
@@ -1320,7 +1320,7 @@ struct BrewInviteDraftCard: View {
     @State private var text: String
     @State private var didAct = false
 
-    private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
+    private var themeColor: Color { Brew.brand }
 
     init(profile: BrewNetProfile, initialText: String, alreadySent: Bool,
          onSend: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
@@ -1353,7 +1353,7 @@ struct BrewInviteDraftCard: View {
                 .frame(minHeight: 70, maxHeight: 130)
                 .padding(6)
                 .scrollContentBackground(.hidden)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color(red: 0.99, green: 0.985, blue: 0.975)))
+                .background(RoundedRectangle(cornerRadius: 10).fill(Brew.surfaceRaised))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(themeColor.opacity(0.12), lineWidth: 1))
                 .disabled(didAct)
 
@@ -1368,7 +1368,7 @@ struct BrewInviteDraftCard: View {
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 9)
-                        .background(RoundedRectangle(cornerRadius: 12).fill(didAct ? Color.gray.opacity(0.4) : themeColor))
+                        .background(RoundedRectangle(cornerRadius: 12).fill(didAct ? Color.gray.opacity(0.4) : Brew.brandFill))
                 }
                 .disabled(didAct || text.trimmingCharacters(in: .whitespaces).isEmpty)
 
@@ -1388,7 +1388,7 @@ struct BrewInviteDraftCard: View {
             }
         }
         .padding(14)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color.white))
+        .background(RoundedRectangle(cornerRadius: 16).fill(Brew.surface))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .stroke(themeColor.opacity(0.25), lineWidth: 1.5)
@@ -1410,8 +1410,8 @@ struct WeeklyBrewCard: View {
     var onSkip: () -> Void
 
     @State private var didAct = false
-    private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
-    private var gold: Color { Color(red: 0.85, green: 0.6, blue: 0.1) }
+    private var themeColor: Color { Brew.brand }
+    private var gold: Color { Brew.gold }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1485,7 +1485,7 @@ struct WeeklyBrewCard: View {
                         .background(
                             RoundedRectangle(cornerRadius: 12).fill(
                                 didAct ? AnyShapeStyle(Color.gray.opacity(0.4)) : AnyShapeStyle(
-                                    LinearGradient(colors: [gold, Color(red: 0.65, green: 0.42, blue: 0.12)],
+                                    LinearGradient(colors: [Brew.goldFill, Brew.goldFillDeep],
                                                    startPoint: .top, endPoint: .bottom))
                             )
                         )
@@ -1506,7 +1506,7 @@ struct WeeklyBrewCard: View {
             .disabled(didAct)
         }
         .padding(14)
-        .background(RoundedRectangle(cornerRadius: 18).fill(Color.white))
+        .background(RoundedRectangle(cornerRadius: 18).fill(Brew.surface))
         .overlay(
             RoundedRectangle(cornerRadius: 18)
                 .stroke(LinearGradient(colors: [gold.opacity(0.7), gold.opacity(0.2)],
@@ -1527,8 +1527,8 @@ struct IncomingProposalCard: View {
     var onPass: () -> Void
 
     @State private var didAct = false
-    private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
-    private var teal: Color { Color(red: 0.1, green: 0.5, blue: 0.45) }
+    private var themeColor: Color { Brew.brand }
+    private var teal: Color { Brew.teal }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1590,7 +1590,7 @@ struct IncomingProposalCard: View {
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
-                        .background(RoundedRectangle(cornerRadius: 12).fill(didAct ? Color.gray.opacity(0.4) : teal))
+                        .background(RoundedRectangle(cornerRadius: 12).fill(didAct ? Color.gray.opacity(0.4) : Brew.tealFill))
                 }
                 Button {
                     guard !didAct else { return }
@@ -1608,7 +1608,7 @@ struct IncomingProposalCard: View {
             .disabled(didAct)
         }
         .padding(14)
-        .background(RoundedRectangle(cornerRadius: 18).fill(Color.white))
+        .background(RoundedRectangle(cornerRadius: 18).fill(Brew.surface))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(teal.opacity(0.4), lineWidth: 1.5))
         .shadow(color: teal.opacity(0.12), radius: 10, x: 0, y: 4)
     }
@@ -1622,7 +1622,7 @@ struct BrewWorthItCard: View {
     var onNotMetYet: () -> Void
 
     @State private var didAct = false
-    private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
+    private var themeColor: Color { Brew.brand }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1637,7 +1637,7 @@ struct BrewWorthItCard: View {
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .background(RoundedRectangle(cornerRadius: 12).fill(didAct ? Color.gray.opacity(0.4) : themeColor))
+                        .background(RoundedRectangle(cornerRadius: 12).fill(didAct ? Color.gray.opacity(0.4) : Brew.brandFill))
                 }
                 Button {
                     guard !didAct else { return }
@@ -1664,7 +1664,7 @@ struct BrewWorthItCard: View {
             }
         }
         .padding(14)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color.white))
+        .background(RoundedRectangle(cornerRadius: 16).fill(Brew.surface))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(themeColor.opacity(0.12), lineWidth: 1))
         .opacity(didAct ? 0.55 : 1)
         .disabled(didAct)
@@ -1703,7 +1703,7 @@ struct BrewTypewriterText: View {
 
 struct BrewTypingDots: View {
     @State private var animating = false
-    private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
+    private var themeColor: Color { Brew.brand }
 
     var body: some View {
         HStack(spacing: 5) {
@@ -1724,7 +1724,7 @@ struct BrewTypingDots: View {
         .padding(.vertical, 12)
         .background(
             UnevenRoundedRectangle(topLeadingRadius: 16, bottomLeadingRadius: 4, bottomTrailingRadius: 16, topTrailingRadius: 16)
-                .fill(Color.white)
+                .fill(Brew.surface)
         )
         .onAppear { animating = true }
     }

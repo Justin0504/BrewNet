@@ -56,8 +56,8 @@ struct BrewOnboardingView: View {
     @State private var isUploadingPhoto = false
     @State private var timeslotChoices: Set<String> = []
 
-    private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
-    private var backgroundColor: Color { Color(red: 0.98, green: 0.97, blue: 0.95) }
+    private var themeColor: Color { Brew.brand }
+    private var backgroundColor: Color { Brew.bg }
 
     var body: some View {
         ZStack {
@@ -170,7 +170,7 @@ struct BrewOnboardingView: View {
                     .padding(.vertical, 10)
                     .background(
                         UnevenRoundedRectangle(topLeadingRadius: 16, bottomLeadingRadius: 4, bottomTrailingRadius: 16, topTrailingRadius: 16)
-                            .fill(Color.white)
+                            .fill(Brew.surface)
                     )
                 Spacer(minLength: 32)
             }
@@ -182,7 +182,7 @@ struct BrewOnboardingView: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 16).fill(themeColor))
+                    .background(RoundedRectangle(cornerRadius: 16).fill(Brew.brandFill))
             }
         case .resumeOffer:
             Button {
@@ -197,7 +197,7 @@ struct BrewOnboardingView: View {
                 .foregroundColor(themeColor)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 11)
-                .background(Capsule().fill(Color.white))
+                .background(Capsule().fill(Brew.surface))
                 .overlay(Capsule().stroke(themeColor.opacity(0.3), lineWidth: 1.2))
             }
             .disabled(parsedResume != nil)
@@ -231,7 +231,7 @@ struct BrewOnboardingView: View {
                             .foregroundColor(.white)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 11)
-                            .background(Capsule().fill(themeColor))
+                            .background(Capsule().fill(Brew.brandFill))
                         }
                         .disabled(isUploadingPhoto)
                         Button("Skip for now") {
@@ -262,7 +262,7 @@ struct BrewOnboardingView: View {
                 .font(.system(size: 15))
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(RoundedRectangle(cornerRadius: 20).fill(Color.white))
+                .background(RoundedRectangle(cornerRadius: 20).fill(Brew.surface))
                 .overlay(RoundedRectangle(cornerRadius: 20).stroke(themeColor.opacity(inputFocused ? 0.4 : 0.12), lineWidth: 1.2))
 
             Button {
@@ -591,7 +591,7 @@ struct TimeslotChipsCard: View {
     var onDone: () -> Void
 
     @State private var didAct = false
-    private var themeColor: Color { Color(red: 0.4, green: 0.2, blue: 0.1) }
+    private var themeColor: Color { Brew.brand }
 
     private let rows: [(label: String, prefix: String)] = [
         ("Weekdays", "wd"), ("Weekends", "we")
@@ -619,7 +619,7 @@ struct TimeslotChipsCard: View {
                                     .foregroundColor(on ? .white : themeColor)
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 7)
-                                    .background(Capsule().fill(on ? themeColor : themeColor.opacity(0.08)))
+                                    .background(Capsule().fill(on ? Brew.brandFill : Brew.brand.opacity(0.08)))
                             }
                         }
                     }
@@ -635,12 +635,12 @@ struct TimeslotChipsCard: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(didAct ? Color.gray.opacity(0.4) : themeColor))
+                    .background(RoundedRectangle(cornerRadius: 12).fill(didAct ? Color.gray.opacity(0.4) : Brew.brandFill))
             }
             .disabled(didAct)
         }
         .padding(14)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color.white))
+        .background(RoundedRectangle(cornerRadius: 16).fill(Brew.surface))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(themeColor.opacity(0.12), lineWidth: 1))
     }
 }
