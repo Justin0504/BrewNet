@@ -62,7 +62,13 @@ struct MinimalProfileHeaderView: View {
                         .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
                         .frame(maxWidth: .infinity)
                     
-                    if showProBadge {
+                    if let uid = authManager.currentUser?.id, FoundingStore.isFounding(userId: uid) {
+                        HStack {
+                            Spacer()
+                            FoundingBadge()
+                                .offset(x: -12)
+                        }
+                    } else if showProBadge {
                         HStack {
                             Spacer()
                             ProBadge(size: .medium)
@@ -620,7 +626,9 @@ struct ProfileDisplayView: View {
     @State private var lastProfileImageURL: String? = nil // 跟踪上次的头像URL
     @State private var resolvedVerifiedStatus: Bool? = nil
     @State private var selectedWorkExperience: WorkExperience?
-    
+    @State private var showInviteRedeem = false            // 🌟 邀请码兑换 sheet
+    @State private var foundingRefresh = false             // 🌟 founding 状态重绘触发
+
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
@@ -711,6 +719,35 @@ struct ProfileDisplayView: View {
                 .padding(.horizontal, 24)
                 .padding(.top, 16)
                 
+                // 🌟 Founding Member 邀请码入口(非 founding 才显示)
+                if let currentUser = authManager.currentUser,
+                   !FoundingStore.isFounding(userId: currentUser.id) {
+                    let _ = foundingRefresh   // 建立重绘依赖
+                    Button(action: { showInviteRedeem = true }) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "star.circle.fill")
+                                .font(.system(size: 18))
+                                .foregroundColor(Brew.goldFill)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Have an invite code?")
+                                    .font(.system(size: 15, weight: .bold))
+                                    .foregroundColor(.primary)
+                                Text("Founding members get Pro free, for good")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.gray)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundColor(.gray)
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 14)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Brew.goldSoftBg))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Brew.goldFill.opacity(0.3), lineWidth: 1))
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .padding(.horizontal, 24)
+                    .padding(.top, 16)
+                }
+
                 if let currentUser = authManager.currentUser {
                     ProUpgradeCard(isProActive: currentUser.isProActive) {
                         showSubscriptionPayment = true
@@ -744,6 +781,18 @@ struct ProfileDisplayView: View {
             startAvatarSyncTimer()
             lastProfileImageURL = profile.coreIdentity.profileImage
             resolveVerifiedStatusIfNeeded(force: true)
+            // 🌟 founding 状态静默刷新
+            if let uid = authManager.currentUser?.id {
+                Task {
+                    await FoundingService.shared.refresh(userId: uid)
+                    await MainActor.run { foundingRefresh.toggle() }
+                }
+            }
+        }
+        .sheet(isPresented: $showInviteRedeem) {
+            if let uid = authManager.currentUser?.id {
+                InviteCodeRedeemView(userId: uid, onFounding: { foundingRefresh.toggle() })
+            }
         }
         .onDisappear {
             stopAvatarSyncTimer()
@@ -1147,7 +1196,10 @@ struct ProfileHeaderView: View {
                     .foregroundColor(.black)
                     .lineLimit(1)
                 
-                if authManager.currentUser?.isPro == true {
+                if let uid = authManager.currentUser?.id, FoundingStore.isFounding(userId: uid) {
+                    FoundingBadge()
+                        .fixedSize()
+                } else if authManager.currentUser?.isPro == true {
                     ProBadge(size: .medium)
                         .fixedSize()
                 }
