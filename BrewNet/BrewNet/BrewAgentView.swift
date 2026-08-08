@@ -22,6 +22,7 @@ struct BrewMessage: Identifiable {
         case incomingProposal(proposalId: String, profile: BrewNetProfile, windowText: String?, venueText: String?)  // 🤝 双盲提案(对方 Brew 发来)
         case externalIntroSetup   // 🌐 开放图谱:池外没人时,问用户心里有没有具体的人
         case externalIntroDraft(targetName: String, targetContext: String, initialText: String)  // 🌐 站外 intro 草稿(可编辑→生成分享链接)
+        case externalIntroAccepted(targetName: String, email: String?)  // 🌐🎉 池外的人接受了 → 回流报喜 + 联系方式
         case note(String)
     }
     let id = UUID()
@@ -102,7 +103,9 @@ struct BrewAgentView: View {
             let proactiveRunStarted = greetIfNeeded()
             if !proactiveRunStarted {
                 Task {
-                    // 优先级:🤝双盲提案 > 报喜 > 见面简报 > worth-it;一次会话只推一件事
+                    // 优先级:🌐站外接受 > 🤝双盲提案 > 报喜 > 见面简报 > worth-it;一次会话只推一件事
+                    let extAccepted = await maybeAnnounceExternalAcceptance()
+                    if extAccepted { return }
                     let proposal = await maybeShowIncomingProposal()
                     if !proposal {
                         let announced = await maybeAnnounceAcceptances()
@@ -386,6 +389,8 @@ struct BrewAgentView: View {
                     Task { await createAndShareIntro(targetName: targetName, targetContext: targetContext, message: finalText) }
                 }
             )
+        case .externalIntroAccepted(let targetName, let email):
+            BrewExternalIntroAcceptedCard(targetName: targetName, email: email)
         case .prepOffer(let profile, let when, let location):
             Button {
                 Task { await fetchPrepBrief(for: profile, when: when, location: location) }
@@ -963,6 +968,40 @@ struct BrewAgentView: View {
         }
     }
 
+    /// 🌐🎉 池外的人接受了 warm intro → 回流报喜,把联系方式交给用户去敲定咖啡
+    private func maybeAnnounceExternalAcceptance() async -> Bool {
+        guard let currentUser = authManager.currentUser else { return false }
+        struct AcceptedRow: Decodable {
+            let id: String, targetName: String, targetReplyEmail: String?
+            enum CodingKeys: String, CodingKey {
+                case id, targetName = "target_name", targetReplyEmail = "target_reply_email"
+            }
+        }
+        guard let response = try? await supabaseService.supabase
+            .from("external_intros")
+            .select("id,target_name,target_reply_email")
+            .eq("inviter_id", value: currentUser.id.lowercased())
+            .eq("status", value: "accepted")
+            .order("responded_at", ascending: false)
+            .limit(5)
+            .execute(),
+            let rows = try? JSONDecoder().decode([AcceptedRow].self, from: response.data) else { return false }
+
+        // 找第一条还没报喜过的
+        guard let row = rows.first(where: {
+            !BrewMemoryStore.shared.hasAnnouncedExternalIntro(id: $0.id, userId: currentUser.id)
+        }) else { return false }
+
+        let firstName = row.targetName.components(separatedBy: " ").first ?? row.targetName
+        await MainActor.run {
+            messages.append(BrewMessage(kind: .agentText("🎉 Big news — \(firstName) accepted your intro! Your reach just paid off.")))
+            messages.append(BrewMessage(kind: .externalIntroAccepted(targetName: row.targetName, email: row.targetReplyEmail)))
+            history.append(BrewChatEntry(role: .agent, text: "Announced external intro acceptance from \(row.targetName)."))
+            BrewMemoryStore.shared.recordAnnouncedExternalIntro(id: row.id, userId: currentUser.id)
+        }
+        return true
+    }
+
     /// 🤝 来件双盲提案(最高优先级):对方的 Brew 提议一起喝咖啡
     private func maybeShowIncomingProposal() async -> Bool {
         guard let currentUser = authManager.currentUser else { return false }
@@ -1533,6 +1572,81 @@ struct BrewExternalIntroDraftCard: View {
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 16).fill(Brew.surface))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(themeColor.opacity(0.1), lineWidth: 1))
+    }
+}
+
+// MARK: - 🌐🎉 站外 intro 被接受:回流报喜卡(含联系方式一键复制/邮件)
+
+struct BrewExternalIntroAcceptedCard: View {
+    let targetName: String
+    let email: String?
+
+    @State private var copied = false
+    private var themeColor: Color { Brew.brand }
+    private var firstName: String { targetName.components(separatedBy: " ").first ?? targetName }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle().fill(Brew.teal.opacity(0.15)).frame(width: 36, height: 36)
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 17))
+                        .foregroundColor(Brew.teal)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(firstName) is in ☕️")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.primary)
+                    Text("They accepted your warm intro")
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                }
+            }
+
+            if let email, !email.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "envelope.fill")
+                        .font(.system(size: 13))
+                        .foregroundColor(themeColor.opacity(0.7))
+                    Text(email)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                    Spacer()
+                    Button {
+                        UIPasteboard.general.string = email
+                        withAnimation { copied = true }
+                    } label: {
+                        Text(copied ? "Copied" : "Copy")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(copied ? .gray : themeColor)
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Brew.surfaceRaised))
+
+                Link(destination: URL(string: "mailto:\(email)?subject=\(coffeeSubject)")!) {
+                    Text("Email \(firstName) to lock in the coffee")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Brew.brandFill))
+                }
+            } else {
+                Text("They didn't leave contact info — but they're expecting to hear from you. Reach out through the channel you sent this on.")
+                    .font(.system(size: 13))
+                    .foregroundColor(.gray)
+            }
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Brew.surface))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Brew.teal.opacity(0.25), lineWidth: 1))
+    }
+
+    private var coffeeSubject: String {
+        "Coffee ☕️".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "Coffee"
     }
 }
 

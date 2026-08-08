@@ -145,14 +145,22 @@ serve(async (req) => {
   // 已回应 → 确认态
   if (intro.status === "accepted" || intro.status === "declined") {
     const accepted = intro.status === "accepted"
+    const reach = intro.target_reply_email
+      ? `${esc(intro.inviter_name.split(" ")[0])} will reach out at <b>${esc(intro.target_reply_email)}</b> to lock in the details.`
+      : `${esc(intro.inviter_name.split(" ")[0])} will reach out to lock in the details.`
     return page(`
       <div class="hd"><div class="logo">BrewNet · Warm Intro</div>
         <h1>${accepted ? "You're all set ☕️" : "No worries"}</h1></div>
       <div class="bd">
-        <p class="msg">${accepted
-          ? `${esc(intro.inviter_name)} has been let know. They'll reach out to lock in the details.`
+        <p class="msg">${accepted ? reach
           : `We've let ${esc(intro.inviter_name)} know. Maybe another time.`}</p>
-        <a class="btn accept" href="https://apps.apple.com/app/id6796967801">Get your own Brew agent →</a>
+        ${accepted ? `
+        <div class="row" style="margin-top:6px">
+          <div class="avatar">🤖</div>
+          <div class="who"><div class="name">Want coffees like this, for you?</div>
+            <div class="sub">Brew is the AI agent that set this up. Tell it who you want to meet — it does the rest.</div></div>
+        </div>` : ""}
+        <a class="btn accept" href="https://apps.apple.com/app/id6796967801">${accepted ? "Get my own Brew agent →" : "See what Brew is →"}</a>
       </div>
       <div class="foot">Brew is your AI networking agent. It sets up coffees worth having.</div>`,
       "BrewNet")
@@ -177,6 +185,7 @@ serve(async (req) => {
       <div class="msg">${esc(intro.message)}</div>
       ${chips ? `<div class="meta">${chips}</div>` : ""}
       <form id="f">
+        <input class="note" type="email" name="email" placeholder="Your email — so ${esc(firstName === "there" ? "they" : intro.inviter_name.split(" ")[0])} can reach you" style="min-height:auto">
         <textarea class="note" name="note" placeholder="Add a quick note (optional)"></textarea>
         <button class="btn accept" type="button" onclick="respond('accept')">Yes, I'm in ☕️</button>
         <button class="btn decline" type="button" onclick="respond('decline')">Not right now</button>
@@ -186,11 +195,12 @@ serve(async (req) => {
     <script>
       async function respond(action){
         var note=document.querySelector('[name=note]').value;
-        document.querySelectorAll('.btn').forEach(function(b){b.disabled=true;b.style.opacity=.5});
+        var email=document.querySelector('[name=email]').value;
+        document.querySelectorAll('.btn,.note').forEach(function(b){b.disabled=true;b.style.opacity=.5});
         try{
           await fetch(window.location.pathname+window.location.search,{method:'POST',
             headers:{'content-type':'application/json'},
-            body:JSON.stringify({token:${JSON.stringify(token)},action:action,note:note})});
+            body:JSON.stringify({token:${JSON.stringify(token)},action:action,note:note,email:email})});
         }catch(e){}
         window.location.reload();
       }

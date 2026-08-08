@@ -22,6 +22,7 @@ struct BrewMemory: Codable {
     var announcedMatchNames: [String]? = nil  // 已报喜过的接受者(避免重复庆祝)
     var prepOfferedNames: [String]? = nil     // 已提供过见面简报的对象
     var lastWeeklyBrewAt: Date? = nil         // ☕ Weekly Brew 上次提案时间(7 天节奏)
+    var announcedExternalIntroIds: [String]? = nil  // 🌐 已报喜过的站外 intro(对方已接受,避免重复)
 }
 
 final class BrewMemoryStore {
@@ -124,6 +125,19 @@ final class BrewMemoryStore {
         var announced = memory.announcedMatchNames ?? []
         if !announced.contains(name) { announced.append(name) }
         memory.announcedMatchNames = Array(announced.suffix(maxNames))
+        save(memory, userId: userId)
+    }
+
+    /// 🌐 站外 intro 是否已报喜过(对方已接受)
+    func hasAnnouncedExternalIntro(id: String, userId: String) -> Bool {
+        (load(userId: userId).announcedExternalIntroIds ?? []).contains(id)
+    }
+
+    func recordAnnouncedExternalIntro(id: String, userId: String) {
+        var memory = load(userId: userId)
+        var announced = memory.announcedExternalIntroIds ?? []
+        if !announced.contains(id) { announced.append(id) }
+        memory.announcedExternalIntroIds = Array(announced.suffix(maxNames))
         save(memory, userId: userId)
     }
 
