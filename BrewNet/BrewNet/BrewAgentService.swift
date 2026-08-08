@@ -121,6 +121,47 @@ final class BrewAgentService {
         return text.isEmpty ? nil : String(text.prefix(500))
     }
 
+    // MARK: - 站外 warm intro(开放图谱:目标还不是 BrewNet 用户)
+
+    /// 为池子外的真人起草一封 warm intro。requester 是发起用户,
+    /// targetName/targetContext 是用户口述的目标信息。返回 intro 正文。
+    func draftExternalIntro(
+        requester: BrewNetProfile?,
+        targetName: String,
+        targetContext: String,
+        goal: String,
+        timeHint: String? = nil
+    ) async -> String? {
+        guard !isCircuitOpen else { return nil }
+
+        var requesterDesc = "someone on BrewNet"
+        if let r = requester {
+            var parts = [r.coreIdentity.name]
+            if let t = r.professionalBackground.jobTitle, !t.isEmpty { parts.append(t) }
+            if let c = r.professionalBackground.currentCompany, !c.isEmpty { parts.append("at \(c)") }
+            requesterDesc = parts.joined(separator: ", ")
+        }
+
+        let prompt = """
+        Write a short, warm, specific coffee-chat invitation (2-3 sentences, first person, English) \
+        from \(requesterDesc) to \(targetName).
+        What the sender knows about the recipient: "\(targetContext)".
+        The sender's goal: "\(goal)".
+        \(timeHint.map { "End by proposing to meet \($0) (phrase naturally as a question)." } ?? "End with a light question proposing a coffee this week.")
+        This message will be read by the recipient who does NOT yet know about BrewNet, so it must stand on its own \
+        and feel personal, not automated. Reference something concrete. No emojis, no subject line, no placeholders. \
+        Output ONLY the message text.
+        """
+        guard let raw = await callEdgeFunction(prompt: prompt, maxTokens: 256) else {
+            consecutiveFailures += 1
+            return nil
+        }
+        consecutiveFailures = 0
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\"", with: "")
+        return text.isEmpty ? nil : String(text.prefix(500))
+    }
+
     // MARK: - Onboarding 档案抽取
 
     /// 从 onboarding 问答里抽取结构化档案(单次调用,失败返回 nil 由调用方走启发式兜底)

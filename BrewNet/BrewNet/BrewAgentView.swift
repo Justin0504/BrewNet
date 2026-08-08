@@ -20,6 +20,8 @@ struct BrewMessage: Identifiable {
         case prepOffer(profile: BrewNetProfile, when: String, location: String?)  // ☕ 见面前简报入口
         case weeklyBrew(profile: BrewNetProfile, reasons: [String], matchPercent: Int?, windowText: String?, venueText: String?)  // ☕ 每周一杯提案
         case incomingProposal(proposalId: String, profile: BrewNetProfile, windowText: String?, venueText: String?)  // 🤝 双盲提案(对方 Brew 发来)
+        case externalIntroSetup   // 🌐 开放图谱:池外没人时,问用户心里有没有具体的人
+        case externalIntroDraft(targetName: String, targetContext: String, initialText: String)  // 🌐 站外 intro 草稿(可编辑→生成分享链接)
         case note(String)
     }
     let id = UUID()
@@ -43,6 +45,8 @@ struct BrewAgentView: View {
     @State private var engagedProfileIds: Set<String> = []
     @State private var showingInviteLimitAlert = false
     @State private var selectedProfile: BrewNetProfile?
+    @State private var shareIntroURL: URL?          // 🌐 站外 intro 生成的分享链接
+    @State private var showingIntroShare = false
     @State private var didGreet = false
     @State private var animatedMessageIds: Set<UUID> = []  // 打字机动画只放一次
     @FocusState private var composerFocused: Bool
@@ -131,6 +135,14 @@ struct BrewAgentView: View {
             )
             .environmentObject(authManager)
             .environmentObject(supabaseService)
+        }
+        .sheet(isPresented: $showingIntroShare) {
+            if let url = shareIntroURL {
+                ActivityShareSheet(items: [
+                    "I'd love to grab a coffee — here's a quick way to say yes:",
+                    url
+                ])
+            }
         }
     }
 
@@ -360,6 +372,20 @@ struct BrewAgentView: View {
                     }
                 }
             )
+        case .externalIntroSetup:
+            BrewExternalIntroSetupCard(
+                onDraft: { name, context in
+                    Task { await draftExternalIntro(targetName: name, targetContext: context) }
+                }
+            )
+        case .externalIntroDraft(let targetName, let targetContext, let initialText):
+            BrewExternalIntroDraftCard(
+                targetName: targetName,
+                initialText: initialText,
+                onShare: { finalText in
+                    Task { await createAndShareIntro(targetName: targetName, targetContext: targetContext, message: finalText) }
+                }
+            )
         case .prepOffer(let profile, let when, let location):
             Button {
                 Task { await fetchPrepBrief(for: profile, when: when, location: location) }
@@ -554,7 +580,10 @@ struct BrewAgentView: View {
                 }
                 if outcome.top.isEmpty {
                     // 冷启动缓冲:把"现在没人"转化为 agent 的主动性承诺
-                    messages.append(BrewMessage(kind: .agentText("No strong fits in the pool right now — but I've saved this as your mission. I'll keep scouting and report back as soon as someone good joins. Add more detail anytime to widen the net.")))
+                    messages.append(BrewMessage(kind: .agentText("No strong fits in the pool right now — but I've saved this as your mission and I'll report back the moment someone good joins.")))
+                    // 🌐 开放图谱:池外没人 ≠ 无解,agent 可以主动去够到还没加入的人
+                    messages.append(BrewMessage(kind: .agentText("Got someone specific in mind? I can reach out on your behalf — even if they're not on BrewNet yet.")))
+                    messages.append(BrewMessage(kind: .externalIntroSetup))
                 } else {
                     messages.append(BrewMessage(kind: .picks(outcome.top)))
                     lastPicks = outcome.top
@@ -583,6 +612,76 @@ struct BrewAgentView: View {
             isThinking = false
             messages.append(BrewMessage(kind: .inviteDraft(profile: profile, initialText: draft ?? fallbackDraft)))
             history.append(BrewChatEntry(role: .agent, text: "Drafted an invitation to \(profile.coreIdentity.name), awaiting user confirmation."))
+        }
+    }
+
+    // MARK: - 🌐 站外 warm intro(开放图谱)
+
+    /// 用户填了目标名字+背景 → agent 起草站外 intro
+    private func draftExternalIntro(targetName: String, targetContext: String) async {
+        let name = targetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        await MainActor.run { isThinking = true }
+        let draft = await BrewAgentService.shared.draftExternalIntro(
+            requester: currentUserProfile,
+            targetName: name,
+            targetContext: targetContext,
+            goal: lastGoal.isEmpty ? "a coffee chat to learn from them" : lastGoal
+        )
+        let firstName = name.components(separatedBy: " ").first ?? name
+        let fallback = "Hi \(firstName), I came across your work and would genuinely love to learn from your experience over a coffee sometime this week — would you be open to it?"
+        await MainActor.run {
+            isThinking = false
+            messages.append(BrewMessage(kind: .externalIntroDraft(targetName: name, targetContext: targetContext, initialText: draft ?? fallback)))
+            history.append(BrewChatEntry(role: .agent, text: "Drafted an external warm intro to \(name)."))
+        }
+    }
+
+    /// 落库 external_intros → 拿 token → 拼落地页 URL → 弹系统分享面板
+    private func createAndShareIntro(targetName: String, targetContext: String, message: String) async {
+        guard let currentUser = authManager.currentUser else { return }
+        await MainActor.run { isThinking = true }
+
+        let headline: String? = {
+            var parts: [String] = []
+            if let t = currentUserProfile?.professionalBackground.jobTitle, !t.isEmpty { parts.append(t) }
+            if let c = currentUserProfile?.professionalBackground.currentCompany, !c.isEmpty { parts.append("at \(c)") }
+            return parts.isEmpty ? nil : parts.joined(separator: " ")
+        }()
+
+        struct IntroInsert: Encodable {
+            let inviter_id: String, inviter_name: String, inviter_headline: String?
+            let target_name: String, target_context: String, message: String
+        }
+        struct IntroRow: Decodable { let token: String }
+        do {
+            let resp = try await supabaseService.supabase.from("external_intros")
+                .insert(IntroInsert(
+                    inviter_id: currentUser.id.lowercased(),
+                    inviter_name: currentUserProfile?.coreIdentity.name ?? currentUser.name,
+                    inviter_headline: headline,
+                    target_name: targetName,
+                    target_context: targetContext,
+                    message: message
+                ))
+                .select("token").single().execute()
+            let token = (try JSONDecoder().decode(IntroRow.self, from: resp.data)).token
+            let url = URL(string: "https://jcxvdolcdifdghaibspy.supabase.co/functions/v1/intro?token=\(token)")
+
+            await MainActor.run {
+                isThinking = false
+                shareIntroURL = url
+                showingIntroShare = true
+                let firstName = targetName.components(separatedBy: " ").first ?? targetName
+                messages.append(BrewMessage(kind: .agentText("Link's ready — send it to \(firstName) however you like (text, email, LinkedIn). The moment they tap accept, I'll ping you and help you lock in the coffee.")))
+                history.append(BrewChatEntry(role: .agent, text: "Created shareable warm-intro link for \(targetName)."))
+            }
+        } catch {
+            await MainActor.run {
+                isThinking = false
+                messages.append(BrewMessage(kind: .note("Couldn't create the intro link — try again in a moment.")))
+            }
+            print("❌ [ExternalIntro] create failed: \(error)")
         }
     }
 
@@ -1111,6 +1210,22 @@ struct BrewAgentView: View {
         #if DEBUG
         // 仅 Debug:环境变量自动发消息(模拟器/UI 测试);MESSAGE2 在第一轮完成后追发
         let env = ProcessInfo.processInfo.environment
+        if env["BREWNET_DEBUG_INTRO"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                messages.append(BrewMessage(kind: .agentText("Got someone specific in mind? I can reach out on your behalf — even if they're not on BrewNet yet.")))
+                messages.append(BrewMessage(kind: .externalIntroSetup))
+            }
+            return
+        }
+        if env["BREWNET_DEBUG_INTRO"] == "2" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                messages.append(BrewMessage(kind: .externalIntroDraft(
+                    targetName: "Alex Rivera",
+                    targetContext: "PM at Stripe, ex-Google",
+                    initialText: "Hi Alex — I'm building an AI networking agent and your work on Stripe's onboarding is exactly the kind of thing I'd love to learn from. Could I buy you a coffee this week?")))
+            }
+            return
+        }
         if let autoMessage = env["BREWNET_AUTOCHAT_MESSAGE"],
            !autoMessage.isEmpty, messages.count <= 1 {
             print("🧪 [DEBUG] Auto-chat via env var: \(autoMessage)")
@@ -1294,6 +1409,142 @@ struct BrewPickCard: View {
 }
 
 // MARK: - Invite Draft Card(确认卡:发送前人工确认,可直接编辑)
+
+// MARK: - 🌐 站外 Warm Intro:setup 卡(问"想约谁")
+
+struct BrewExternalIntroSetupCard: View {
+    var onDraft: (String, String) -> Void
+
+    @State private var name = ""
+    @State private var context = ""
+    @State private var submitted = false
+
+    private var themeColor: Color { Brew.brand }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "person.crop.circle.badge.plus")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(themeColor.opacity(0.7))
+                Text("Reach someone new")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(themeColor.opacity(0.8))
+            }
+
+            TextField("Who? (name)", text: $name)
+                .font(.system(size: 14))
+                .padding(.horizontal, 12).padding(.vertical, 10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Brew.surfaceRaised))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(themeColor.opacity(0.12), lineWidth: 1))
+
+            TextField("What do you know about them? (role, company, why them)", text: $context, axis: .vertical)
+                .font(.system(size: 14))
+                .lineLimit(2...4)
+                .padding(.horizontal, 12).padding(.vertical, 10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Brew.surfaceRaised))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(themeColor.opacity(0.12), lineWidth: 1))
+
+            Button {
+                guard !name.trimmingCharacters(in: .whitespaces).isEmpty, !submitted else { return }
+                submitted = true
+                onDraft(name, context)
+            } label: {
+                Text("Draft the intro")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(
+                        (name.trimmingCharacters(in: .whitespaces).isEmpty || submitted)
+                        ? Color.gray.opacity(0.4) : Brew.brandFill))
+            }
+            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || submitted)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Brew.surface))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(themeColor.opacity(0.1), lineWidth: 1))
+    }
+}
+
+// MARK: - 🌐 站外 Warm Intro:草稿卡(可编辑 → 生成分享链接)
+
+struct BrewExternalIntroDraftCard: View {
+    let targetName: String
+    let initialText: String
+    var onShare: (String) -> Void
+
+    @State private var text: String
+    @State private var didAct = false
+
+    private var themeColor: Color { Brew.brand }
+
+    init(targetName: String, initialText: String, onShare: @escaping (String) -> Void) {
+        self.targetName = targetName
+        self.initialText = initialText
+        self.onShare = onShare
+        _text = State(initialValue: initialText)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "paperplane.circle")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(themeColor.opacity(0.7))
+                Text("Intro to \(targetName)")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(themeColor.opacity(0.8))
+                Spacer()
+                Text("Edit freely")
+                    .font(.system(size: 11))
+                    .foregroundColor(.gray)
+            }
+
+            TextEditor(text: $text)
+                .font(.system(size: 14))
+                .frame(minHeight: 90)
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Brew.surfaceRaised))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(themeColor.opacity(0.12), lineWidth: 1))
+
+            Text("They tap one link to say yes — no download needed. You'll get pinged the moment they do.")
+                .font(.system(size: 11))
+                .foregroundColor(.gray)
+
+            Button {
+                guard !didAct else { return }
+                didAct = true
+                onShare(text)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text(didAct ? "Link created" : "Create link & share")
+                        .font(.system(size: 14, weight: .bold))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 11)
+                .background(RoundedRectangle(cornerRadius: 12).fill(didAct ? Color.gray.opacity(0.4) : Brew.brandFill))
+            }
+            .disabled(didAct)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Brew.surface))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(themeColor.opacity(0.1), lineWidth: 1))
+    }
+}
+
+// MARK: - 系统分享面板包装
+
+struct ActivityShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
 
 struct BrewInviteDraftCard: View {
     let profile: BrewNetProfile
