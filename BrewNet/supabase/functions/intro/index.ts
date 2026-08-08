@@ -97,18 +97,34 @@ async function notifyInviter(intro: any, accepted: boolean) {
 serve(async (req) => {
   const url = new URL(req.url)
 
-  // ---- POST: accept / decline ----
+  // ---- POST: accept / decline / lead ----
   if (req.method === "POST") {
     let payload: any = {}
     try { payload = await req.json() } catch (_) {}
     const token = payload.token
     const action = payload.action
-    if (!token || !["accept", "decline"].includes(action)) {
+    if (!token || !["accept", "decline", "lead"].includes(action)) {
       return new Response(JSON.stringify({ error: "bad request" }), { status: 400 })
     }
     const { data: intro } = await admin
       .from("external_intros").select("*").eq("token", token).maybeSingle()
     if (!intro) return new Response(JSON.stringify({ error: "not found" }), { status: 404 })
+
+    // 接受后的增长回收:被邀请人留下自己的网络意图 → 存为 lead(email 幂等 upsert)
+    if (action === "lead") {
+      const email = (payload.email || intro.target_reply_email || "").trim().toLowerCase()
+      if (!email) return new Response(JSON.stringify({ error: "email required" }), { status: 400 })
+      await admin.from("brew_leads").upsert({
+        email,
+        name: intro.target_name,
+        intent: payload.intent || null,
+        source: "external_intro",
+        source_intro_id: intro.id,
+      }, { onConflict: "email" })
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json" },
+      })
+    }
 
     // 只有首次终态才回流通知(幂等,防重复点击刷推送)
     const firstResponse = intro.status !== "accepted" && intro.status !== "declined"
@@ -158,11 +174,32 @@ serve(async (req) => {
         <div class="row" style="margin-top:6px">
           <div class="avatar">🤖</div>
           <div class="who"><div class="name">Want coffees like this, for you?</div>
-            <div class="sub">Brew is the AI agent that set this up. Tell it who you want to meet — it does the rest.</div></div>
-        </div>` : ""}
-        <a class="btn accept" href="https://apps.apple.com/app/id6796967801">${accepted ? "Get my own Brew agent →" : "See what Brew is →"}</a>
+            <div class="sub">Brew is the AI agent that set this up. Tell it who you'd like to meet — it starts scouting before you even download.</div></div>
+        </div>
+        <div id="leadForm">
+          <input class="note" id="leadIntent" placeholder="Who would you like to meet? (e.g. founders in fintech)" style="min-height:auto">
+          <button class="btn accept" type="button" onclick="saveLead()">Reserve my Brew — start scouting</button>
+        </div>
+        <div id="leadDone" style="display:none">
+          <p class="msg">Done — Brew is already looking. Download the app with this email and your matches will be waiting. ☕️</p>
+          <a class="btn accept" href="https://apps.apple.com/app/id6796967801">Get the app →</a>
+        </div>
+        ` : `<a class="btn accept" href="https://apps.apple.com/app/id6796967801">See what Brew is →</a>`}
       </div>
-      <div class="foot">Brew is your AI networking agent. It sets up coffees worth having.</div>`,
+      <div class="foot">Brew is your AI networking agent. It sets up coffees worth having.</div>
+      ${accepted ? `<script>
+        async function saveLead(){
+          var intent=document.getElementById('leadIntent').value;
+          document.querySelectorAll('#leadForm .btn,#leadForm .note').forEach(function(b){b.disabled=true;b.style.opacity=.5});
+          try{
+            await fetch(window.location.pathname+window.location.search,{method:'POST',
+              headers:{'content-type':'application/json'},
+              body:JSON.stringify({token:${JSON.stringify(token)},action:'lead',intent:intent})});
+          }catch(e){}
+          document.getElementById('leadForm').style.display='none';
+          document.getElementById('leadDone').style.display='block';
+        }
+      </script>` : ""}`,
       "BrewNet")
   }
 

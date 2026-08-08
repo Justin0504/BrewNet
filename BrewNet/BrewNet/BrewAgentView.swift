@@ -100,20 +100,22 @@ struct BrewAgentView: View {
         .onAppear {
             PushManager.shared.requestIfAppropriate()   // 🔔 权限请求/token 注册(内部去重)
             loadRequesterProfile()
-            let proactiveRunStarted = greetIfNeeded()
-            if !proactiveRunStarted {
-                Task {
-                    // 优先级:🌐站外接受 > 🤝双盲提案 > 报喜 > 见面简报 > worth-it;一次会话只推一件事
-                    let extAccepted = await maybeAnnounceExternalAcceptance()
-                    if extAccepted { return }
-                    let proposal = await maybeShowIncomingProposal()
-                    if !proposal {
-                        let announced = await maybeAnnounceAcceptances()
-                        if !announced {
-                            let prepped = await maybeOfferCoffeePrep()
-                            if !prepped {
-                                maybeAskWorthIt()
-                            }
+            Task {
+                // 🌐 首开:认领站外 lead(用户接受 intro 时留的网络意图)→ 直接种 mission 并开搜
+                if await maybeClaimLead() { return }
+
+                let proactiveRunStarted = await MainActor.run { greetIfNeeded() }
+                if proactiveRunStarted { return }
+                // 优先级:🌐站外接受 > 🤝双盲提案 > 报喜 > 见面简报 > worth-it;一次会话只推一件事
+                let extAccepted = await maybeAnnounceExternalAcceptance()
+                if extAccepted { return }
+                let proposal = await maybeShowIncomingProposal()
+                if !proposal {
+                    let announced = await maybeAnnounceAcceptances()
+                    if !announced {
+                        let prepped = await maybeOfferCoffeePrep()
+                        if !prepped {
+                            await MainActor.run { maybeAskWorthIt() }
                         }
                     }
                 }
@@ -966,6 +968,32 @@ struct BrewAgentView: View {
             messages.append(BrewMessage(kind: .inviteDraft(profile: profile, initialText: draft ?? fallbackDraft)))
             history.append(BrewChatEntry(role: .agent, text: "Weekly Brew: drafted invite to \(profile.coreIdentity.name)."))
         }
+    }
+
+    /// 🌐 首次打开:认领用户在接受站外 intro 时留下的网络意图(brew_leads)
+    /// 命中 → 直接种成 mission、欢迎、立即开搜。一人一次(UserDefaults 去重)。
+    private func maybeClaimLead() async -> Bool {
+        guard let uid = authManager.currentUser?.id else { return false }
+        let flagKey = "brew_lead_claimed_\(uid)"
+        if UserDefaults.standard.bool(forKey: flagKey) { return false }
+        UserDefaults.standard.set(true, forKey: flagKey)   // 无论结果,只尝试一次
+
+        struct LeadResult: Decodable { let intent: String?; let name: String? }
+        guard let resp = try? await supabaseService.supabase.rpc("claim_brew_lead").execute(),
+              let result = try? JSONDecoder().decode(LeadResult?.self, from: resp.data) ?? nil,
+              let intent = result.intent, !intent.isEmpty else { return false }
+
+        await MainActor.run {
+            didGreet = true   // 抑制常规开场白
+            let firstName = authManager.currentUser?.name.components(separatedBy: " ").first
+            let greeting = "Welcome to BrewNet\(firstName.map { ", \($0)" } ?? "")! You mentioned you'd like to meet \(intent) — I already started scouting. Here's who fits…"
+            messages.append(BrewMessage(kind: .agentText(greeting)))
+            history.append(BrewChatEntry(role: .agent, text: greeting))
+            lastGoal = intent
+            isThinking = true
+        }
+        await runSearch(query: intent)   // 内部会把 intent 持久化为常驻 mission
+        return true
     }
 
     /// 🌐🎉 池外的人接受了 warm intro → 回流报喜,把联系方式交给用户去敲定咖啡
