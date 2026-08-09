@@ -623,6 +623,10 @@ struct ProfileDisplayView: View {
     @State private var selectedWorkExperience: WorkExperience?
     @State private var showInviteRedeem = false            // 🌟 邀请码兑换 sheet
     @State private var foundingRefresh = false             // 🌟 founding 状态重绘触发
+    @State private var myInviteCode: String? = nil         // 🎁 专属推荐码
+    @State private var myInviteJoined: Int = 0
+    @State private var shareInviteItems: [Any]? = nil      // 分享面板内容
+    @State private var showInviteShare = false
 
     var body: some View {
         ScrollView {
@@ -743,6 +747,33 @@ struct ProfileDisplayView: View {
                     .padding(.top, 16)
                 }
 
+                // 🎁 邀请好友(K 因子病毒环:双方各得一周 Pro)
+                Button(action: { shareMyInvite() }) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "gift.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(Brew.teal)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Invite friends")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(.primary)
+                            Text(myInviteJoined > 0
+                                 ? "\(myInviteJoined) joined · you both get a week of Pro"
+                                 : "You both get a week of Pro free")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                        }
+                        Spacer()
+                        Image(systemName: "square.and.arrow.up").foregroundColor(Brew.teal)
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 14)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Brew.teal.opacity(0.08)))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Brew.teal.opacity(0.25), lineWidth: 1))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .padding(.horizontal, 24)
+                .padding(.top, 16)
+
                 if let currentUser = authManager.currentUser {
                     ProUpgradeCard(isProActive: currentUser.isProActive) {
                         showSubscriptionPayment = true
@@ -776,17 +807,28 @@ struct ProfileDisplayView: View {
             startAvatarSyncTimer()
             lastProfileImageURL = profile.coreIdentity.profileImage
             resolveVerifiedStatusIfNeeded(force: true)
-            // 🌟 founding 状态静默刷新
+            // 🌟 founding 状态静默刷新 + 🎁 预取专属推荐码(用于 joined 计数展示)
             if let uid = authManager.currentUser?.id {
                 Task {
                     await FoundingService.shared.refresh(userId: uid)
                     await MainActor.run { foundingRefresh.toggle() }
+                    if let invite = await FoundingService.shared.myInvite() {
+                        await MainActor.run {
+                            myInviteCode = invite.code
+                            myInviteJoined = invite.joined
+                        }
+                    }
                 }
             }
         }
         .sheet(isPresented: $showInviteRedeem) {
             if let uid = authManager.currentUser?.id {
                 InviteCodeRedeemView(userId: uid, onFounding: { foundingRefresh.toggle() })
+            }
+        }
+        .sheet(isPresented: $showInviteShare) {
+            if let items = shareInviteItems {
+                ActivityShareSheet(items: items)
             }
         }
         .onDisappear {
@@ -880,9 +922,25 @@ struct ProfileDisplayView: View {
         }
     }
     
+    // 🎁 分享专属推荐码(拿码 → 系统分享面板)
+    private func shareMyInvite() {
+        Task {
+            var code = myInviteCode
+            if code == nil { code = (await FoundingService.shared.myInvite())?.code }
+            guard let code else { return }
+            await MainActor.run {
+                myInviteCode = code
+                let text = "Join me on BrewNet — you tell an AI agent who you want to meet and it sets up the coffee. Use my code \(code) when you sign up and we both get a week of Pro free."
+                let link = URL(string: "https://apps.apple.com/app/id6796967801")!
+                shareInviteItems = [text, link]
+                showInviteShare = true
+            }
+        }
+    }
+
     private func loadMatches() {
         guard let currentUser = authManager.currentUser else { return }
-        
+
         isLoadingMatches = true
         Task {
             do {

@@ -43,6 +43,16 @@ final class FoundingService: ObservableObject {
             let row = try? JSONDecoder().decode(Row.self, from: resp.data) else { return }
         FoundingStore.set(row.is_founding ?? false, userId: userId)
     }
+
+    /// 拿到/生成当前用户的专属推荐码 + 已邀请人数
+    func myInvite() async -> (code: String, joined: Int)? {
+        struct Row: Decodable { let code: String?; let joined: Int? }
+        guard let resp = try? await SupabaseConfig.shared.client
+            .rpc("get_or_create_my_invite").execute(),
+            let row = try? JSONDecoder().decode(Row.self, from: resp.data),
+            let code = row.code else { return nil }
+        return (code, row.joined ?? 0)
+    }
 }
 
 // MARK: - Founding Member 徽章
