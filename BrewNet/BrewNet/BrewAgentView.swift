@@ -25,6 +25,7 @@ struct BrewMessage: Identifiable {
         case externalIntroAccepted(targetName: String, email: String?)  // 🌐🎉 池外的人接受了 → 回流报喜 + 联系方式
         case followUpOffer(profile: BrewNetProfile, daysSince: Int)  // 🤝 见过的人:要不要发条保持联系
         case followUpDraft(name: String, initialText: String)        // 🤝 跟进话术草稿(可编辑→分享)
+        case winCardOffer(profile: BrewNetProfile)                   // 🏆 好咖啡后:晒战绩卡片(社会证明)
         case note(String)
     }
     let id = UUID()
@@ -50,6 +51,7 @@ struct BrewAgentView: View {
     @State private var selectedProfile: BrewNetProfile?
     @State private var shareIntroURL: URL?          // 🌐 站外 intro 生成的分享链接
     @State private var shareIntroText: String?      // 🤝 跟进话术等纯文本分享
+    @State private var shareWinImage: UIImage?      // 🏆 战绩卡片图片分享
     @State private var showingIntroShare = false
     @State private var didGreet = false
     @State private var animatedMessageIds: Set<UUID> = []  // 打字机动画只放一次
@@ -151,7 +153,9 @@ struct BrewAgentView: View {
             .environmentObject(supabaseService)
         }
         .sheet(isPresented: $showingIntroShare) {
-            if let text = shareIntroText {
+            if let image = shareWinImage {
+                ActivityShareSheet(items: [image, "Networking, handled — by Brew, my AI networking agent. ☕️"])
+            } else if let text = shareIntroText {
                 ActivityShareSheet(items: [text])
             } else if let url = shareIntroURL {
                 ActivityShareSheet(items: [
@@ -308,9 +312,12 @@ struct BrewAgentView: View {
                             print("⚠️ [WorthIt] cloud sync skipped: \(error.localizedDescription)")
                         }
                     }
-                    appendAgent(worthIt
-                        ? "Love to hear it! I'll look for more people like \(name)."
-                        : "Got it — I'll adjust what I look for. Thanks for telling me.")
+                    if worthIt {
+                        appendAgent("Love to hear it! I'll look for more people like \(name).")
+                        messages.append(BrewMessage(kind: .winCardOffer(profile: profile)))
+                    } else {
+                        appendAgent("Got it — I'll adjust what I look for. Thanks for telling me.")
+                    }
                 },
                 onNotMetYet: {
                     appendAgent("No rush — I'll check back later.")
@@ -428,6 +435,7 @@ struct BrewAgentView: View {
                 buttonLabel: "Share note",
                 doneLabel: "Ready to send",
                 onShare: { finalText in
+                    shareWinImage = nil
                     shareIntroURL = nil
                     shareIntroText = finalText
                     showingIntroShare = true
@@ -436,6 +444,22 @@ struct BrewAgentView: View {
                     }
                 }
             )
+        case .winCardOffer(let profile):
+            Button {
+                shareWinCard(for: profile)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "trophy.fill")
+                        .font(.system(size: 14))
+                    Text("Share your win")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .foregroundColor(Brew.goldDeep)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+                .background(Capsule().fill(Brew.goldSoftBg))
+                .overlay(Capsule().stroke(Brew.goldFill.opacity(0.4), lineWidth: 1))
+            }
         case .prepOffer(let profile, let when, let location):
             Button {
                 Task { await fetchPrepBrief(for: profile, when: when, location: location) }
@@ -720,6 +744,7 @@ struct BrewAgentView: View {
 
             await MainActor.run {
                 isThinking = false
+                shareWinImage = nil
                 shareIntroText = nil
                 shareIntroURL = url
                 showingIntroShare = true
@@ -734,6 +759,31 @@ struct BrewAgentView: View {
             }
             print("❌ [ExternalIntro] create failed: \(error)")
         }
+    }
+
+    /// 🏆 渲染战绩卡片为图片并分享(社会证明 → 免费顶部流量)
+    private func shareWinCard(for profile: BrewNetProfile) {
+        let card = WinShareCard(
+            meName: currentUserProfile?.coreIdentity.name.components(separatedBy: " ").first,
+            otherFirstName: profile.coreIdentity.name.components(separatedBy: " ").first ?? profile.coreIdentity.name,
+            otherRole: winRoleLine(for: profile)
+        )
+        let renderer = ImageRenderer(content: card)
+        renderer.scale = 3
+        if let image = renderer.uiImage {
+            shareIntroURL = nil
+            shareIntroText = nil
+            shareWinImage = image
+            showingIntroShare = true
+        }
+    }
+
+    /// "Product manager at TikTok" / "at Stripe" / nil
+    private func winRoleLine(for profile: BrewNetProfile) -> String? {
+        var parts: [String] = []
+        if let t = profile.professionalBackground.jobTitle, !t.isEmpty { parts.append(t) }
+        if let c = profile.professionalBackground.currentCompany, !c.isEmpty { parts.append("at \(c)") }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
     /// 发送邀请:与手动流程完全一致(限额检查 + sendInvitation)
@@ -1409,6 +1459,19 @@ struct BrewAgentView: View {
             }
             return
         }
+        if env["BREWNET_DEBUG_WIN"] == "1" {
+            Task {
+                guard let sp = try? await supabaseService.getProfile(userId: "dbc9a570-a933-43ca-a205-6e367bf406dc") else { return }
+                let p = sp.toBrewNetProfile()
+                await MainActor.run {
+                    messages.append(BrewMessage(kind: .agentText("Love to hear it! I'll look for more people like \(p.coreIdentity.name).")))
+                    messages.append(BrewMessage(kind: .winCardOffer(profile: p)))
+                }
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                await MainActor.run { shareWinCard(for: p) }   // 自动弹分享面板便于验收
+            }
+            return
+        }
         if env["BREWNET_DEBUG_INTRO"] == "2" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 messages.append(BrewMessage(kind: .externalIntroDraft(
@@ -1818,6 +1881,63 @@ struct BrewExternalIntroAcceptedCard: View {
 
     private var coffeeSubject: String {
         "Coffee ☕️".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "Coffee"
+    }
+}
+
+// MARK: - 🏆 战绩可晒卡片(渲染成图片发 LinkedIn/朋友圈)
+
+struct WinShareCard: View {
+    let meName: String?
+    let otherFirstName: String
+    let otherRole: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // 顶部品牌条
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 18, weight: .bold))
+                Text("BrewNet")
+                    .font(.system(size: 18, weight: .heavy))
+                Spacer()
+                Text("AI networking agent")
+                    .font(.system(size: 12, weight: .semibold))
+                    .opacity(0.8)
+            }
+            .foregroundColor(.white)
+            .padding(20)
+            .background(Color(red: 0.40, green: 0.20, blue: 0.10))
+
+            VStack(alignment: .leading, spacing: 14) {
+                Image(systemName: "cup.and.saucer.fill")
+                    .font(.system(size: 34))
+                    .foregroundColor(Color(red: 0.40, green: 0.20, blue: 0.10))
+
+                Text("Another great coffee ☕️")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundColor(Color(red: 0.25, green: 0.15, blue: 0.08))
+
+                Text(bodyLine)
+                    .font(.system(size: 17))
+                    .foregroundColor(Color(red: 0.35, green: 0.28, blue: 0.22))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("My agent found them, broke the ice, and booked it. I just showed up.")
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
+        }
+        .frame(width: 340)
+        .background(Color(red: 0.98, green: 0.97, blue: 0.95))
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+    }
+
+    private var bodyLine: String {
+        let who = otherRole.map { "\(otherFirstName), \($0)" } ?? otherFirstName
+        return "I just had a great coffee chat with \(who) — set up by Brew, my AI networking agent."
     }
 }
 
