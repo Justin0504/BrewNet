@@ -23,6 +23,8 @@ struct BrewMessage: Identifiable {
         case externalIntroSetup   // 🌐 开放图谱:池外没人时,问用户心里有没有具体的人
         case externalIntroDraft(targetName: String, targetContext: String, initialText: String)  // 🌐 站外 intro 草稿(可编辑→生成分享链接)
         case externalIntroAccepted(targetName: String, email: String?)  // 🌐🎉 池外的人接受了 → 回流报喜 + 联系方式
+        case followUpOffer(profile: BrewNetProfile, daysSince: Int)  // 🤝 见过的人:要不要发条保持联系
+        case followUpDraft(name: String, initialText: String)        // 🤝 跟进话术草稿(可编辑→分享)
         case note(String)
     }
     let id = UUID()
@@ -47,6 +49,7 @@ struct BrewAgentView: View {
     @State private var showingInviteLimitAlert = false
     @State private var selectedProfile: BrewNetProfile?
     @State private var shareIntroURL: URL?          // 🌐 站外 intro 生成的分享链接
+    @State private var shareIntroText: String?      // 🤝 跟进话术等纯文本分享
     @State private var showingIntroShare = false
     @State private var didGreet = false
     @State private var animatedMessageIds: Set<UUID> = []  // 打字机动画只放一次
@@ -117,7 +120,11 @@ struct BrewAgentView: View {
                     if !announced {
                         let prepped = await maybeOfferCoffeePrep()
                         if !prepped {
-                            await MainActor.run { maybeAskWorthIt() }
+                            // 🤝 留存钩子:见过的人该保持联系了
+                            let followUp = await maybeOfferFollowUp()
+                            if !followUp {
+                                await MainActor.run { maybeAskWorthIt() }
+                            }
                         }
                     }
                 }
@@ -144,7 +151,9 @@ struct BrewAgentView: View {
             .environmentObject(supabaseService)
         }
         .sheet(isPresented: $showingIntroShare) {
-            if let url = shareIntroURL {
+            if let text = shareIntroText {
+                ActivityShareSheet(items: [text])
+            } else if let url = shareIntroURL {
                 ActivityShareSheet(items: [
                     "I'd love to grab a coffee — here's a quick way to say yes:",
                     url
@@ -395,6 +404,38 @@ struct BrewAgentView: View {
             )
         case .externalIntroAccepted(let targetName, let email):
             BrewExternalIntroAcceptedCard(targetName: targetName, email: email)
+        case .followUpOffer(let profile, _):
+            Button {
+                Task { await draftFollowUpFor(profile: profile) }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "hand.wave.fill")
+                        .font(.system(size: 14))
+                    Text("Draft a note to \(profile.coreIdentity.name.components(separatedBy: " ").first ?? "them")")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .foregroundColor(themeColor)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+                .background(Capsule().fill(Brew.surface))
+                .overlay(Capsule().stroke(themeColor.opacity(0.2), lineWidth: 1))
+            }
+        case .followUpDraft(let name, let initialText):
+            BrewExternalIntroDraftCard(
+                title: "Keep in touch with \(name.components(separatedBy: " ").first ?? name)",
+                initialText: initialText,
+                helper: "Send it however you like — text, email, LinkedIn. Staying in touch is how coffees turn into a real network.",
+                buttonLabel: "Share note",
+                doneLabel: "Ready to send",
+                onShare: { finalText in
+                    shareIntroURL = nil
+                    shareIntroText = finalText
+                    showingIntroShare = true
+                    if let uid = authManager.currentUser?.id {
+                        BrewMemoryStore.shared.recordFollowedUp(name: name, userId: uid)
+                    }
+                }
+            )
         case .prepOffer(let profile, let when, let location):
             Button {
                 Task { await fetchPrepBrief(for: profile, when: when, location: location) }
@@ -679,6 +720,7 @@ struct BrewAgentView: View {
 
             await MainActor.run {
                 isThinking = false
+                shareIntroText = nil
                 shareIntroURL = url
                 showingIntroShare = true
                 let firstName = targetName.components(separatedBy: " ").first ?? targetName
@@ -1207,6 +1249,73 @@ struct BrewAgentView: View {
         return false
     }
 
+    /// 🤝 关系跟进(留存核心):见过的人 >10 天没联系 → 提醒并可起草保持联系的话
+    private func maybeOfferFollowUp() async -> Bool {
+        guard let currentUser = authManager.currentUser else { return false }
+
+        struct CoffeeRow: Decodable {
+            let senderId: String, receiverId: String, senderName: String?, receiverName: String?
+            let scheduledDate: String?
+            enum CodingKeys: String, CodingKey {
+                case senderId = "sender_id", receiverId = "receiver_id"
+                case senderName = "sender_name", receiverName = "receiver_name"
+                case scheduledDate = "scheduled_date"
+            }
+        }
+        let uid = currentUser.id.lowercased()
+        let tenDaysAgo = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-10 * 24 * 3600))
+        guard let response = try? await supabaseService.supabase
+            .from("coffee_chat_invitations")
+            .select("sender_id,receiver_id,sender_name,receiver_name,scheduled_date")
+            .eq("status", value: "accepted")
+            .or("sender_id.eq.\(uid),receiver_id.eq.\(uid)")
+            .not("scheduled_date", operator: .is, value: "null")
+            .lte("scheduled_date", value: tenDaysAgo)   // 见面已过去 ≥10 天
+            .order("scheduled_date", ascending: false)
+            .limit(5)
+            .execute(),
+            let rows = try? JSONDecoder().decode([CoffeeRow].self, from: response.data) else { return false }
+
+        for row in rows {
+            let otherId = row.senderId == currentUser.id ? row.receiverId : row.senderId
+            guard let supabaseProfile = try? await supabaseService.getProfile(userId: otherId) else { continue }
+            let profile = supabaseProfile.toBrewNetProfile()
+            let name = profile.coreIdentity.name
+            guard !BrewMemoryStore.shared.hasFollowedUp(name: name, userId: currentUser.id) else { continue }
+
+            var days = 14
+            if let ds = row.scheduledDate {
+                let iso = ISO8601DateFormatter()
+                iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                let date = iso.date(from: ds) ?? { iso.formatOptions = [.withInternetDateTime]; return iso.date(from: ds) }()
+                if let date { days = max(1, Int(Date().timeIntervalSince(date) / 86400)) }
+            }
+
+            let firstName = name.components(separatedBy: " ").first ?? name
+            await MainActor.run {
+                messages.append(BrewMessage(kind: .agentText("🤝 It's been about \(days) days since your coffee with \(firstName). A quick note now keeps the relationship warm — want me to draft one?")))
+                messages.append(BrewMessage(kind: .followUpOffer(profile: profile, daysSince: days)))
+                history.append(BrewChatEntry(role: .agent, text: "Offered a keep-in-touch follow-up for \(name)."))
+                BrewMemoryStore.shared.recordFollowedUp(name: name, userId: currentUser.id)
+            }
+            return true
+        }
+        return false
+    }
+
+    /// 🤝 起草保持联系的话术
+    private func draftFollowUpFor(profile: BrewNetProfile) async {
+        await MainActor.run { isThinking = true }
+        let text = await BrewAgentService.shared.draftFollowUp(requester: currentUserProfile, target: profile)
+        let firstName = profile.coreIdentity.name.components(separatedBy: " ").first ?? profile.coreIdentity.name
+        let fallback = "Hi \(firstName), really enjoyed our coffee — I've been thinking about what you said. Would love to stay in touch and hear how things are going on your end. Coffee again sometime?"
+        await MainActor.run {
+            isThinking = false
+            messages.append(BrewMessage(kind: .followUpDraft(name: profile.coreIdentity.name, initialText: text ?? fallback)))
+            history.append(BrewChatEntry(role: .agent, text: "Drafted a follow-up note for \(profile.coreIdentity.name)."))
+        }
+    }
+
     /// ☕ 生成并展示见面简报
     private func fetchPrepBrief(for profile: BrewNetProfile, when: String, location: String?) async {
         await MainActor.run { isThinking = true }
@@ -1553,8 +1662,11 @@ struct BrewExternalIntroSetupCard: View {
 // MARK: - 🌐 站外 Warm Intro:草稿卡(可编辑 → 生成分享链接)
 
 struct BrewExternalIntroDraftCard: View {
-    let targetName: String
+    let title: String
     let initialText: String
+    let helper: String
+    let buttonLabel: String
+    let doneLabel: String
     var onShare: (String) -> Void
 
     @State private var text: String
@@ -1562,9 +1674,24 @@ struct BrewExternalIntroDraftCard: View {
 
     private var themeColor: Color { Brew.brand }
 
+    // 站外 intro 默认文案
     init(targetName: String, initialText: String, onShare: @escaping (String) -> Void) {
-        self.targetName = targetName
+        self.title = "Intro to \(targetName)"
         self.initialText = initialText
+        self.helper = "They tap one link to say yes — no download needed. You'll get pinged the moment they do."
+        self.buttonLabel = "Create link & share"
+        self.doneLabel = "Link created"
+        self.onShare = onShare
+        _text = State(initialValue: initialText)
+    }
+
+    // 通用初始化(跟进话术等)
+    init(title: String, initialText: String, helper: String, buttonLabel: String, doneLabel: String, onShare: @escaping (String) -> Void) {
+        self.title = title
+        self.initialText = initialText
+        self.helper = helper
+        self.buttonLabel = buttonLabel
+        self.doneLabel = doneLabel
         self.onShare = onShare
         _text = State(initialValue: initialText)
     }
@@ -1575,7 +1702,7 @@ struct BrewExternalIntroDraftCard: View {
                 Image(systemName: "paperplane.circle")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(themeColor.opacity(0.7))
-                Text("Intro to \(targetName)")
+                Text(title)
                     .font(.system(size: 13, weight: .bold))
                     .foregroundColor(themeColor.opacity(0.8))
                 Spacer()
@@ -1591,7 +1718,7 @@ struct BrewExternalIntroDraftCard: View {
                 .background(RoundedRectangle(cornerRadius: 10).fill(Brew.surfaceRaised))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(themeColor.opacity(0.12), lineWidth: 1))
 
-            Text("They tap one link to say yes — no download needed. You'll get pinged the moment they do.")
+            Text(helper)
                 .font(.system(size: 11))
                 .foregroundColor(.gray)
 
@@ -1603,7 +1730,7 @@ struct BrewExternalIntroDraftCard: View {
                 HStack(spacing: 6) {
                     Image(systemName: "square.and.arrow.up")
                         .font(.system(size: 14, weight: .semibold))
-                    Text(didAct ? "Link created" : "Create link & share")
+                    Text(didAct ? doneLabel : buttonLabel)
                         .font(.system(size: 14, weight: .bold))
                 }
                 .foregroundColor(.white)

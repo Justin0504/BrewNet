@@ -240,6 +240,35 @@ final class BrewAgentService {
         return text.isEmpty ? nil : String(text.prefix(700))
     }
 
+    // MARK: - 关系跟进(见过之后保持联系)
+
+    /// 为见过面的人起草一条自然、不套路的"保持联系"消息
+    func draftFollowUp(requester: BrewNetProfile?, target: BrewNetProfile) async -> String? {
+        guard !isCircuitOpen else { return nil }
+        var targetDesc = [target.coreIdentity.name]
+        if let t = target.professionalBackground.jobTitle, !t.isEmpty { targetDesc.append(t) }
+        if let c = target.professionalBackground.currentCompany, !c.isEmpty { targetDesc.append("at \(c)") }
+        if !target.professionalBackground.skills.isEmpty {
+            targetDesc.append("interests: \(target.professionalBackground.skills.prefix(4).joined(separator: ", "))")
+        }
+        let requesterName = requester?.coreIdentity.name ?? "a BrewNet user"
+
+        let prompt = """
+        \(requesterName) had a coffee chat with \(targetDesc.joined(separator: ", ")) a couple of weeks ago \
+        and wants to keep the relationship warm. Write a short (2-3 sentences, first person, English), warm, \
+        specific keep-in-touch message. Reference something plausible about their work/interests above so it feels \
+        personal, not a template. End with a light open door (stay in touch / meet again). \
+        No emojis, no subject line, no placeholders. Output ONLY the message text.
+        """
+        guard let raw = await callEdgeFunction(prompt: prompt, maxTokens: 220) else {
+            consecutiveFailures += 1
+            return nil
+        }
+        consecutiveFailures = 0
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\"", with: "")
+        return text.isEmpty ? nil : String(text.prefix(500))
+    }
+
     // MARK: - 见面前简报(Coffee Prep Brief)
 
     /// 为即将到来的 coffee chat 生成简报:对方是谁 / 聊什么 / 共同点
