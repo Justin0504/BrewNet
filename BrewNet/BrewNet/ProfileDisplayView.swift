@@ -56,26 +56,21 @@ struct MinimalProfileHeaderView: View {
             }
 
             VStack(spacing: 8) {
-                ZStack {
+                // 名字 + 徽章作为一个居中的组,长名字不再被徽章压住
+                HStack(spacing: 8) {
                     Text(profile.coreIdentity.name)
                         .font(.system(size: 24, weight: .bold))
                         .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-                        .frame(maxWidth: .infinity)
-                    
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+
                     if let uid = authManager.currentUser?.id, FoundingStore.isFounding(userId: uid) {
-                        HStack {
-                            Spacer()
-                            FoundingBadge()
-                                .offset(x: -12)
-                        }
+                        FoundingBadge()
                     } else if showProBadge {
-                        HStack {
-                            Spacer()
-                            ProBadge(size: .medium)
-                                .offset(x: -20)
-                        }
+                        ProBadge(size: .medium)
                     }
                 }
+                .frame(maxWidth: .infinity)
 
                 // if let pronouns = profile.coreIdentity.pronouns, !pronouns.isEmpty {
                 //     Text(pronouns)

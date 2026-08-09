@@ -14,42 +14,42 @@ struct WelcomeOnboardingView: View {
     private let themeColor = Color(red: 0.4, green: 0.2, blue: 0.1)
     private let pages: [OnboardingPage] = [
         OnboardingPage(
-            icon: "cup.and.saucer.fill",
-            iconGradient: [Color(red: 0.4, green: 0.2, blue: 0.1), Color(red: 0.5, green: 0.3, blue: 0.15)],
-            title: "Welcome to BrewNet",
-            subtitle: "Connect with professionals through meaningful coffee chats",
-            description: "Build your network one coffee at a time. Find people who share your interests, goals, and passion for growth."
-        ),
-        OnboardingPage(
             icon: "sparkles",
-            iconGradient: [Color(red: 1.0, green: 0.84, blue: 0.0), Color(red: 1.0, green: 0.6, blue: 0.0)],
-            title: "Discover Your Matches",
-            subtitle: "AI-powered recommendations just for you",
-            description: "Swipe through personalized recommendations based on your interests, industry, and networking goals. Swipe right to connect, left to pass.",
-            animationType: .swipeCards
+            iconGradient: [Color(red: 0.4, green: 0.2, blue: 0.1), Color(red: 0.5, green: 0.3, blue: 0.15)],
+            title: "Meet Brew",
+            subtitle: "Your AI networking agent",
+            description: "Tell Brew who you want to meet. It finds them, breaks the ice, and sets up the coffee — so you just show up."
         ),
         OnboardingPage(
             icon: "sparkle.magnifyingglass",
             iconGradient: [Color(red: 0.6, green: 0.4, blue: 0.2), Color(red: 0.4, green: 0.2, blue: 0.1)],
-            title: "Talent Scout",
-            subtitle: "Search by natural language",
-            description: "Describe exactly who you want to meet. For example: 'alumni from Stanford working in product management'. Our AI will find the perfect matches.",
+            title: "Just say who you need",
+            subtitle: "Networking in plain words",
+            description: "“A founder who's raised a seed round” or “someone at Stripe in payments.” Brew understands and starts scouting right away.",
             animationType: .talentScout
         ),
         OnboardingPage(
-            icon: "message.fill",
-            iconGradient: [Color(red: 0.3, green: 0.6, blue: 1.0), Color(red: 0.2, green: 0.4, blue: 0.8)],
-            title: "Chat Before You Connect",
-            subtitle: "Try temporary chat first",
-            description: "Send a temporary message to break the ice. Chat briefly before deciding to accept the connection. No pressure, just genuine conversation.",
+            icon: "hands.sparkles.fill",
+            iconGradient: [Color(red: 0.1, green: 0.5, blue: 0.45), Color(red: 0.08, green: 0.4, blue: 0.36)],
+            title: "Brew sets it up",
+            subtitle: "Double-blind, zero awkwardness",
+            description: "Brew and their agent quietly agree on a time and place. One tap and it's booked. If they pass, you'll never know.",
             animationType: .chatBubbles
         ),
         OnboardingPage(
-            icon: "calendar.badge.clock",
+            icon: "paperplane.fill",
+            iconGradient: [Color(red: 1.0, green: 0.7, blue: 0.2), Color(red: 0.9, green: 0.5, blue: 0.1)],
+            title: "It reaches beyond the app",
+            subtitle: "Even people not on BrewNet yet",
+            description: "Got someone specific in mind? Brew drafts a warm intro and reaches them directly — they say yes with one tap, no download needed.",
+            animationType: .none
+        ),
+        OnboardingPage(
+            icon: "cup.and.saucer.fill",
             iconGradient: [Color(red: 0.2, green: 0.7, blue: 0.3), Color(red: 0.15, green: 0.5, blue: 0.25)],
-            title: "Meet for Coffee",
-            subtitle: "Turn connections into real relationships",
-            description: "Once connected, schedule a coffee chat to meet in person. Choose a time and place that works for both of you.",
+            title: "Just show up",
+            subtitle: "Brew preps you first",
+            description: "Before every coffee, Brew briefs you on who they are and what to talk about. Networking, without the work.",
             animationType: .coffeeSchedule
         )
     ]
