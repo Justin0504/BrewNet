@@ -27,8 +27,7 @@ struct BrewNetApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                // 调试钩子:SIMCTL_CHILD_BREWNET_DARK=1 强制深色(iOS 26 模拟器外观切换失灵的替代验证口)
-                .preferredColorScheme(ProcessInfo.processInfo.environment["BREWNET_DARK"] == "1" ? .dark : nil)
+                .brewDebugDarkMode()
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
                 .environmentObject(authManager)
                 .environmentObject(databaseManager)
@@ -68,5 +67,16 @@ struct BrewNetApp: App {
         print("✅ =========================================")
         print("✅ 应用初始化完成")
         print("✅ =========================================")
+    }
+}
+
+// 调试钩子:SIMCTL_CHILD_BREWNET_DARK=1 强制深色(仅 Debug 构建;Release 编译掉)
+private extension View {
+    @ViewBuilder func brewDebugDarkMode() -> some View {
+        #if DEBUG
+        self.preferredColorScheme(ProcessInfo.processInfo.environment["BREWNET_DARK"] == "1" ? .dark : nil)
+        #else
+        self
+        #endif
     }
 }

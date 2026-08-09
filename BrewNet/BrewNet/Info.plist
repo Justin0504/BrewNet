@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>
@@ -9,6 +11,10 @@
 		<key>NSExceptionDomains</key>
 		<dict/>
 	</dict>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>BrewNet needs your location to help you find nearby professionals and suggest coffee chat locations.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>BrewNet needs your location to help you find nearby professionals and suggest coffee chat locations.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -28,11 +34,5 @@
 	</dict>
 	<key>UILaunchScreen</key>
 	<dict/>
-	<key>GEMINI_API_KEY</key>
-	<string>YOUR_GEMINI_API_KEY_HERE</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>BrewNet needs your location to help you find nearby professionals and suggest coffee chat locations.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>BrewNet needs your location to help you find nearby professionals and suggest coffee chat locations.</string>
 </dict>
 </plist>

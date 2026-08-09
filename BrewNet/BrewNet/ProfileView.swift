@@ -17,6 +17,8 @@ struct ProfileView: View {
     @State private var showSubscriptionPayment = false
     @State private var showProExpiredPopup = false
     @State private var showOnboardingResetAlert = false
+    @State private var showDeleteAccountAlert = false
+    @State private var isDeletingAccount = false
     
     var body: some View {
         Group {
@@ -157,6 +159,12 @@ struct ProfileView: View {
                     Button(authManager.isCurrentUserGuest() ? "Exit Guest Mode" : "Logout", role: .destructive) {
                         showLogoutAlert = true
                     }
+
+                    if !authManager.isCurrentUserGuest() {
+                        Button("Delete Account", role: .destructive) {
+                            showDeleteAccountAlert = true
+                        }
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                         .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
@@ -169,9 +177,21 @@ struct ProfileView: View {
                 authManager.logout()
             }
         } message: {
-            Text(authManager.isCurrentUserGuest() ? 
-                 "Are you sure you want to exit guest mode? Your data will not be saved." : 
+            Text(authManager.isCurrentUserGuest() ?
+                 "Are you sure you want to exit guest mode? Your data will not be saved." :
                  "Are you sure you want to logout?")
+        }
+        .alert("Delete Account", isPresented: $showDeleteAccountAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete Permanently", role: .destructive) {
+                isDeletingAccount = true
+                Task {
+                    _ = await authManager.deleteAccount()
+                    isDeletingAccount = false
+                }
+            }
+        } message: {
+            Text("This permanently deletes your BrewNet account, profile, matches, and messages. This cannot be undone.")
         }
         .alert("Upgrade to Regular User", isPresented: $showUpgradeAlert) {
             Button("Cancel", role: .cancel) { }

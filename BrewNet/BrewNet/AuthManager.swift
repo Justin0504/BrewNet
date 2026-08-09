@@ -882,6 +882,23 @@ class AuthManager: ObservableObject {
     }
     
     // MARK: - Logout
+    /// Apple 5.1.1(v):App 内彻底删除账号(服务端清数据 + 删 auth,再本地登出)
+    @MainActor
+    func deleteAccount() async -> Result<Void, Error> {
+        do {
+            _ = try await SupabaseConfig.shared.client.rpc("delete_my_account").execute()
+            try? await SupabaseConfig.shared.client.auth.signOut()
+            currentUser = nil
+            authState = .unauthenticated
+            clearUserData()
+            print("✅ Account deleted")
+            return .success(())
+        } catch {
+            print("❌ Account deletion failed: \(error.localizedDescription)")
+            return .failure(error)
+        }
+    }
+
     func logout() {
         print("🚪 Starting logout...")
         
