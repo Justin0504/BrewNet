@@ -101,6 +101,8 @@ struct BrewAgentView: View {
             PushManager.shared.requestIfAppropriate()   // 🔔 权限请求/token 注册(内部去重)
             loadRequesterProfile()
             Task {
+                // 🌟 首开:兑换注册时填的邀请码(会话此时已就绪)→ founding 报喜
+                await maybeRedeemPendingInvite()
                 // 🌐 首开:认领站外 lead(用户接受 intro 时留的网络意图)→ 直接种 mission 并开搜
                 if await maybeClaimLead() { return }
 
@@ -967,6 +969,20 @@ struct BrewAgentView: View {
             isThinking = false
             messages.append(BrewMessage(kind: .inviteDraft(profile: profile, initialText: draft ?? fallbackDraft)))
             history.append(BrewChatEntry(role: .agent, text: "Weekly Brew: drafted invite to \(profile.coreIdentity.name)."))
+        }
+    }
+
+    /// 🌟 首次打开:兑换注册时暂存的邀请码(Supabase 会话此时已建立)
+    private func maybeRedeemPendingInvite() async {
+        guard let uid = authManager.currentUser?.id,
+              let code = UserDefaults.standard.string(forKey: "brew_pending_invite"),
+              !code.isEmpty else { return }
+        UserDefaults.standard.removeObject(forKey: "brew_pending_invite")   // 只尝试一次
+        let founding = (try? await FoundingService.shared.redeem(code: code, userId: uid)) ?? false
+        if founding {
+            await MainActor.run {
+                appendAgent("🌟 Your founding invite is in — you've got BrewNet Pro free, for good. Welcome to the inner circle.")
+            }
         }
     }
 

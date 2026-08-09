@@ -3555,7 +3555,7 @@ struct PointsSystemView: View {
                                 VStack(alignment: .leading, spacing: 8) {
                                     PointsRuleRow(icon: "checkmark.circle.fill", text: "Complete an in-person Coffee Chat to earn 10 credits")
                                     PointsRuleRow(icon: "checkmark.circle.fill", text: "Both parties need to confirm the meeting completion")
-                                    PointsRuleRow(icon: "checkmark.circle.fill", text: "Credits can be used to redeem coffee coupons or other gifts")
+                                    PointsRuleRow(icon: "checkmark.circle.fill", text: "Redeem credits for BrewNet Pro perks")
                                 }
                             }
                             .padding(20)
@@ -3950,21 +3950,18 @@ struct RedemptionSystemView: View {
     @ViewBuilder
     private var availableGiftSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Available Gift")
+            Text("Redeem Credits")
                 .font(.system(size: 18, weight: .bold))
                 .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
-            
-            coffeeVouchersSection
-            
-            Divider()
-                .padding(.vertical, 8)
-            
+
+            // 只保留 BrewNet 自己能兑现的奖励(Pro 会员)。
+            // 咖啡实体券(未与咖啡店合作)与现金提现暂不提供,避免无法兑现的承诺。
             membershipSection
-            
-            Divider()
-                .padding(.vertical, 8)
-            
-            cashOutSection
+
+            Text("More rewards are on the way as BrewNet grows.")
+                .font(.system(size: 12))
+                .foregroundColor(.gray)
+                .padding(.top, 4)
         }
         .padding(20)
         .background(Color.white)

@@ -9,6 +9,7 @@ struct RegisterView: View {
     @State private var password = ""
     @State private var confirmPassword = ""
     @State private var name = ""
+    @State private var inviteCode = ""
     @State private var isLoading = false
     @State private var showAlert = false
     @State private var alertMessage = ""
@@ -217,8 +218,27 @@ struct RegisterView: View {
                                     .frame(width: 12, height: 12)
                                     .opacity(confirmPassword.isEmpty ? 0.3 : 1.0)
                             }
-                            
-                            
+
+                            // 🌟 Invite code(可选)—— 邀请制/创始会员入口
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "star.circle.fill")
+                                        .font(.system(size: 13))
+                                        .foregroundColor(Brew.goldFill)
+                                    Text("Invite code")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+                                    Text("optional")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.gray)
+                                }
+                                TextField("Founding members get Pro free", text: $inviteCode)
+                                    .textFieldStyle(CustomTextFieldStyle())
+                                    .autocorrectionDisabled()
+                                    .autocapitalization(.allCharacters)
+                            }
+
+
                             // Register button
                             Button(action: {
                                 performRegistration()
@@ -354,6 +374,11 @@ struct RegisterView: View {
                 switch result {
                 case .success(let user):
                     print("Registration successful: \(user.name)")
+                    // 🌟 邀请码暂存,首次进入 Brew 时兑换(那时 Supabase 会话已就绪)
+                    let trimmed = inviteCode.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        UserDefaults.standard.set(trimmed, forKey: "brew_pending_invite")
+                    }
                     // Registration successful, will automatically navigate to main view
                 case .failure(let error):
                     showAlert(message: error.localizedDescription)

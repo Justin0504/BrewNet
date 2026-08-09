@@ -3920,9 +3920,23 @@ extension SupabaseService {
             .from("redemptions")
             .insert(redemption)
             .execute()
-        
+
         print("✅ [Redemption] Redemption record created, \(pointsRequired) points used")
-        
+
+        // 4.5 会员奖励 → 真正延长 Pro(否则只是扣分不兑现,和咖啡券一样虚)
+        let category = (rewardJson["category"] as? String)?.lowercased() ?? ""
+        let nameLower = (rewardJson["name"] as? String)?.lowercased() ?? ""
+        if category == "membership" {
+            let days: Int
+            if nameLower.contains("year") { days = 365 }
+            else if nameLower.contains("month") { days = 30 }
+            else if nameLower.contains("week") { days = 7 }
+            else { days = 30 }
+            struct GrantParams: Encodable { let p_days: Int }
+            _ = try? await client.rpc("grant_pro_days", params: GrantParams(p_days: days)).execute()
+            print("👑 [Redemption] Granted \(days) days of Pro")
+        }
+
         // 5. 发送通知更新积分（在主线程发送，确保所有监听者都能收到）
         await MainActor.run {
             print("📢 [Redemption] 发送积分更新通知")
