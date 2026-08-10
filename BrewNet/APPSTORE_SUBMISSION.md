@@ -51,7 +51,7 @@ The first release of BrewNet — your AI networking agent that sets up coffee ch
 ## 6. 必填 URL
 
 - **Support URL**: 需要一个支持页(可用 Notion/简单落地页)。建议: 建一个含邮箱的简单页面。
-- **Privacy Policy URL**: 见下方 PRIVACY_POLICY.md，需托管到公网(Notion 公开页 / GitHub Pages / 简单站点均可),把 URL 填进来。**这是提交硬性要求。**
+- **Privacy Policy URL**: ✅ 已上线可直接用 → `https://github.com/Justin0504/BrewNet/blob/main/PRIVACY_POLICY.md`(GitHub 原生渲染,公开可读,Apple 接受)。若想要更干净的独立页面,GitHub Pages 版在 `https://justin0504.github.io/BrewNet/privacy.html`(构建就绪后生效)。
 - **Marketing URL**（可选）
 
 ## 7. App Privacy（隐私营养标签，在 ASC 里勾选）
