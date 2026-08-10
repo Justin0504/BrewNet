@@ -86,16 +86,16 @@ Push notifications require a real device (coffee acceptance / reminders).
 - Password: `123456`
 （提交前确认这个号 profileSetupCompleted=true、能进主界面、池子非空。）
 
-## 10. 截图（必需:6.7" 和 6.5"，各 3-10 张）
+## 10. 截图 (已生成 6.9 inch / 1320x2868, 在 ~/BrewNet-Fresh/appstore-screenshots/)
 
-建议 5 张,叙事顺序:
-1. Brew 对话首页(欢迎 + "who do you want to meet")
-2. Talent Scout 精选卡(top-3 + 理由)
-3. Brew Handshake 双盲提案卡
-4. 站外 warm intro / 落地页
-5. Weekly Brew / 见面简报
+5 张,叙事顺序,直接上传即可:
+1. 01_meet_brew.png — "Meet Brew · Your AI networking agent" (英雄图)
+2. 02_double_blind.png — "Brew sets it up · Double-blind" (双盲机制)
+3. 03_reaches_beyond.png — "It reaches beyond the app" (病毒钩子)
+4. 04_brew_in_action.png — 真实对话: 问候 + 关系跟进 + 站外 intro 草稿卡
+5. 05_invite_friends.png — Profile: 邀请好友 + 创始会员 + Pro
 
-（可用 iPhone 17 Pro Max 模拟器截图,或真机截图。尺寸: 6.7"=1290×2796。)
+1320x2868 = 6.9 inch (iPhone 16/17 Pro Max), ASC 接受作主 iPhone 尺寸并自动适配小机型。
 
 ---
 
@@ -104,7 +104,7 @@ Push notifications require a real device (coffee acceptance / reminders).
 - [ ] Build 8 处理完成(ASC 显示可选)
 - [ ] Privacy Policy URL 已托管并填入
 - [ ] Support URL 已填
-- [ ] 截图已上传(6.7" + 6.5")
+- [x] 截图已生成 (appstore-screenshots/, 5 张 6.9 inch)
 - [ ] App Privacy 问卷已按第 7 节勾选
 - [ ] 演示账号可用 + 审核备注已填
 - [ ] 加密合规:Info.plist 已设 ITSAppUsesNonExemptEncryption=false(不会再弹问)
