@@ -18,10 +18,39 @@ struct SubscriptionPaymentView: View {
     }
     
     var body: some View {
+        // 🆓 免费上线阶段:绝不展示价格/订阅按钮(假 IAP 会被 App 审核直接拒)
+        VStack(spacing: 20) {
+            Spacer()
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 64))
+                .foregroundColor(Color(red: 0.1, green: 0.5, blue: 0.45))
+            Text("You're all set")
+                .font(.system(size: 26, weight: .bold))
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            Text("Everything in BrewNet is free right now — you have full access. Enjoy!")
+                .font(.system(size: 16))
+                .foregroundColor(.gray)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+            Button(action: { dismiss() }) {
+                Text("Great")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 15)
+                    .background(RoundedRectangle(cornerRadius: 14).fill(Color(red: 0.4, green: 0.2, blue: 0.1)))
+            }
+            .padding(.horizontal, 40)
+            Spacer()
+        }
+        .background(Color.white.ignoresSafeArea())
+    }
+
+    var _unusedPaywallBody: some View {
         ZStack {
             // Background
             Color.white.ignoresSafeArea()
-            
+
             VStack(spacing: 0) {
                 // Header with close button
                 HStack {

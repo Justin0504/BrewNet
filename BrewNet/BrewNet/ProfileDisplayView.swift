@@ -774,7 +774,8 @@ struct ProfileDisplayView: View {
                 .padding(.horizontal, 24)
                 .padding(.top, 16)
 
-                if let currentUser = authManager.currentUser {
+                // 🆓 免费上线阶段:只给 Pro/创始会员显示状态卡,不给免费用户"Get Pro"入口
+                if let currentUser = authManager.currentUser, currentUser.isProActive {
                     ProUpgradeCard(isProActive: currentUser.isProActive) {
                         showSubscriptionPayment = true
                     }
@@ -4935,6 +4936,29 @@ struct TokenPurchaseView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var supabaseService: SupabaseService
+
+    // 🆓 免费上线阶段:不展示价格/购买(假 IAP 会被 App 审核拒)
+    var body: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 64))
+                .foregroundColor(Color(red: 0.1, green: 0.5, blue: 0.45))
+            Text("You're all set")
+                .font(.system(size: 24, weight: .bold))
+                .foregroundColor(Color(red: 0.4, green: 0.2, blue: 0.1))
+            Text("BrewTokens are free to earn in BrewNet right now — enjoy full access!")
+                .font(.system(size: 16)).foregroundColor(.gray)
+                .multilineTextAlignment(.center).padding(.horizontal, 40)
+            Button(action: { dismiss() }) {
+                Text("Great").font(.system(size: 17, weight: .bold)).foregroundColor(.white)
+                    .frame(maxWidth: .infinity).padding(.vertical, 15)
+                    .background(RoundedRectangle(cornerRadius: 14).fill(Color(red: 0.4, green: 0.2, blue: 0.1)))
+            }.padding(.horizontal, 40)
+            Spacer()
+        }
+        .background(Color.white.ignoresSafeArea())
+    }
     
     @State private var selectedTokenIndex: Int = 1 // 默认选择第二个档位（最常用）
     @State private var isProcessing = false
@@ -4991,7 +5015,7 @@ struct TokenPurchaseView: View {
         )
     ]
     
-    var body: some View {
+    var _unusedTokenBody: some View {
         VStack(spacing: 0) {
             // Header
             HStack {

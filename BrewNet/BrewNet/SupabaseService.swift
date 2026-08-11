@@ -5373,8 +5373,12 @@ extension SupabaseService {
     /// Decrement user's like count (for non-Pro users)
     /// Returns false if no likes remaining
     func decrementUserLikes(userId: String) async throws -> Bool {
+        // 🆓 免费上线阶段:所有 connect 不限次(付费未接入前不做限制)
+        return true
+    }
+    private func decrementUserLikes_disabled(userId: String) async throws -> Bool {
         print("🔄 [Likes] 扣减用户 \(userId) 的点赞数")
-        
+
         // Get current user status
         let response = try await client
             .from("users")
@@ -5682,8 +5686,11 @@ extension SupabaseService {
         }
     }
     
-    /// Check if user can send temporary chat (Pro users only)
+    /// Check if user can send temporary chat (免费上线阶段:全部放开)
     func canSendTemporaryChat(userId: String) async throws -> Bool {
+        return true
+    }
+    private func canSendTemporaryChat_disabled(userId: String) async throws -> Bool {
         let response = try await client
             .from("users")
             .select("is_pro, pro_end")
